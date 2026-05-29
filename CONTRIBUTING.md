@@ -11,6 +11,12 @@ welcome — bug reports, docs fixes, tests, and features.
 
 ## Running tests
 
+Tests require a local clone of the Wolverine source at
+`C:\source\external\wolverine` (or set the `WOLVERINE_SOURCE` environment
+variable), because `WolverineFx.ComplianceTests` is not yet published to NuGet.
+They also require **Docker** — Testcontainers starts a MongoDB replica set for
+the run. These tests are excluded from CI until the compliance package ships.
+
 Tests run against a **real MongoDB replica set** — in-memory mocking misses the
 concurrency behaviour this library depends on. The quickest local setup is a
 Docker Compose single-node replica set:

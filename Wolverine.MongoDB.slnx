@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj" />
+    <Project Path="src/Wolverine.MongoDB/Wolverine.MongoDB.csproj" />
+  </Folder>
+</Solution>

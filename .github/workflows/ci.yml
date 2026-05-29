@@ -1,0 +1,22 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+      # NOTE: WolverineFx.ComplianceTests is not yet published to NuGet, so the test project
+      # (which depends on it) cannot build/restore in CI yet. We build + pack the library only.
+      # TODO: once WolverineFx.ComplianceTests ships, restore the full solution and add
+      # `dotnet test` here. The local compliance loop already runs the full suite.
+      - run: dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release
+      - run: dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -o ./artifacts

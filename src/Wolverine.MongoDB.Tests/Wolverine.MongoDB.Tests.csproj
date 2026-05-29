@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net9.0</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="GitHubActionsTestLogger" PrivateAssets="All" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.assemblyfixture" />
+    <PackageReference Include="Testcontainers.MongoDb" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <!-- Compliance harness: local clone project-ref gives a single consistent Wolverine.dll.
+       WolverineFx.ComplianceTests is not yet on NuGet; the PackageReference path below is dormant
+       until it ships (and this project is simply not built in CI in the meantime). -->
+  <ItemGroup Condition="'$(UseWolverineSource)' == 'true'">
+    <ProjectReference Include="$(WolverineSourcePath)\src\Testing\Wolverine.ComplianceTests\Wolverine.ComplianceTests.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseWolverineSource)' != 'true'">
+    <PackageReference Include="WolverineFx.ComplianceTests" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Wolverine.MongoDB\Wolverine.MongoDB.csproj" />
+  </ItemGroup>
+</Project>
