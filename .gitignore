@@ -1,2 +1,11 @@
 .devswarm-temp/
 docs/superpowers/*
+
+# .NET build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+
+# IDE / tooling
+.vs/
+*.user
