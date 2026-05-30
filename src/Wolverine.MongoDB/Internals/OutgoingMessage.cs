@@ -1,3 +1,4 @@
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using Wolverine.Runtime.Serialization;
 
@@ -18,7 +19,9 @@ public class OutgoingMessage
         DeliverBy = envelope.DeliverBy?.ToUniversalTime();
     }
 
-    [BsonId] public Guid Id { get; set; }
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid Id { get; set; }
     [BsonElement("ownerId")] public int OwnerId { get; set; }
     [BsonElement("destination")] public string? Destination { get; set; }
     [BsonElement("deliverBy")] public DateTimeOffset? DeliverBy { get; set; }

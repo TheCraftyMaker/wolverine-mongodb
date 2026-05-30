@@ -1,4 +1,5 @@
 using JasperFx.Core.Reflection;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using Wolverine.Persistence.Durability;
 using Wolverine.Runtime.Serialization;
@@ -22,7 +23,9 @@ public class DeadLetterMessage
         Body = EnvelopeSerializer.Serialize(envelope);
     }
 
-    [BsonId] public Guid Id { get; set; }
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid Id { get; set; }
     [BsonElement("messageType")] public string? MessageType { get; set; }
     [BsonElement("receivedAt")] public string? ReceivedAt { get; set; }
     [BsonElement("sentAt")] public DateTimeOffset? SentAt { get; set; }
