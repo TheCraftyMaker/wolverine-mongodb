@@ -22,7 +22,7 @@ public class IncomingMessage
     }
 
     [BsonId] public string Id { get; set; } = string.Empty;
-    [BsonElement("envelopeId")] public Guid EnvelopeId { get; set; }
+    [BsonElement("envelopeId")] [BsonGuidRepresentation(GuidRepresentation.Standard)] public Guid EnvelopeId { get; set; }
     [BsonElement("status")] [BsonRepresentation(BsonType.String)] public EnvelopeStatus Status { get; set; } = EnvelopeStatus.Incoming;
     [BsonElement("ownerId")] public int OwnerId { get; set; }
     [BsonElement("executionTime")] public DateTimeOffset? ExecutionTime { get; set; }
