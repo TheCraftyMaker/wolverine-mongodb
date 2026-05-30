@@ -56,15 +56,38 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
 
     public IAgent StartScheduledJobs(IWolverineRuntime runtime) => BuildAgent(runtime);
 
-    public IAgent BuildAgent(IWolverineRuntime runtime) => throw new NotImplementedException();
+    public IAgent BuildAgent(IWolverineRuntime runtime) => new MongoDbDurabilityAgent(runtime, this);
 
     public IAgentFamily? BuildAgentFamily(IWolverineRuntime runtime) => null;
 
-    public Task<IReadOnlyList<Envelope>> LoadPageOfGloballyOwnedIncomingAsync(Uri listenerAddress, int limit)
-        => throw new NotImplementedException();
+    public async Task<IReadOnlyList<Envelope>> LoadPageOfGloballyOwnedIncomingAsync(Uri listenerAddress, int limit)
+    {
+        var b = Builders<IncomingMessage>.Filter;
+        var filter = b.And(
+            b.Eq(x => x.OwnerId, MongoConstants.AnyNode),
+            b.Eq(x => x.ReceivedAt, listenerAddress.ToString()),
+            b.Eq(x => x.Status, EnvelopeStatus.Incoming));
+
+        var docs = await Incoming.Find(filter)
+            .Sort(Builders<IncomingMessage>.Sort.Ascending(x => x.EnvelopeId))
+            .Limit(limit)
+            .ToListAsync();
+
+        return docs.Select(x => x.Read()).ToList();
+    }
 
     public Task ReassignIncomingAsync(int ownerId, IReadOnlyList<Envelope> incoming)
-        => throw new NotImplementedException();
+    {
+        if (incoming.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var ids = incoming.Select(x => x.Id).ToList();
+        return Incoming.UpdateManyAsync(
+            Builders<IncomingMessage>.Filter.In(x => x.EnvelopeId, ids),
+            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
+    }
 
     public ValueTask DisposeAsync()
     {
