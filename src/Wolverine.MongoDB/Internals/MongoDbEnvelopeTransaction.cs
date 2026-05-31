@@ -41,6 +41,17 @@ public class MongoDbEnvelopeTransaction : IEnvelopeTransaction
     public async Task<bool> TryMakeEagerIdempotencyCheckAsync(Envelope envelope, DurabilitySettings settings,
         CancellationToken cancellation)
     {
+        // The eager check runs INSIDE the open outbox transaction, and the handler that
+        // follows persists its outgoing messages on the same session. A duplicate-key
+        // INSERT inside a Mongo transaction aborts the whole transaction server-side, so
+        // any subsequent write (PersistOutgoingAsync) would then throw "Transaction has
+        // been aborted". To avoid poisoning the transaction, detect a duplicate via a
+        // transaction-consistent READ and only insert the handled marker when absent.
+        if (await _store.ExistsAsync(_session, envelope, cancellation).ConfigureAwait(false))
+        {
+            return false;
+        }
+
         var copy = Envelope.ForPersistedHandled(envelope, DateTimeOffset.UtcNow, settings);
         try
         {
@@ -49,8 +60,10 @@ public class MongoDbEnvelopeTransaction : IEnvelopeTransaction
             envelope.Status = EnvelopeStatus.Handled;
             return true;
         }
-        catch (Exception)
+        catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategory.DuplicateKey)
         {
+            // Lost a race against a concurrent delivery between the read and the insert:
+            // still a duplicate, so short-circuit. The insert never committed.
             return false;
         }
     }

@@ -44,6 +44,19 @@ public partial class MongoDbMessageStore : IMessageInbox
             .Limit(1).AnyAsync(cancellation);
     }
 
+    /// <summary>
+    /// Existence check scoped to an active session/transaction. Used by the eager
+    /// idempotency check so that a duplicate is detected via a READ rather than a
+    /// duplicate-key INSERT — a failed insert inside a Mongo transaction aborts the
+    /// whole transaction, stranding the subsequent outgoing-message writes.
+    /// </summary>
+    internal Task<bool> ExistsAsync(IClientSessionHandle session, Envelope envelope, CancellationToken cancellation)
+    {
+        var id = new IncomingMessage(envelope).Id;
+        return Incoming.Find(session, Builders<IncomingMessage>.Filter.Eq(x => x.Id, id))
+            .Limit(1).AnyAsync(cancellation);
+    }
+
     public Task MarkIncomingEnvelopeAsHandledAsync(Envelope envelope)
     {
         var id = new IncomingMessage(envelope).Id;
