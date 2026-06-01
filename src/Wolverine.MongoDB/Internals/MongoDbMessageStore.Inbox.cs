@@ -91,7 +91,7 @@ public partial class MongoDbMessageStore : IMessageInbox
         return Incoming.UpdateOneAsync(
             Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
             Builders<IncomingMessage>.Update
-                .Set(x => x.ExecutionTime, envelope.ScheduledTime)
+                .Set(x => x.ExecutionTime, envelope.ScheduledTime?.ToUniversalTime())
                 .Set(x => x.Status, EnvelopeStatus.Scheduled)
                 .Set(x => x.Attempts, envelope.Attempts)
                 .Set(x => x.OwnerId, 0));
