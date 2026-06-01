@@ -1,6 +1,9 @@
 .devswarm-temp/
 docs/superpowers/*
 
+# Local NuGet feed (packed locally for demo — not for source control)
+local-nuget/
+
 # .NET build output
 [Bb]in/
 [Oo]bj/
