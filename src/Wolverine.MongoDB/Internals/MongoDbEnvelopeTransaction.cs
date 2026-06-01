@@ -35,7 +35,7 @@ public class MongoDbEnvelopeTransaction : IEnvelopeTransaction
 
     public Task PersistIncomingAsync(Envelope envelope)
     {
-        return _store.Incoming.InsertOneAsync(_session, new IncomingMessage(envelope));
+        return _store.Incoming.InsertOneAsync(_session, new IncomingMessage(envelope, _store.InboxIdentity(envelope)));
     }
 
     public async Task<bool> TryMakeEagerIdempotencyCheckAsync(Envelope envelope, DurabilitySettings settings,

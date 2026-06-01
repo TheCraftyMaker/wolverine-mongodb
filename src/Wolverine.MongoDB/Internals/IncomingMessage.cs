@@ -8,9 +8,9 @@ public class IncomingMessage
 {
     public IncomingMessage() { }
 
-    public IncomingMessage(Envelope envelope)
+    public IncomingMessage(Envelope envelope, string id)
     {
-        Id = $"{envelope.Id}|{envelope.Destination?.ToString().Replace(":/", "").TrimEnd('/')}";
+        Id = id;
         EnvelopeId = envelope.Id;
         Status = envelope.Status;
         OwnerId = envelope.OwnerId;

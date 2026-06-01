@@ -14,6 +14,7 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     private readonly string _databaseName;
     private readonly WolverineOptions _options;
     private readonly IMongoDatabase _database;
+    private readonly Func<Envelope, string> _inboxIdentity;
 
     internal IMongoCollection<IncomingMessage> Incoming { get; }
     internal IMongoCollection<OutgoingMessage> Outgoing { get; }
@@ -25,6 +26,10 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         _databaseName = databaseName;
         _options = options;
         _database = client.GetDatabase(databaseName);
+
+        _inboxIdentity = options.Durability.MessageIdentity == MessageIdentity.IdOnly
+            ? e => e.Id.ToString()
+            : e => $"{e.Id}|{e.Destination?.ToString().Replace(":/", "").TrimEnd('/')}";
 
         Incoming = _database.GetCollection<IncomingMessage>(MongoConstants.IncomingCollection);
         Outgoing = _database.GetCollection<OutgoingMessage>(MongoConstants.OutgoingCollection);
@@ -47,6 +52,8 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
 
     public void PromoteToMain(IWolverineRuntime runtime) => Role = MessageStoreRole.Main;
     public void DemoteToAncillary() => Role = MessageStoreRole.Ancillary;
+
+    internal string InboxIdentity(Envelope envelope) => _inboxIdentity(envelope);
 
     public void Initialize(IWolverineRuntime runtime) { }
 

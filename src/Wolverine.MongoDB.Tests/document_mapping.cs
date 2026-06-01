@@ -13,7 +13,7 @@ public class document_mapping
         var envelope = ObjectMother.Envelope();
         envelope.Attempts = 2;
 
-        var doc = new IncomingMessage(envelope);
+        var doc = new IncomingMessage(envelope, envelope.Id.ToString());
         var read = doc.Read();
 
         read.Id.ShouldBe(envelope.Id);
