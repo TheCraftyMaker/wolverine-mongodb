@@ -91,8 +91,14 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         }
 
         var ids = incoming.Select(x => x.Id).ToList();
+
+        // Compare-and-swap: only claim envelopes still owned by "any node". An envelope already
+        // owned by another node (claimed between our read and this write) must not be stolen —
+        // the OwnerId == AnyNode guard makes this an atomic claim per document.
         return Incoming.UpdateManyAsync(
-            Builders<IncomingMessage>.Filter.In(x => x.EnvelopeId, ids),
+            Builders<IncomingMessage>.Filter.And(
+                Builders<IncomingMessage>.Filter.In(x => x.EnvelopeId, ids),
+                Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
             Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
     }
 

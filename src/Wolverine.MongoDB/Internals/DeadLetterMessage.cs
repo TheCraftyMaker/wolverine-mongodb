@@ -23,6 +23,29 @@ public class DeadLetterMessage
         Body = EnvelopeSerializer.Serialize(envelope);
     }
 
+    /// <summary>
+    /// Builds a dead-letter document for an envelope whose body could not be serialized.
+    /// Captures all available metadata and a safe empty body so the poison message can still
+    /// be moved out of the inbox instead of being stranded. The serialization failure is
+    /// recorded as the exception type/message when no handler exception is available.
+    /// </summary>
+    public static DeadLetterMessage ForUnserializableEnvelope(Envelope envelope, Exception? exception,
+        Exception serializeFailure)
+    {
+        return new DeadLetterMessage
+        {
+            Id = envelope.Id,
+            MessageType = envelope.MessageType,
+            ReceivedAt = envelope.Destination?.ToString(),
+            SentAt = envelope.SentAt,
+            ScheduledTime = envelope.ScheduledTime,
+            Source = envelope.Source,
+            ExceptionType = (exception ?? serializeFailure).GetType().FullNameInCode(),
+            ExceptionMessage = exception?.Message ?? $"Envelope body could not be serialized: {serializeFailure.Message}",
+            Body = []
+        };
+    }
+
     [BsonId]
     [BsonGuidRepresentation(GuidRepresentation.Standard)]
     public Guid Id { get; set; }
@@ -39,7 +62,11 @@ public class DeadLetterMessage
 
     public DeadLetterEnvelope ToEnvelope()
     {
-        var envelope = EnvelopeSerializer.Deserialize(Body);
+        // A body-less dead letter (an envelope that failed to serialize) reconstructs a minimal
+        // envelope so the dead-letter admin/query surface still works for poison messages.
+        var envelope = Body is { Length: > 0 }
+            ? EnvelopeSerializer.Deserialize(Body)
+            : new Envelope { Id = Id, MessageType = MessageType, Data = [] };
         return new DeadLetterEnvelope(Id, ScheduledTime, envelope, MessageType ?? "",
             ReceivedAt ?? "", Source ?? "", ExceptionType ?? "", ExceptionMessage ?? "",
             SentAt ?? DateTimeOffset.MinValue, Replayable);

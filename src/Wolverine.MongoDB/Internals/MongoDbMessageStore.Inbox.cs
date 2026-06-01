@@ -123,17 +123,41 @@ public partial class MongoDbMessageStore : IMessageInbox
 
     public async Task MoveToDeadLetterStorageAsync(Envelope envelope, Exception? exception)
     {
-        var dlq = new DeadLetterMessage(envelope, exception)
+        // Guard body serialization: a poison message whose envelope fails to serialize must
+        // still leave the inbox. Build the DLQ doc with a safe/empty body in that case rather
+        // than letting the move throw and strand the message in incoming forever.
+        DeadLetterMessage dlq;
+        try
         {
-            ExpirationTime = envelope.DeliverBy ?? DateTimeOffset.UtcNow.Add(_options.Durability.DeadLetterQueueExpiration)
-        };
+            dlq = new DeadLetterMessage(envelope, exception);
+        }
+        catch (Exception serializeFailure)
+        {
+            dlq = DeadLetterMessage.ForUnserializableEnvelope(envelope, exception, serializeFailure);
+        }
 
-        await DeadLetterDocs.ReplaceOneAsync(
-            Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, dlq.Id),
-            dlq, new ReplaceOptions { IsUpsert = true });
+        dlq.ExpirationTime = envelope.DeliverBy ??
+                             DateTimeOffset.UtcNow.Add(_options.Durability.DeadLetterQueueExpiration);
 
         var id = InboxIdentity(envelope);
-        await Incoming.DeleteOneAsync(Builders<IncomingMessage>.Filter.Eq(x => x.Id, id));
+
+        // Wrap the DLQ upsert and incoming delete in a single replica-set transaction so a crash
+        // between them cannot duplicate the dead letter or strand the incoming envelope.
+        // WithTransactionAsync transparently retries TransientTransactionError /
+        // UnknownTransactionCommitResult (e.g. write conflicts under concurrency), and aborts
+        // automatically if the body throws.
+        using var session = await _client.StartSessionAsync();
+        await session.WithTransactionAsync(async (s, ct) =>
+        {
+            await DeadLetterDocs.ReplaceOneAsync(s,
+                Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, dlq.Id),
+                dlq, new ReplaceOptions { IsUpsert = true }, ct);
+
+            await Incoming.DeleteOneAsync(s, Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
+                cancellationToken: ct);
+
+            return true;
+        });
     }
 
     public Task ReleaseIncomingAsync(int ownerId, Uri receivedAt)
