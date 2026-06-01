@@ -69,6 +69,12 @@ public sealed class OrdersFixture : IAsyncLifetime
     public async Task<IHost> CreateHostAsync(string databaseName)
     {
         var host = await Host.CreateDefaultBuilder()
+            .UseDefaultServiceProvider(opts =>
+            {
+                // IMessageBus is scoped; tests resolve it from host.Services (root provider).
+                // Disable scope validation so this works identically in Rider, VS, and dotnet test.
+                opts.ValidateScopes = false;
+            })
             .UseWolverine(opts =>
             {
                 opts.Durability.Mode = DurabilityMode.Solo;
