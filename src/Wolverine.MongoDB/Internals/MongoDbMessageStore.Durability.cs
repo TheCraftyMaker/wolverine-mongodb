@@ -1,5 +1,6 @@
 using MongoDB.Driver;
 using Wolverine.Runtime;
+using Wolverine.Runtime.Serialization;
 using Wolverine.Runtime.WorkerQueues;
 using Wolverine.Transports;
 using Wolverine.Transports.Sending;
@@ -8,6 +9,31 @@ namespace Wolverine.MongoDB.Internals;
 
 public partial class MongoDbMessageStore
 {
+    /// <summary>
+    /// Moves dead-letter documents that have been flagged <c>Replayable</c> back into
+    /// <c>wolverine_incoming_envelopes</c> as globally-owned Incoming envelopes, then removes
+    /// them from the dead-letter queue. Mirrors the RDBMS
+    /// <c>MoveReplayableErrorMessagesToIncomingOperation</c>; called from the durability agent's
+    /// recovery loop so flagging a dead letter replayable actually re-delivers it.
+    /// </summary>
+    internal async Task ReplayDeadLettersAsync(CancellationToken token)
+    {
+        var replayable = await DeadLetterDocs
+            .Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Replayable, true))
+            .ToListAsync(token);
+
+        foreach (var doc in replayable)
+        {
+            var envelope = EnvelopeSerializer.Deserialize(doc.Body);
+            envelope.Status = EnvelopeStatus.Incoming;
+            envelope.OwnerId = MongoConstants.AnyNode;
+
+            await StoreIncomingAsync(envelope);
+            await DeadLetterDocs.DeleteOneAsync(
+                Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, doc.Id), token);
+        }
+    }
+
     /// <summary>
     /// Translation of the Cosmos durability agent's runScheduledJobs body: find scheduled
     /// envelopes that are due, flip them to Incoming owned by this node, and enqueue them
