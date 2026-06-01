@@ -58,7 +58,7 @@ internal class TransactionalFrame : AsyncFrame, IFlushesMessages
         writer.BlankLine();
         writer.WriteComment("Open a MongoDB session and transaction for the outbox unit of work");
         writer.Write(
-            $"var {Session.Usage} = await {_client!.Usage}.{nameof(IMongoClient.StartSessionAsync)}(cancellationToken: {_cancellation!.Usage}).ConfigureAwait(false);");
+            $"await using var {Session.Usage} = await {_client!.Usage}.{nameof(IMongoClient.StartSessionAsync)}(cancellationToken: {_cancellation!.Usage}).ConfigureAwait(false);");
         writer.Write($"{Session.Usage}.{nameof(IClientSessionHandle.StartTransaction)}();");
 
         if (_context != null)
