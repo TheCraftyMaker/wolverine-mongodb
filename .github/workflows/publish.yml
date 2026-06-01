@@ -5,9 +5,14 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: main
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -21,3 +26,14 @@ jobs:
         run: dotnet nuget push "./artifacts/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
       - name: Push symbols to NuGet
         run: dotnet nuget push "./artifacts/*.snupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: Bump version in Directory.Build.props
+        run: |
+          sed -i "s|<Version>.*</Version>|<Version>${{ steps.version.outputs.VERSION }}</Version>|" Directory.Build.props
+      - name: Create version bump PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: bump version to ${{ steps.version.outputs.VERSION }}"
+          branch: version-bump/${{ steps.version.outputs.VERSION }}
+          title: "chore: bump version to ${{ steps.version.outputs.VERSION }}"
+          body: "Auto-generated after publishing `${{ steps.version.outputs.VERSION }}` to NuGet."
+          labels: automated
