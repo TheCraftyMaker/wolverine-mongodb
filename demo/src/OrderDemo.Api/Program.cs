@@ -51,11 +51,10 @@ builder.Host.UseWolverine(opts =>
     // Wolverine routes them to the outbox, which delivers them to RabbitMQ.
     const string appEventsExchange = "order-app-events";
 
-    opts.PublishMessage<OrderPlacedApplicationEvent>()
-        .ToRabbitExchange(appEventsExchange);
-
-    opts.PublishMessage<OrderShippedApplicationEvent>()
-        .ToRabbitExchange(appEventsExchange);
+    opts.PublishMessage<OrderPlacedApplicationEvent>().ToRabbitExchange(appEventsExchange);
+    opts.PublishMessage<OrderShippedApplicationEvent>().ToRabbitExchange(appEventsExchange);
+    opts.PublishMessage<OrderCancelledApplicationEvent>().ToRabbitExchange(appEventsExchange);
+    opts.PublishMessage<DiscountAppliedApplicationEvent>().ToRabbitExchange(appEventsExchange);
 
     // The read-side projector listens on this queue, bound to the exchange.
     // UseDurableInbox() persists each message before processing so that crashes
@@ -68,7 +67,8 @@ builder.Host.UseWolverine(opts =>
     //
     // Wraps any handler whose dependency tree includes IMongoDatabase in a MongoDB
     // session + transaction frame (see Wolverine.MongoDB / MongoDbPersistenceFrameProvider).
-    // Covered handlers: PlaceOrderHandler, ShipOrderHandler (via OrderRepository → IMongoDatabase).
+    // Covered handlers: PlaceOrderHandler, ShipOrderHandler, CancelOrderHandler,
+    //                   ApplyDiscountHandler (all via OrderRepository → IMongoDatabase).
     opts.Policies.AutoApplyTransactions();
 });
 

@@ -15,6 +15,11 @@ public sealed class OrderSummaryRepository(IMongoDatabase database)
     public async Task<IReadOnlyList<OrderSummary>> GetAllAsync(CancellationToken ct = default)
         => await _summaries.Find(Builders<OrderSummary>.Filter.Empty).ToListAsync(ct);
 
+    public Task<OrderSummary?> FindByOrderIdAsync(Guid orderId, CancellationToken ct = default)
+        => _summaries
+            .Find(Builders<OrderSummary>.Filter.Eq(s => s.OrderId, orderId))
+            .FirstOrDefaultAsync(ct)!;
+
     public Task UpsertAsync(OrderSummary summary, CancellationToken ct = default)
         => _summaries.ReplaceOneAsync(
             Builders<OrderSummary>.Filter.Eq(s => s.OrderId, summary.OrderId),

@@ -43,15 +43,40 @@ public static class OrderSummaryProjector
         OrderSummaryRepository summaries,
         CancellationToken ct)
     {
-        // Load the existing summary and update the shipped fields.
-        // The upsert creates a minimal document if for some reason the placed event
-        // hasn't been projected yet (e.g. out-of-order delivery edge case).
-        var existing = (await summaries.GetAllAsync(ct))
-            .FirstOrDefault(s => s.OrderId == evt.OrderId);
+        var summary = await summaries.FindByOrderIdAsync(evt.OrderId, ct)
+            ?? new OrderSummary { OrderId = evt.OrderId };
 
-        var summary = existing ?? new OrderSummary { OrderId = evt.OrderId };
         summary.Status = "Shipped";
         summary.ShippedAt = evt.ShippedAt;
+
+        await summaries.UpsertAsync(summary, ct);
+    }
+
+    public static async Task Handle(
+        OrderCancelledApplicationEvent evt,
+        OrderSummaryRepository summaries,
+        CancellationToken ct)
+    {
+        var summary = await summaries.FindByOrderIdAsync(evt.OrderId, ct)
+            ?? new OrderSummary { OrderId = evt.OrderId };
+
+        summary.Status = "Cancelled";
+        summary.CancelledAt = evt.CancelledAt;
+        summary.CancelReason = evt.Reason;
+
+        await summaries.UpsertAsync(summary, ct);
+    }
+
+    public static async Task Handle(
+        DiscountAppliedApplicationEvent evt,
+        OrderSummaryRepository summaries,
+        CancellationToken ct)
+    {
+        var summary = await summaries.FindByOrderIdAsync(evt.OrderId, ct)
+            ?? new OrderSummary { OrderId = evt.OrderId };
+
+        summary.TotalAmount = evt.NewTotal;
+        summary.DiscountPercent += evt.DiscountPercent;
 
         await summaries.UpsertAsync(summary, ct);
     }
