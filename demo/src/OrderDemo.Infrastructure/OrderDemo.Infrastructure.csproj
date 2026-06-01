@@ -9,7 +9,6 @@
   <ItemGroup>
     <ProjectReference Include="..\OrderDemo.Domain\OrderDemo.Domain.csproj" />
     <ProjectReference Include="..\OrderDemo.Contracts\OrderDemo.Contracts.csproj" />
-    <!-- Local project-reference so the demo uses the in-repo provider -->
-    <ProjectReference Include="..\..\..\src\Wolverine.MongoDB\Wolverine.MongoDB.csproj" />
+    <PackageReference Include="Wolverine.MongoDB" />
   </ItemGroup>
 </Project>

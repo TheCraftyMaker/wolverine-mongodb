@@ -15,5 +15,6 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="FluentAssertions" Version="7.2.0" />
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.2.2" />
+    <PackageVersion Include="Wolverine.MongoDB" Version="0.1.0" />
   </ItemGroup>
 </Project>

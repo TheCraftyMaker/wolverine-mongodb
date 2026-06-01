@@ -11,7 +11,6 @@
   <ItemGroup>
     <ProjectReference Include="..\OrderDemo.Application\OrderDemo.Application.csproj" />
     <ProjectReference Include="..\OrderDemo.Infrastructure\OrderDemo.Infrastructure.csproj" />
-    <!-- Direct reference for WolverineOptions extension methods (UseMongoDbPersistence) -->
-    <ProjectReference Include="..\..\..\src\Wolverine.MongoDB\Wolverine.MongoDB.csproj" />
+    <PackageReference Include="Wolverine.MongoDB" />
   </ItemGroup>
 </Project>
