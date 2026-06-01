@@ -22,12 +22,23 @@ public sealed class OrderRepository(IMongoDatabase database) : IOrderRepository
     public Task AddAsync(Order order, IClientSessionHandle session, CancellationToken ct = default)
         => _orders.InsertOneAsync(session, order, cancellationToken: ct);
 
-    public Task UpdateAsync(Order order, IClientSessionHandle session, CancellationToken ct = default)
-        => _orders.ReplaceOneAsync(
+    public async Task UpdateAsync(Order order, IClientSessionHandle session, CancellationToken ct = default)
+    {
+        // Filter on (Id, Version-1) so a concurrent update causes ModifiedCount == 0.
+        // Version was already incremented by the aggregate method before this call.
+        var result = await _orders.ReplaceOneAsync(
             session,
-            Builders<Order>.Filter.Eq(o => o.Id, order.Id),
+            Builders<Order>.Filter.And(
+                Builders<Order>.Filter.Eq(o => o.Id, order.Id),
+                Builders<Order>.Filter.Eq(o => o.Version, order.Version - 1)),
             order,
             cancellationToken: ct);
+
+        if (result.ModifiedCount == 0)
+            throw new InvalidOperationException(
+                $"Optimistic concurrency conflict on Order {order.Id}. " +
+                "The document was modified by another command. Retry the operation.");
+    }
 
     public Task<Order?> FindAsync(Guid id, CancellationToken ct = default)
         => _orders

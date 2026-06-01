@@ -28,6 +28,13 @@ public sealed class Order
     public string? CancelReason { get; private set; }
 
     /// <summary>
+    /// Optimistic concurrency token. Incremented on each mutation.
+    /// <see cref="Infrastructure.Persistence.OrderRepository.UpdateAsync"/> filters on this value
+    /// and throws <see cref="InvalidOperationException"/> if no document matches (concurrent update).
+    /// </summary>
+    public int Version { get; private set; }
+
+    /// <summary>
     /// Create a new order and register the <see cref="OrderPlaced"/> domain event.
     /// Rules: 1–10 items, each with a positive quantity and unit price.
     /// </summary>
@@ -49,7 +56,8 @@ public sealed class Order
             Items = items,
             TotalAmount = items.Sum(i => i.LineTotal),
             Status = OrderStatus.Pending,
-            PlacedAt = DateTimeOffset.UtcNow
+            PlacedAt = DateTimeOffset.UtcNow,
+            Version = 0
         };
 
         order._domainEvents.Add(new OrderPlaced(order.Id, customerId, items, order.TotalAmount, order.PlacedAt));
@@ -64,6 +72,7 @@ public sealed class Order
 
         ShippedAt = DateTimeOffset.UtcNow;
         Status = OrderStatus.Shipped;
+        Version++;
         _domainEvents.Add(new OrderShipped(Id, ShippedAt.Value));
     }
 
@@ -78,6 +87,7 @@ public sealed class Order
         CancelledAt = DateTimeOffset.UtcNow;
         CancelReason = reason;
         Status = OrderStatus.Cancelled;
+        Version++;
         _domainEvents.Add(new OrderCancelled(Id, reason ?? string.Empty, CancelledAt.Value));
     }
 
@@ -96,7 +106,8 @@ public sealed class Order
 
         DiscountPercent += discountPercent;
         TotalAmount = TotalAmount * (1 - discountPercent / 100m);
-        _domainEvents.Add(new DiscountApplied(Id, discountPercent, TotalAmount, DateTimeOffset.UtcNow));
+        Version++;
+        _domainEvents.Add(new DiscountApplied(Id, discountPercent, TotalAmount, DateTimeOffset.UtcNow, DiscountPercent));
     }
 
     /// <summary>

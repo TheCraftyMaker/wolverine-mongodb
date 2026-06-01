@@ -28,6 +28,6 @@ public static class ApplyDiscountHandler
         await orders.UpdateAsync(order, session, ct);
 
         var evt = order.DrainDomainEvents().OfType<DiscountApplied>().Single();
-        return new DiscountAppliedApplicationEvent(evt.OrderId, evt.DiscountPercent, evt.NewTotal);
+        return new DiscountAppliedApplicationEvent(evt.OrderId, evt.DiscountPercent, evt.NewTotal, evt.CumulativeDiscountPercent);
     }
 }

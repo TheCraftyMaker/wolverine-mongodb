@@ -157,4 +157,70 @@ public class OrderProjectorTests(OrdersFixture fixture)
 
         count.Should().Be(1);
     }
+
+    /// <summary>
+    /// Regression test for adversarial review finding: DiscountApplied must be idempotent.
+    /// Replaying the same DiscountAppliedApplicationEvent twice must not double the discount.
+    /// </summary>
+    [Fact]
+    public async Task Projector_DiscountApplied_IsIdempotentOnReplay()
+    {
+        var db = OrdersFixture.CreateDatabaseName();
+        var mongo = fixture.MongoClient.GetDatabase(db);
+        var repo = new OrderSummaryRepository(mongo);
+
+        var orderId = Guid.NewGuid();
+
+        // Seed summary first
+        await repo.InsertIfNotExistsAsync(
+            new OrderSummary { OrderId = orderId, CustomerId = Guid.NewGuid(), TotalAmount = 100m, Status = "Pending", PlacedAt = DateTimeOffset.UtcNow },
+            CancellationToken.None);
+
+        // 20% off, cumulative 20%
+        var evt = new DiscountAppliedApplicationEvent(orderId, 20m, 80m, 20m);
+
+        // Replay the event twice (simulates message redelivery)
+        await Infrastructure.Projectors.OrderSummaryProjector.Handle(evt, repo, CancellationToken.None);
+        await Infrastructure.Projectors.OrderSummaryProjector.Handle(evt, repo, CancellationToken.None);
+
+        var summary = await repo.FindByOrderIdAsync(orderId);
+        summary!.DiscountPercent.Should().BeApproximately(20m, 0.001m, "replaying the event must not double the discount");
+        summary.TotalAmount.Should().BeApproximately(80m, 0.001m);
+    }
+
+    /// <summary>
+    /// Regression test for adversarial review finding: OrderPlaced redelivery must not
+    /// overwrite a summary that was already advanced to Shipped.
+    /// </summary>
+    [Fact]
+    public async Task Projector_OrderPlaced_RedeliveryDoesNotResetShippedSummary()
+    {
+        var db = OrdersFixture.CreateDatabaseName();
+        var mongo = fixture.MongoClient.GetDatabase(db);
+        var repo = new OrderSummaryRepository(mongo);
+
+        var orderId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var shippedAt = DateTimeOffset.UtcNow;
+
+        // Simulate: summary was already Shipped
+        var shipped = new OrderSummary
+        {
+            OrderId = orderId,
+            CustomerId = customerId,
+            TotalAmount = 50m,
+            Status = "Shipped",
+            PlacedAt = shippedAt.AddMinutes(-5),
+            ShippedAt = shippedAt
+        };
+        await repo.UpsertAsync(shipped);
+
+        // A late/retried OrderPlaced event arrives
+        var lateOrderPlaced = new OrderPlacedApplicationEvent(orderId, customerId, 50m, shippedAt.AddMinutes(-5));
+        await Infrastructure.Projectors.OrderSummaryProjector.Handle(lateOrderPlaced, repo, CancellationToken.None);
+
+        var summary = await repo.FindByOrderIdAsync(orderId);
+        summary!.Status.Should().Be("Shipped", "late OrderPlaced must not reset a Shipped summary back to Pending");
+        summary.ShippedAt.Should().NotBeNull();
+    }
 }
