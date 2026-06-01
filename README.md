@@ -8,7 +8,7 @@ relational ADO.NET connection and SQL-managed envelope tables. This package
 implements `IMessageStore` directly against the MongoDB .NET driver, giving
 MongoDB-backed applications reliable, durable message delivery without EF Core.
 
-> **Status: pre-release (`0.1.0-beta.1`).** Node coordination is still being hardened.
+> **Status: pre-release (`0.1.0-beta.2`).** Node coordination is still being hardened.
 > The major version tracks Wolverine's major version (`6.x` ↔ `WolverineFx 6.x`).
 
 [![NuGet](https://img.shields.io/nuget/vpre/Wolverine.MongoDB?label=nuget)](https://www.nuget.org/packages/Wolverine.MongoDB)
@@ -148,7 +148,7 @@ required beyond Docker Desktop.
 
 - **Standalone MongoDB is not supported** — a replica set is required for
   transactions.
-- **Single-node coordination only in 0.1.0-beta.1.** Multi-node agent balancing
+- **Single-node coordination only currenly.** Multi-node agent balancing
   (having the `DurabilityAgent` distribute work across a cluster of application
   instances) and orphan-recovery hardening are deferred to a follow-up release.
   The lock-based leader election and heartbeat mechanism work correctly for a
