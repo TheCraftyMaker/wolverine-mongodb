@@ -1,4 +1,3 @@
-using MongoDB.Driver;
 using OrderDemo.Contracts.Events;
 using OrderDemo.Infrastructure.Persistence;
 

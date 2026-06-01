@@ -1,5 +1,4 @@
 using OrderDemo.Contracts.Commands;
-using OrderDemo.Contracts.Queries;
 using OrderDemo.Infrastructure.Persistence;
 using Wolverine;
 
@@ -7,7 +6,8 @@ namespace OrderDemo.Api.Endpoints;
 
 /// <summary>
 /// Minimal API endpoint registration for the Orders module.
-/// Dispatches commands and queries to their Wolverine handlers via <see cref="IMessageBus"/>.
+/// Command endpoints dispatch via <see cref="IMessageBus"/>; the GET endpoint
+/// reads from the projected read model directly.
 /// </summary>
 public static class OrdersEndpoints
 {
@@ -18,8 +18,8 @@ public static class OrdersEndpoints
         // POST /orders — place a new order
         orders.MapPost("/", async (PlaceOrderCommand cmd, IMessageBus bus) =>
         {
-            await bus.InvokeAsync(cmd);
-            return Results.Accepted();
+            var evt = await bus.InvokeAsync<Contracts.Events.OrderPlacedApplicationEvent>(cmd);
+            return Results.Created($"/orders/{evt.OrderId}", new { evt.OrderId });
         })
         .WithSummary("Place a new order")
         .WithDescription(
@@ -51,13 +51,13 @@ public static class OrdersEndpoints
         .WithSummary("Apply a percentage discount (0–50%) to a pending order");
 
         // GET /orders — list all orders (read model)
-        orders.MapGet("/", async (IMessageBus bus) =>
+        orders.MapGet("/", async (OrderSummaryRepository summaries, CancellationToken ct) =>
         {
-            var summaries = await bus.InvokeAsync<IReadOnlyList<OrderSummary>>(new GetOrdersQuery());
-            return Results.Ok(summaries);
+            var results = await summaries.GetAllAsync(ct);
+            return Results.Ok(results);
         })
         .WithSummary("List all orders (read model)")
-        .WithDescription("Returns the denormalized OrderSummary read model updated by the RabbitMQ projector.");
+        .WithDescription("Returns the denormalized OrderSummary read model updated by the projector.");
 
         return app;
     }

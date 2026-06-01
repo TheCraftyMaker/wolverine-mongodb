@@ -4,6 +4,5 @@ namespace OrderDemo.Domain.Aggregates.Events;
 public sealed record OrderPlaced(
     Guid OrderId,
     Guid CustomerId,
-    IReadOnlyList<OrderItem> Items,
     decimal TotalAmount,
     DateTimeOffset PlacedAt);

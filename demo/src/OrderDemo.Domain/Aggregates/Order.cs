@@ -60,7 +60,7 @@ public sealed class Order
             Version = 0
         };
 
-        order._domainEvents.Add(new OrderPlaced(order.Id, customerId, items, order.TotalAmount, order.PlacedAt));
+        order._domainEvents.Add(new OrderPlaced(order.Id, customerId, order.TotalAmount, order.PlacedAt));
         return order;
     }
 
@@ -107,7 +107,7 @@ public sealed class Order
         DiscountPercent += discountPercent;
         TotalAmount = TotalAmount * (1 - discountPercent / 100m);
         Version++;
-        _domainEvents.Add(new DiscountApplied(Id, discountPercent, TotalAmount, DateTimeOffset.UtcNow, DiscountPercent));
+        _domainEvents.Add(new DiscountApplied(Id, discountPercent, TotalAmount, DiscountPercent));
     }
 
     /// <summary>

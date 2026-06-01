@@ -37,7 +37,7 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var bus = host.Services.GetRequiredService<IMessageBus>();
 
         var items = Enumerable.Range(1, 11)
-            .Select(i => new OrderDemo.Domain.Aggregates.OrderItem(Guid.NewGuid(), $"Item{i}", 1, 1m))
+            .Select(i => new OrderItemDto(Guid.NewGuid(), $"Item{i}", 1, 1m))
             .ToList();
 
         var act = () => bus.InvokeAsync(new PlaceOrderCommand(Guid.NewGuid(), items));

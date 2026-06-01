@@ -6,6 +6,5 @@ public sealed record DiscountApplied(
     /// <summary>The incremental discount applied in this operation (e.g. 10 for 10%).</summary>
     decimal DiscountPercent,
     decimal NewTotal,
-    DateTimeOffset AppliedAt,
     /// <summary>The cumulative discount on the order after this application. Used by projectors to assign absolute values and stay idempotent on replay.</summary>
     decimal CumulativeDiscountPercent);
