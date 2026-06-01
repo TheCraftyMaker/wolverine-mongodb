@@ -42,4 +42,28 @@ public class inbox
 
         (await store.Admin.FetchCountsAsync()).Handled.ShouldBe(1);
     }
+
+    [Fact]
+    public async Task reschedule_for_retry_updates_existing_doc()
+    {
+        var store = _fixture.BuildMessageStore();
+        await store.Admin.RebuildAsync();
+
+        var envelope = ObjectMother.Envelope();
+        envelope.Destination = new Uri("rabbitmq://queue/in");
+        await store.Inbox.StoreIncomingAsync(envelope);
+
+        var scheduledTime = DateTimeOffset.UtcNow.AddMinutes(5);
+        envelope.ScheduledTime = scheduledTime;
+
+        // Must NOT throw a duplicate-key exception for an envelope already in the inbox.
+        await Should.NotThrowAsync(() => store.Inbox.RescheduleExistingEnvelopeForRetryAsync(envelope));
+
+        var all = await store.Admin.AllIncomingAsync();
+        all.Count.ShouldBe(1);
+        var reloaded = all.Single();
+        reloaded.Status.ShouldBe(EnvelopeStatus.Scheduled);
+        reloaded.OwnerId.ShouldBe(0);
+        reloaded.ScheduledTime!.Value.ShouldBe(scheduledTime, TimeSpan.FromSeconds(1));
+    }
 }

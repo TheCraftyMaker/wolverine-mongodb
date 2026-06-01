@@ -97,11 +97,22 @@ public partial class MongoDbMessageStore : IMessageInbox
                 .Set(x => x.OwnerId, 0));
     }
 
-    public Task RescheduleExistingEnvelopeForRetryAsync(Envelope envelope)
+    public async Task RescheduleExistingEnvelopeForRetryAsync(Envelope envelope)
     {
         envelope.Status = EnvelopeStatus.Scheduled;
         envelope.OwnerId = TransportConstants.AnyNode;
-        return StoreIncomingAsync(envelope);
+        var id = InboxIdentity(envelope);
+        var result = await Incoming.UpdateOneAsync(
+            Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
+            Builders<IncomingMessage>.Update
+                .Set(x => x.Status, EnvelopeStatus.Scheduled)
+                .Set(x => x.OwnerId, 0)
+                .Set(x => x.ExecutionTime, envelope.ScheduledTime?.ToUniversalTime())
+                .Set(x => x.Attempts, envelope.Attempts));
+        if (result.MatchedCount == 0)
+        {
+            await StoreIncomingAsync(envelope);
+        }
     }
 
     public async Task MoveToDeadLetterStorageAsync(Envelope envelope, Exception? exception)
