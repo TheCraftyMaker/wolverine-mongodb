@@ -4,19 +4,45 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+
 jobs:
-  build:
+  # ---------- Library build + pack ----------
+  build-library:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
             9.0.x
             10.0.x
-      # NOTE: WolverineFx.ComplianceTests is not yet published to NuGet, so the test project
-      # (which depends on it) cannot build/restore in CI yet. We build + pack the library only.
-      # TODO: once WolverineFx.ComplianceTests ships, restore the full solution and add
-      # `dotnet test` here. The local compliance loop already runs the full suite.
-      - run: dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release
-      - run: dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -o ./artifacts
+
+      - name: Build library
+        run: dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release
+
+      # NOTE: WolverineFx.ComplianceTests is not yet published to NuGet, so the
+      # test project cannot build in CI. Once that package ships, uncomment below.
+      # - name: Run library tests
+      #   run: dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj -c Release --logger "GitHubActions"
+
+      - name: Pack
+        run: dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -o ./artifacts
+
+  # ---------- Demo app build + integration tests ----------
+  build-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build demo solution
+        working-directory: demo
+        run: dotnet build OrderDemo.slnx -c Release
+
+      - name: Run demo integration tests
+        working-directory: demo
+        run: dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release --logger "console;verbosity=normal"
