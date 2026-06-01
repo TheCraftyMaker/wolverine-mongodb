@@ -62,14 +62,28 @@ public partial class MongoDbMessageStore
 
         foreach (var message in due)
         {
-            await Incoming.UpdateOneAsync(
-                Builders<IncomingMessage>.Filter.Eq(x => x.Id, message.Id),
+            // Atomically claim each due message by flipping Scheduled -> Incoming only if it is
+            // still Scheduled. The Status==Scheduled guard means a competing node (or a prior
+            // pass) cannot also claim it, so a due message is published exactly once. If the
+            // claim returns null another node already took it, so skip. A crash after the flip
+            // but before enqueue leaves the doc Incoming owned by this node, which the incoming
+            // orphan-recovery loop re-picks — it is never silently stranded.
+            var claimed = await Incoming.FindOneAndUpdateAsync(
+                Builders<IncomingMessage>.Filter.And(
+                    Builders<IncomingMessage>.Filter.Eq(x => x.Id, message.Id),
+                    Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Scheduled)),
                 Builders<IncomingMessage>.Update
                     .Set(x => x.Status, EnvelopeStatus.Incoming)
                     .Set(x => x.OwnerId, ownerId),
-                cancellationToken: token);
+                new FindOneAndUpdateOptions<IncomingMessage> { ReturnDocument = ReturnDocument.After },
+                token);
 
-            var envelope = message.Read();
+            if (claimed is null)
+            {
+                continue;
+            }
+
+            var envelope = claimed.Read();
             envelope.Status = EnvelopeStatus.Incoming;
             envelope.OwnerId = ownerId;
             await localQueue.EnqueueAsync(envelope);
