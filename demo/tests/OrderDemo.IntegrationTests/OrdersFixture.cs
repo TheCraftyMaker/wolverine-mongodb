@@ -63,6 +63,17 @@ public sealed class OrdersFixture : IAsyncLifetime
     public static string CreateDatabaseName() => $"test_{Guid.NewGuid():N}";
 
     /// <summary>
+    /// Seeds a product into the inventory collection so that PlaceOrderHandler's
+    /// inventory reservation succeeds. Call this before placing an order.
+    /// </summary>
+    public static async Task SeedProductAsync(IMongoDatabase mongo, Guid productId, string name, int stock = 1000)
+    {
+        var products = mongo.GetCollection<Domain.Aggregates.Product>("products");
+        var product = Domain.Aggregates.Product.Create(productId, name, stock);
+        await products.InsertOneAsync(product);
+    }
+
+    /// <summary>
     /// Builds and starts a Wolverine IHost wired to MongoDB for the given database.
     /// Application events are routed to a local durable queue (no RabbitMQ required).
     /// </summary>
@@ -85,6 +96,8 @@ public sealed class OrdersFixture : IAsyncLifetime
                 opts.Services.AddSingleton(MongoClient);
                 opts.Services.AddScoped<Infrastructure.Persistence.IOrderRepository,
                     Infrastructure.Persistence.OrderRepository>();
+                opts.Services.AddScoped<Infrastructure.Persistence.IInventoryRepository,
+                    Infrastructure.Persistence.InventoryRepository>();
                 opts.Services.AddScoped<Infrastructure.Persistence.OrderSummaryRepository>();
 
                 opts.UseMongoDbPersistence(databaseName);

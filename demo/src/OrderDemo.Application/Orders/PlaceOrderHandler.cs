@@ -11,14 +11,13 @@ namespace OrderDemo.Application.Orders;
 ///
 /// Flow (within a single MongoDB outbox transaction managed by Wolverine):
 ///   1. Map command DTOs to domain value objects.
-///   2. Create Order aggregate (registers <c>OrderPlaced</c> domain event internally).
-///   3. Persist to the orders collection via the Wolverine-managed session.
-///   4. Drain the aggregate's domain events and map to the application event
-///      cascaded by Wolverine through the transactional outbox.
-///
-/// Because the Wolverine.MongoDB persistence frame wraps this handler in a
-/// MongoDB transaction, the order write and the outbox entry are committed
-/// atomically — the outbox guarantee is preserved even on crash.
+///   2. Create Order aggregate.
+///   3. Persist the order via the Wolverine-managed session.
+///   4. Process domain events: for <c>OrderPlaced</c>, reserve inventory stock
+///      within the SAME transaction. If stock is insufficient, the exception
+///      aborts the transaction and rolls back the order write.
+///   5. Return the application event — Wolverine cascades it to the outbox
+///      (also within the same transaction), guaranteeing atomicity.
 /// </summary>
 public static class PlaceOrderHandler
 {
@@ -26,6 +25,7 @@ public static class PlaceOrderHandler
         PlaceOrderCommand cmd,
         IClientSessionHandle session,
         IOrderRepository orders,
+        IInventoryRepository inventory,
         CancellationToken ct)
     {
         var items = cmd.Items
@@ -35,14 +35,39 @@ public static class PlaceOrderHandler
         var order = Order.Place(cmd.CustomerId, items);
         await orders.AddAsync(order, session, ct);
 
-        var domainEvent = order.DrainDomainEvents()
-            .OfType<Domain.Aggregates.Events.OrderPlaced>()
-            .Single();
+        // Domain event side effects — execute within the same transaction.
+        // If inventory reservation fails, the entire transaction (including the
+        // order write and any outbox entry) is rolled back.
+        foreach (var evt in order.DrainDomainEvents())
+        {
+            if (evt is Domain.Aggregates.Events.OrderPlaced placed)
+            {
+                await ReserveInventoryAsync(placed, items, inventory, session, ct);
+            }
+        }
 
         return new OrderPlacedApplicationEvent(
-            domainEvent.OrderId,
-            domainEvent.CustomerId,
-            domainEvent.TotalAmount,
-            domainEvent.PlacedAt);
+            order.Id,
+            order.CustomerId,
+            order.TotalAmount,
+            order.PlacedAt);
+    }
+
+    private static async Task ReserveInventoryAsync(
+        Domain.Aggregates.Events.OrderPlaced _,
+        IReadOnlyList<OrderItem> items,
+        IInventoryRepository inventory,
+        IClientSessionHandle session,
+        CancellationToken ct)
+    {
+        foreach (var item in items)
+        {
+            var product = await inventory.FindByIdAsync(item.ProductId, ct)
+                ?? throw new InvalidOperationException(
+                    $"Product '{item.ProductName}' ({item.ProductId}) not found in inventory.");
+
+            product.Reserve(item.Quantity);
+            await inventory.UpdateAsync(product, session, ct);
+        }
     }
 }

@@ -29,6 +29,7 @@ public static class InfrastructureBootstrap
         services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnectionString));
 
         services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<IInventoryRepository, InventoryRepository>();
         services.AddScoped<OrderSummaryRepository>();
 
         return services;

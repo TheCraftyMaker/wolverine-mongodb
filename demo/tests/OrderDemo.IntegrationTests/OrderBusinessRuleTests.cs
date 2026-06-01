@@ -35,10 +35,16 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var db = OrdersFixture.CreateDatabaseName();
         using var host = await fixture.CreateHostAsync(db);
         var bus = host.Services.GetRequiredService<IMessageBus>();
+        var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
-        var items = Enumerable.Range(1, 11)
-            .Select(i => new OrderItemDto(Guid.NewGuid(), $"Item{i}", 1, 1m))
-            .ToList();
+        var items = new List<OrderItemDto>();
+        foreach (var i in Enumerable.Range(1, 11))
+        {
+            var productId = Guid.NewGuid();
+            var name = $"Item{i}";
+            await OrdersFixture.SeedProductAsync(mongo, productId, name);
+            items.Add(new OrderItemDto(productId, name, 1, 1m));
+        }
 
         var act = () => bus.InvokeAsync(new PlaceOrderCommand(Guid.NewGuid(), items));
 
@@ -57,7 +63,9 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -94,7 +102,9 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -116,7 +126,9 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -140,7 +152,9 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -160,7 +174,9 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -180,7 +196,9 @@ public class OrderBusinessRuleTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))

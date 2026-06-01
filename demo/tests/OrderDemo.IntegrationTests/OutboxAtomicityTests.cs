@@ -58,10 +58,12 @@ public class OutboxAtomicityTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
 
         // Arrange: place then cancel — wait for the full pipeline so the summary is projected
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
-            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 50m)]));
+            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 50m)]));
 
         var order = await FindOrderByCustomerAsync(mongo, customerId);
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
@@ -111,9 +113,11 @@ public class OutboxAtomicityTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Laptop");
 
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
-            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Laptop", 1, 200m)]));
+            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(productId, "Laptop", 1, 200m)]));
 
         var order = await FindOrderByCustomerAsync(mongo, customerId);
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
@@ -191,9 +195,11 @@ public class OutboxAtomicityTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Camera");
 
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
-            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Camera", 1, 100m)]));
+            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(productId, "Camera", 1, 100m)]));
 
         var order = await FindOrderByCustomerAsync(mongo, customerId);
         var versionAfterPlace = order.Version;
@@ -214,5 +220,59 @@ public class OutboxAtomicityTests(OrdersFixture fixture)
         summary!.TotalAmount.Should().Be(100m,
             "projected total must be unchanged: no DiscountAppliedApplicationEvent must have been dispatched");
         summary.DiscountPercent.Should().Be(0m);
+    }
+
+    // ── insufficient stock rolls back the entire transaction ───────────────────
+
+    /// <summary>
+    /// Placing an order with more items than available stock must fail and
+    /// produce NO side effects: no Order document, no summary, no outbox entry,
+    /// and inventory stock must remain unchanged.
+    ///
+    /// This proves that domain event side effects (inventory reservation) run
+    /// within the same MongoDB transaction as the order write.
+    /// </summary>
+    [Fact]
+    public async Task PlaceOrder_InsufficientStock_RollsBackEntireTransaction()
+    {
+        var db = OrdersFixture.CreateDatabaseName();
+        using var host = await fixture.CreateHostAsync(db);
+        var bus = host.Services.GetRequiredService<IMessageBus>();
+        var mongo = host.Services.GetRequiredService<IMongoDatabase>();
+
+        // Seed a product with only 2 units available
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Scarce Widget", stock: 2);
+
+        var customerId = Guid.NewGuid();
+
+        // Try to order 5 units — reservation must fail
+        var act = async () => await bus.InvokeAsync(
+            new PlaceOrderCommand(customerId, [new(productId, "Scarce Widget", 5, 10m)]));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Insufficient stock*");
+
+        await Task.Delay(500);
+
+        // Assert: no Order document created (transaction rolled back)
+        var orders = mongo.GetCollection<Order>("orders");
+        var orderCount = await orders.CountDocumentsAsync(
+            Builders<Order>.Filter.Eq(o => o.CustomerId, customerId));
+        orderCount.Should().Be(0, "order write must be rolled back when inventory reservation fails");
+
+        // Assert: no summary projected (no OrderPlacedApplicationEvent in outbox)
+        var summaries = mongo.GetCollection<OrderSummary>("order_summaries");
+        var summaryCount = await summaries.CountDocumentsAsync(
+            Builders<OrderSummary>.Filter.Eq(s => s.CustomerId, customerId));
+        summaryCount.Should().Be(0, "no projection must run when the order was rolled back");
+
+        // Assert: inventory unchanged — ReservedStock still 0
+        var products = mongo.GetCollection<Product>("products");
+        var product = await products.Find(Builders<Product>.Filter.Eq(p => p.Id, productId))
+            .FirstOrDefaultAsync();
+        product.Should().NotBeNull();
+        product.ReservedStock.Should().Be(0, "reservation must be rolled back with the transaction");
+        product.AvailableStock.Should().Be(2, "available stock must remain at the seeded value");
     }
 }

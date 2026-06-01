@@ -32,7 +32,9 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        var cmd = new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 2, 9.99m)]);
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        var cmd = new PlaceOrderCommand(customerId, [new(productId, "Widget", 2, 9.99m)]);
 
         await bus.InvokeAsync(cmd);
 
@@ -51,9 +53,12 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
     {
         var db = OrdersFixture.CreateDatabaseName();
         using var host = await fixture.CreateHostAsync(db);
+        var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        var cmd = new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Gadget", 1, 50m)]);
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Gadget");
+        var cmd = new PlaceOrderCommand(customerId, [new(productId, "Gadget", 1, 50m)]);
 
         // TrackActivity waits until all cascaded messages (outbox relay + projector) complete.
         // This proves the full outbox pipeline ran without needing to poll MongoDB.
@@ -63,7 +68,6 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
 
         // By this point the handler ran, the outbox wrote the envelope,
         // the relay picked it up, and the projector consumed it — all without RabbitMQ.
-        var mongo = host.Services.GetRequiredService<IMongoDatabase>();
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
             .FirstOrDefaultAsync();
@@ -81,7 +85,9 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -107,7 +113,9 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 10m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 10m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -133,8 +141,10 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Laptop");
         // Place order: 1 × £100 = £100 total
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Laptop", 1, 100m)]));
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Laptop", 1, 100m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -158,7 +168,9 @@ public class OrderCommandHandlerTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Camera", 1, 200m)]));
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Camera");
+        await bus.InvokeAsync(new PlaceOrderCommand(customerId, [new(productId, "Camera", 1, 200m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))

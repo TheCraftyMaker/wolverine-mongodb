@@ -27,7 +27,9 @@ public class OrderProjectorTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
-        var cmd = new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 3, 10m)]);
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
+        var cmd = new PlaceOrderCommand(customerId, [new(productId, "Widget", 3, 10m)]);
 
         // TrackActivity waits for all cascaded messages (incl. the projector) to complete
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30)).InvokeMessageAndWaitAsync(cmd);
@@ -51,10 +53,12 @@ public class OrderProjectorTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
 
         // Place
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
-            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 20m)]));
+            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 20m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -82,9 +86,11 @@ public class OrderProjectorTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Widget");
 
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
-            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Widget", 1, 15m)]));
+            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(productId, "Widget", 1, 15m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
@@ -112,9 +118,11 @@ public class OrderProjectorTests(OrdersFixture fixture)
         var mongo = host.Services.GetRequiredService<IMongoDatabase>();
 
         var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await OrdersFixture.SeedProductAsync(mongo, productId, "Phone");
 
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
-            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(Guid.NewGuid(), "Phone", 1, 500m)]));
+            .InvokeMessageAndWaitAsync(new PlaceOrderCommand(customerId, [new(productId, "Phone", 1, 500m)]));
 
         var orders = mongo.GetCollection<Order>("orders");
         var order = await orders.Find(Builders<Order>.Filter.Eq(o => o.CustomerId, customerId))
