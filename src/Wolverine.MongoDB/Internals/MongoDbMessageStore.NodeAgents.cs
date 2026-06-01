@@ -59,16 +59,24 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
         return w;
     }
 
-    public Task MarkHealthCheckAsync(WolverineNode node, CancellationToken cancellationToken)
-        => NodeDocs.UpdateOneAsync(
+    // Mirror the canonical Postgres implementation: update the heartbeat in place, and if no
+    // node document matched, re-register the node via PersistAsync. This avoids resurrecting a
+    // phantom node from a blind SetOnInsert (which would have written a half-populated document
+    // with a stale/zero node number); re-registration always assigns a proper node number and a
+    // complete record. The Wolverine NodePersistenceCompliance suite enforces this upsert-style
+    // contract (a heartbeat for an unregistered node must create it).
+    public async Task MarkHealthCheckAsync(WolverineNode node, CancellationToken cancellationToken)
+    {
+        var result = await NodeDocs.UpdateOneAsync(
             Builders<NodeDocument>.Filter.Eq(x => x.Id, node.NodeId),
-            Builders<NodeDocument>.Update
-                .Set(x => x.LastHealthCheck, DateTime.UtcNow)
-                .SetOnInsert(x => x.Id, node.NodeId)
-                .SetOnInsert(x => x.AssignedNodeNumber, node.AssignedNodeNumber)
-                .SetOnInsert(x => x.Description, node.Description)
-                .SetOnInsert(x => x.Started, node.Started),
-            new UpdateOptions { IsUpsert = true }, cancellationToken);
+            Builders<NodeDocument>.Update.Set(x => x.LastHealthCheck, DateTime.UtcNow),
+            cancellationToken: cancellationToken);
+
+        if (result.MatchedCount == 0)
+        {
+            await PersistAsync(node, cancellationToken);
+        }
+    }
 
     public Task OverwriteHealthCheckTimeAsync(Guid nodeId, DateTimeOffset lastHeartbeatTime)
         => NodeDocs.UpdateOneAsync(
