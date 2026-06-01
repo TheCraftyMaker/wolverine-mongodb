@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WolverineFx" />
+    <PackageReference Include="WolverineFx.RabbitMQ" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OrderDemo.Application\OrderDemo.Application.csproj" />
+    <ProjectReference Include="..\OrderDemo.Infrastructure\OrderDemo.Infrastructure.csproj" />
+    <!-- Direct reference for WolverineOptions extension methods (UseMongoDbPersistence) -->
+    <ProjectReference Include="..\..\..\src\Wolverine.MongoDB\Wolverine.MongoDB.csproj" />
+  </ItemGroup>
+</Project>

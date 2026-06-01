@@ -1,0 +1,8 @@
+<Project>
+  <!-- Standalone build props for the demo — does NOT chain to the repo root props -->
+  <PropertyGroup>
+    <LangVersion>13</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

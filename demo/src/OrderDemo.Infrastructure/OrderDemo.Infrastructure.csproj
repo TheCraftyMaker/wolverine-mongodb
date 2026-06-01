@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" />
+    <PackageReference Include="WolverineFx" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OrderDemo.Domain\OrderDemo.Domain.csproj" />
+    <ProjectReference Include="..\OrderDemo.Contracts\OrderDemo.Contracts.csproj" />
+    <!-- Local project-reference so the demo uses the in-repo provider -->
+    <ProjectReference Include="..\..\..\src\Wolverine.MongoDB\Wolverine.MongoDB.csproj" />
+  </ItemGroup>
+</Project>

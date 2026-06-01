@@ -1,0 +1,155 @@
+# OrderDemo — Wolverine.MongoDB Demo
+
+A runnable demo that showcases `Wolverine.MongoDB` — the MongoDB transactional inbox/outbox provider for [Wolverine](https://wolverinefx.net).
+
+## Architecture
+
+The demo follows a CQRS + event-driven architecture with a clear boundary between write-side and read-side:
+
+```
+  HTTP request
+       │
+       ▼
+  PlaceOrderHandler  (write side)
+       │   1. Begin MongoDB transaction (auto-applied by Wolverine)
+       │   2. Persist Order aggregate to MongoDB
+       │   3. Drain domain events → map to application event
+       │   4. Return OrderPlacedApplicationEvent
+       │      └── Wolverine writes it to the outbox (same transaction)
+       │   5. Commit transaction
+       │
+       ▼
+  MongoDB outbox relay  ──►  RabbitMQ  ──►  OrderSummaryProjector
+                                                  │   (read side)
+                                                  │   Updates OrderSummary
+                                                  │   read-model collection
+                                                  └── Durable inbox: auto-recovered on crash
+```
+
+### Domain events vs application events
+
+| Event | Where it lives | How it travels |
+|---|---|---|
+| `OrderPlaced` (domain event) | Aggregate, in-memory only | Drained synchronously in the handler |
+| `OrderPlacedApplicationEvent` | Wolverine outbox → MongoDB | Delivered via RabbitMQ |
+
+Domain events never leave the handler method. Application events are persisted to the outbox *inside the same MongoDB transaction* as the domain write — guaranteeing at-least-once delivery to the broker.
+
+### Projects
+
+| Project | Role |
+|---|---|
+| `OrderDemo.Domain` | Aggregate root, domain events, value objects — no infrastructure deps |
+| `OrderDemo.Contracts` | Commands, queries, application events — shared contracts |
+| `OrderDemo.Application` | Wolverine command/query handlers |
+| `OrderDemo.Infrastructure` | MongoDB repositories, read-model projector, infrastructure bootstrap |
+| `OrderDemo.Api` | ASP.NET Core entry point — Wolverine + RabbitMQ wiring, minimal API endpoints |
+
+## Prerequisites
+
+- [.NET 9 SDK](https://dotnet.microsoft.com/download)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) (for MongoDB replica set + RabbitMQ)
+
+> **MongoDB must run as a replica set.** The transactional outbox uses multi-document transactions, which require a replica set. The provided `docker-compose.yml` configures this automatically.
+
+## Quick start
+
+### 1. Start infrastructure
+
+```bash
+cd demo
+docker compose up -d
+```
+
+This starts:
+- A single-node MongoDB 7 replica set (`rs0`) on port `27017`
+- RabbitMQ 3 with the management UI on port `15672` (`guest`/`guest`)
+
+Wait ~10 seconds for MongoDB to initialise the replica set.
+
+### 2. Run the API
+
+```bash
+cd demo/src/OrderDemo.Api
+dotnet run
+```
+
+The API starts on `http://localhost:5000`. Open `http://localhost:5000/scalar/v1` for the interactive API docs.
+
+### 3. Try it out
+
+**Place an order:**
+```bash
+curl -X POST http://localhost:5000/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"cust-1","items":[{"productId":"prod-1","quantity":2,"unitPrice":9.99}]}'
+```
+
+**Ship the order** (use the `orderId` from the response):
+```bash
+curl -X POST http://localhost:5000/orders/{orderId}/ship
+```
+
+**Read the projected read model:**
+```bash
+curl http://localhost:5000/orders
+```
+
+### 4. Observe the outbox
+
+Connect to MongoDB and inspect the outbox collections:
+
+```javascript
+use orderDemo
+db.wolverine_outgoing_envelopes.find()   // messages waiting to be relayed
+db.wolverine_incoming_envelopes.find()   // inbox messages (projector queue)
+db.wolverine_dead_letters.find()         // any failures
+```
+
+## How the transaction works
+
+Wolverine's `AutoApplyTransactions()` policy detects that `PlaceOrderHandler` depends on `IOrderRepository → OrderRepository(IMongoDatabase)` and automatically wraps the handler in a `TransactionalFrame`:
+
+```csharp
+// generated pseudocode
+await using var session = client.StartSession();
+session.StartTransaction();
+try
+{
+    var result = await PlaceOrderHandler.Handle(cmd, session, repository, ct);
+    // outbox envelope written to wolverine_outgoing_envelopes using same session
+    await session.CommitTransactionAsync();
+}
+catch { await session.AbortTransactionAsync(); throw; }
+```
+
+The `IClientSessionHandle` is available as a parameter in handler methods — repositories thread it through all write operations so they participate in the transaction.
+
+## Key patterns demonstrated
+
+| Pattern | Where to look |
+|---|---|
+| Domain event → application event mapping | `PlaceOrderHandler.cs` |
+| MongoDB transaction via `IClientSessionHandle` | `OrderRepository.cs` + `PlaceOrderHandler.cs` |
+| Outbox auto-apply policy | `Program.cs` — `opts.Policies.AutoApplyTransactions()` |
+| Durable inbox for projector | `Program.cs` — `.UseDurableInbox()` |
+| Read model upsert (idempotent) | `OrderSummaryRepository.cs` |
+| Handler in non-entry assembly | `Program.cs` — `opts.Discovery.IncludeAssembly(...)` |
+
+## Configuration
+
+| Key | Default (local dev) | Docker value |
+|---|---|---|
+| `MongoDB:ConnectionString` | `mongodb://localhost:27017/?replicaSet=rs0&directConnection=true` | `mongodb://mongo1:27017/?replicaSet=rs0&directConnection=true` |
+| `MongoDB:DatabaseName` | `orderDemo` | `orderDemo` |
+| `RabbitMQ:HostName` | `localhost` | `rabbitmq` |
+| `RabbitMQ:UserName` | `guest` | `guest` |
+| `RabbitMQ:Password` | `guest` | `guest` |
+
+Settings live in `appsettings.json` (Docker defaults) and `appsettings.Development.json` (local dev overrides).
+
+## Stopping infrastructure
+
+```bash
+docker compose down -v   # -v removes the MongoDB data volume
+```

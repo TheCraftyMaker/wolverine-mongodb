@@ -1,0 +1,36 @@
+services:
+  mongo1:
+    image: mongo:7
+    container_name: orderdemo-mongo1
+    hostname: mongo1
+    ports:
+      - "27017:27017"
+    command: mongod --replSet rs0 --bind_ip_all
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-rs-init:
+    image: mongo:7
+    container_name: orderdemo-mongo-init
+    depends_on:
+      mongo1:
+        condition: service_healthy
+    command: >
+      mongosh --host mongo1:27017 --quiet --eval
+      "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo1:27017' }] })"
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: orderdemo-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI  (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
