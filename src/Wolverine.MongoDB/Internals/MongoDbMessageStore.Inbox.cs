@@ -33,6 +33,12 @@ public partial class MongoDbMessageStore : IMessageInbox
                 .Where(w => w.Category == ServerErrorCategory.DuplicateKey)
                 .Select(w => envelopes[w.Index])
                 .ToList();
+            var others = ex.WriteErrors
+                .Where(w => w.Category != ServerErrorCategory.DuplicateKey)
+                .ToList();
+
+            // Non-duplicate failures must surface — silently swallowing them would lose messages.
+            if (others.Count > 0) throw;
             if (dupes.Count > 0) throw new DuplicateIncomingEnvelopeException(dupes);
         }
     }

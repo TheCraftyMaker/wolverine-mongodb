@@ -29,6 +29,33 @@ public class inbox
     }
 
     [Fact]
+    public async Task bulk_store_throws_for_dupe_subset_and_persists_the_rest()
+    {
+        var store = _fixture.BuildMessageStore();
+        await store.Admin.RebuildAsync();
+
+        var existing = ObjectMother.Envelope();
+        existing.Destination = new Uri("rabbitmq://queue/in");
+        await store.Inbox.StoreIncomingAsync(existing);
+
+        var fresh1 = ObjectMother.Envelope();
+        fresh1.Destination = new Uri("rabbitmq://queue/in");
+        var fresh2 = ObjectMother.Envelope();
+        fresh2.Destination = new Uri("rabbitmq://queue/in");
+
+        var ex = await Should.ThrowAsync<DuplicateIncomingEnvelopeException>(
+            () => store.Inbox.StoreIncomingAsync(new[] { fresh1, existing, fresh2 }));
+
+        // Only the already-stored envelope should be reported as a duplicate.
+        ex.Duplicates.Count.ShouldBe(1);
+        ex.Duplicates.Single().Id.ShouldBe(existing.Id);
+
+        // The non-duplicate envelopes must still have persisted (unordered insert).
+        (await store.Inbox.ExistsAsync(fresh1, CancellationToken.None)).ShouldBeTrue();
+        (await store.Inbox.ExistsAsync(fresh2, CancellationToken.None)).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task mark_handled_sets_handled_count()
     {
         var store = _fixture.BuildMessageStore();
