@@ -68,13 +68,11 @@ public class MongoDbEnvelopeTransaction : IEnvelopeTransaction
         }
     }
 
-    public ValueTask RollbackAsync()
+    public async ValueTask RollbackAsync()
     {
         if (_session.IsInTransaction)
         {
-            _session.AbortTransaction();
+            await _session.AbortTransactionAsync().ConfigureAwait(false);
         }
-
-        return ValueTask.CompletedTask;
     }
 }
