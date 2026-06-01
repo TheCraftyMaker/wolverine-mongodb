@@ -13,7 +13,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <RepositoryUrl>https://github.com/TheCraftyMaker/wolverine-mongodb</RepositoryUrl>
-    <Version>0.1.0-beta.1</Version>
+    <Version>0.1.0-beta.2</Version>
   </PropertyGroup>
 
   <!-- WolverineFx.ComplianceTests is not yet published on NuGet. When a local Wolverine clone
