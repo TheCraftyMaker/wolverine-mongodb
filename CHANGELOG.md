@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The major version tracks Wolverine's major version.
 
-## [Unreleased]
+## [0.1.0-beta.1] - 2026-06-01
 
 ### Added
 - Project scaffolding and DevSwarm parallel-workspace configuration.
@@ -90,4 +90,4 @@ Post-review hardening pass (adversarial review of the 0.1.0 implementation):
   `WolverineFx.ComplianceTests` is published to NuGet.
 - Replica set is required; standalone MongoDB is not supported.
 
-[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/commits/main
+[0.1.0-beta.1]: https://github.com/TheCraftyMaker/wolverine-mongodb/releases/tag/v0.1.0-beta.1

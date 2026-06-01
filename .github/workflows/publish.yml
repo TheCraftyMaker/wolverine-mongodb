@@ -16,3 +16,5 @@ jobs:
         run: dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -o ./artifacts
       - name: Push to NuGet
         run: dotnet nuget push "./artifacts/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: Push symbols to NuGet
+        run: dotnet nuget push "./artifacts/*.snupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
