@@ -26,6 +26,20 @@ docker compose up -d   # see docker-compose.yml for the replica-set config
 dotnet test
 ```
 
+## Design notes
+
+### Domain-write atomicity
+
+Wolverine opens an `IClientSessionHandle` for each handler and persists the
+inbox/outbox envelopes on that session inside a multi-document transaction. The
+"domain write + outbox write in one transaction" guarantee therefore only holds
+when the handler enlists its own MongoDB writes in that same session — it must
+accept the generated `IClientSessionHandle` and pass it to every MongoDB write
+(`collection.InsertOneAsync(session, doc)`). The `IMongoDatabase` registered by
+`UseMongoDbPersistence` does **not** auto-enlist; a write that omits the session
+runs outside the transaction and is not atomic with the outbox. A session-bound
+write helper to make this automatic is a planned follow-up enhancement.
+
 ## Pull requests
 
 - Keep changes focused; one logical change per PR.

@@ -46,9 +46,35 @@ builder.UseWolverine(opts =>
 can configure the client however you like (Atlas connection string, custom
 `MongoClientSettings`, etc.) before the call.
 
+### Domain-write atomicity
+
 When a handler both modifies a MongoDB document and publishes outgoing messages,
-the domain write and the outbox write are committed atomically inside a single
-MongoDB multi-document transaction — this is why a replica set is required.
+the outbox write is committed inside a single MongoDB multi-document transaction
+— this is why a replica set is required.
+
+**Important:** the domain write is only atomic with the outbox write if the
+handler enlists its own MongoDB writes in the Wolverine-managed transaction.
+Wolverine opens an `IClientSessionHandle` for the handler and persists the
+outgoing/inbox envelopes on that session. For your domain write to commit (or
+roll back) atomically with those envelopes, the handler **must** accept the
+generated `IClientSessionHandle` and pass it to every MongoDB write it performs:
+
+```csharp
+public static async Task Handle(MyCommand command, IClientSessionHandle session,
+    IMongoDatabase database)
+{
+    // Pass the session so this write joins the Wolverine-managed transaction.
+    await database.GetCollection<Order>("orders").InsertOneAsync(session, order);
+
+    // Outgoing messages published here are persisted on the SAME session/transaction.
+}
+```
+
+The `IMongoDatabase` registered by `UseMongoDbPersistence` does **not**
+auto-enlist in the transaction. A handler that writes without the session writes
+outside the transaction, so its domain change is **not** atomic with the outbox
+and can be lost or duplicated on failure. A session-bound write helper that
+removes the need to thread the session manually is a planned follow-up.
 
 ## How it works
 
