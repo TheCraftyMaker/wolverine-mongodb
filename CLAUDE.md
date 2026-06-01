@@ -97,9 +97,21 @@ Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop requi
 
 ## Versioning & Release
 
-- Version in `Directory.Build.props` (single source of truth)
+- Version in `Directory.Build.props` (kept in sync via auto-bump PR after publish)
 - Major version tracks Wolverine: `0.1.x` ↔ `WolverineFx 6.x`
-- Release: tag `v{version}` → `publish.yml` pushes to NuGet
+- The publish workflow extracts version from the git tag (`-p:Version`), so the tag is the source of truth
+
+**Release flow:**
+1. Merge your branch into main (via PR or direct push)
+2. Tag main from any branch:
+   ```bash
+   git tag v0.1.0-beta.3 origin/main
+   git push origin v0.1.0-beta.3
+   ```
+3. The `publish.yml` workflow triggers, packs with the tag version, and pushes to NuGet
+4. A PR is auto-created to bump `Directory.Build.props` to match
+
+⚠️ **Always tag a commit on main** — the workflow runs the `publish.yml` from the tagged commit, so that commit must contain the latest workflow file.
 
 ---
 
