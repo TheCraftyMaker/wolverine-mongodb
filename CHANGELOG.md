@@ -50,8 +50,40 @@ The major version tracks Wolverine's major version.
 - Code-generation integration (`MongoDbPersistenceFrameProvider`,
   `TransactionalFrame`) so handlers using `IMongoDatabase` participate in the
   transactional outbox automatically via Wolverine's source-generation pipeline.
-- Wolverine compliance test suite (63 tests) via Testcontainers replica-set
-  fixture; all tests green.
+- Wolverine compliance test suite via Testcontainers replica-set fixture;
+  all tests green (86 tests after the post-review hardening pass).
+
+### Fixed
+Post-review hardening pass (adversarial review of the 0.1.0 implementation):
+- **Inbox dedup key honors `Durability.MessageIdentity`** — under the default
+  `IdOnly`, a redelivery to a different destination is now correctly deduped by
+  envelope id; `IdAndDestination` keeps them distinct.
+- **`RescheduleExistingEnvelopeForRetryAsync`** now updates the existing inbox
+  document instead of inserting (no longer throws a duplicate-key error on retry).
+- **Outbox orphan recovery** — the durability agent now reassigns and re-sends
+  orphaned outgoing envelopes (`OwnerId == AnyNode`), not just incoming ones.
+- **Transactional session disposal** — the generated handler now disposes the
+  MongoDB session via `await using`, preventing session leaks.
+- **Dead-letter replay** now actually moves replayable messages back to the
+  incoming collection (previously it only flagged them).
+- **`DateTimeOffset` persisted as UTC BSON `Date`** (process-wide serializer
+  registration) — fixes TTL expiry, dead-letter time-range filtering/paging,
+  node-record ordering, and scheduled-message UTC comparison.
+- **Bulk `StoreIncomingAsync`** now rethrows non-duplicate write errors instead
+  of silently swallowing them.
+- **Async transaction rollback** (`AbortTransactionAsync` is awaited).
+- **Heartbeats no longer write phantom node documents** — a heartbeat for an
+  unknown node re-registers it (Postgres-style) rather than upserting a
+  half-populated record.
+- **Eager-idempotency inside the outbox transaction** no longer aborts the
+  session (duplicate detected via a transaction-consistent read instead of a
+  failing insert).
+- **Scheduled-message claim** guarded with a `Status == Scheduled` filter and
+  crash-safe ordering so a due message is published at most once and is never
+  stranded.
+- **Atomic dead-letter move** (DLQ upsert + incoming delete in one transaction,
+  with poison-message serialization guarded) and **compare-and-swap incoming
+  reassignment** (only still-unclaimed envelopes are reassigned).
 
 ### Notes
 - The compliance test suite uses a local Wolverine source clone until
