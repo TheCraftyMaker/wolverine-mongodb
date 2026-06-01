@@ -1,132 +1,111 @@
-# Wolverine.MongoDB — Contributor Guide
+# Wolverine.MongoDB
 
-## What This Is
+## Overview
 
-A native MongoDB persistence provider for [Wolverine](https://wolverinefx.net)'s transactional inbox/outbox. It implements `IMessageStore` directly against the MongoDB .NET driver — no EF Core, no relational assumptions.
+Native MongoDB persistence provider for Wolverine's transactional inbox/outbox. Implements `IMessageStore` directly against the MongoDB .NET driver. No EF Core dependency.
 
-**NuGet package:** `Wolverine.MongoDB`  
-**Current version:** `0.1.0-beta.1`
+**Package:** `Wolverine.MongoDB` (NuGet, currently `0.1.0-beta.1`)  
+**Targets:** .NET 9, .NET 10  
+**Dependencies:** `WolverineFx 6.x`, `MongoDB.Driver 3.x`  
+**Constraint:** MongoDB must run as a replica set (transactions require it).
 
 ---
 
-## Project Structure
+## Repository Layout
 
 ```
-src/
-  Wolverine.MongoDB/           ← The library (ships as NuGet package)
-    Internals/                 ← All implementation details
-    WolverineMongoDbExtensions.cs  ← Public API entry point
-  Wolverine.MongoDB.Tests/     ← Compliance + integration tests
-demo/                          ← Standalone demo app (separate solution)
+src/Wolverine.MongoDB/              ← Library (NuGet package)
+  WolverineMongoDbExtensions.cs     ← Public API: UseMongoDbPersistence()
+  Internals/                        ← All implementation (internal)
+src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine source clone)
+demo/                               ← Separate solution, references package from nuget.org
+.github/workflows/
+  ci.yml                            ← Build lib + demo, run demo tests
+  publish.yml                       ← NuGet push on v* tag
+  security.yml                      ← Trivy vulnerability scan
 ```
 
-### Key Source Files
+---
 
-| File | Purpose |
-|------|---------|
-| `WolverineMongoDbExtensions.cs` | `UseMongoDbPersistence()` extension method — public API |
-| `Internals/MongoDbMessageStore.cs` | Core `IMessageStore` implementation (partial class) |
-| `Internals/MongoDbMessageStore.Inbox.cs` | `IMessageInbox` — incoming envelope persistence |
-| `Internals/MongoDbMessageStore.Outbox.cs` | `IMessageOutbox` — outgoing envelope persistence |
-| `Internals/MongoDbMessageStore.DeadLetters.cs` | `IDeadLetters` — failed message storage |
-| `Internals/MongoDbMessageStore.Admin.cs` | `IMessageStoreAdmin` — collection/index setup |
-| `Internals/MongoDbMessageStore.NodeAgents.cs` | `IAgentFamily` — node coordination |
-| `Internals/MongoDbMessageStore.Locking.cs` | Leader election via `findAndModify` lock |
-| `Internals/MongoDbDurabilityAgent.cs` | Background polling (relay, scheduled, orphans) |
-| `Internals/MongoDbEnvelopeTransaction.cs` | Transaction middleware for handler atomicity |
-| `Internals/MongoDbPersistenceFrameProvider.cs` | Code-gen integration for `AutoApplyTransactions()` |
-| `Internals/TransactionalFrame.cs` | Generated frame that wraps handler in MongoDB session |
+## How the Library Works
+
+### Public API
+
+One extension method: `opts.UseMongoDbPersistence(databaseName)`. It:
+1. Registers `MongoDbMessageStore` as `IMessageStore`
+2. Registers `IMongoDatabase` from the DI-provided `IMongoClient`
+3. Inserts `MongoDbPersistenceFrameProvider` into Wolverine's code-generation pipeline
+
+### Core Implementation (partial class `MongoDbMessageStore`)
+
+| File | Implements |
+|------|-----------|
+| `MongoDbMessageStore.cs` | `IMessageStore` root, collection references |
+| `MongoDbMessageStore.Inbox.cs` | `IMessageInbox` — store/mark/recover incoming envelopes |
+| `MongoDbMessageStore.Outbox.cs` | `IMessageOutbox` — persist/relay/mark outgoing envelopes |
+| `MongoDbMessageStore.DeadLetters.cs` | `IDeadLetters` — failed messages, replay |
+| `MongoDbMessageStore.Admin.cs` | `IMessageStoreAdmin` — collection/index creation, rebuild |
+| `MongoDbMessageStore.NodeAgents.cs` | `IAgentFamily` — node registry, agent assignments |
+| `MongoDbMessageStore.Locking.cs` | Leader election via findAndModify lock document + TTL |
+| `MongoDbMessageStore.ScheduledMessages.cs` | Scheduled message polling with atomic claim |
+| `MongoDbMessageStore.Durability.cs` | `MongoDbDurabilityAgent` integration |
+
+### Transaction Integration
+
+| File | Role |
+|------|------|
+| `MongoDbEnvelopeTransaction.cs` | `IEnvelopeTransaction` — opens session, commits outbox atomically |
+| `MongoDbPersistenceFrameProvider.cs` | Code-gen: detects `IMongoDatabase` usage, injects transactional frame |
+| `TransactionalFrame.cs` | Generated code frame: `StartSession → StartTransaction → handler → Commit` |
 
 ### MongoDB Collections
 
 | Collection | Purpose |
 |------------|---------|
-| `wolverine_incoming_envelopes` | Inbox — idempotency + durable local queues |
-| `wolverine_outgoing_envelopes` | Outbox — pending delivery to broker |
-| `wolverine_dead_letters` | Failed messages with exception details |
-| `wolverine_nodes` | Node registry (heartbeats, capabilities) |
-| `wolverine_node_assignments` | Agent-to-node assignments |
+| `wolverine_incoming_envelopes` | Inbox (idempotency, durable queues) |
+| `wolverine_outgoing_envelopes` | Outbox (pending broker delivery) |
+| `wolverine_dead_letters` | Failed messages + exception info |
+| `wolverine_nodes` | Node registry (heartbeat, capabilities) |
+| `wolverine_node_assignments` | Agent-to-node mapping |
+
+### Key Design Decisions
+
+- **Hot path uses `findAndModify`** (single-doc atomic ops), not multi-doc transactions. Transactions only for handler atomicity (domain write + outbox in one commit).
+- **Inbox idempotency:** unique `_id` index; duplicate insert → `DuplicateKeyException` → treated as already-processed.
+- **Scheduled messages:** `FindOneAndUpdate` with `Status == Scheduled && ExecutionTime <= now` for atomic claim.
+- **Node coordination:** lock document with TTL expiry via `findAndModify` (approximates PostgreSQL advisory locks). Least mature subsystem.
 
 ---
 
-## Architecture Decisions
-
-### Concurrency: `findAndModify` over transactions
-
-The hot path (claiming envelopes, idempotency checks) uses single-document atomic operations (`FindOneAndUpdate`) — not multi-document transactions. Transactions are only used when a handler needs atomic domain-write + outbox-write.
-
-### Inbox idempotency
-
-Unique index on `_id`. Duplicate inserts throw `DuplicateKeyException` which is caught and treated as "already processed."
-
-### Scheduled messages
-
-`LoadScheduledToExecuteAsync` uses `FindOneAndUpdate` with a filter on `Status == Scheduled && ExecutionTime <= now` to atomically claim ownership.
-
-### Node coordination
-
-Leader election uses a lock document with TTL-based expiry via `findAndModify`. This approximates PostgreSQL advisory locks. It's the least mature part of the codebase.
-
----
-
-## Development Setup
-
-### Prerequisites
-
-- .NET 9 SDK (or .NET 10)
-- Docker (for Testcontainers)
-- Local Wolverine source clone (until `WolverineFx.ComplianceTests` is on NuGet)
-
-### Building
+## Build & Test
 
 ```bash
-dotnet build
-```
+# Build library only (no Wolverine source clone needed)
+dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj
 
-The library auto-detects a Wolverine source clone at `C:\source\external\wolverine` or the path in the `WOLVERINE_SOURCE` environment variable. Without it, only the library project builds (test project is skipped).
-
-### Running Tests
-
-```bash
+# Build + test (requires Wolverine source clone for compliance tests)
+# Clone location: C:\source\external\wolverine or WOLVERINE_SOURCE env var
 dotnet test src/Wolverine.MongoDB.Tests/
-```
 
-Tests use Testcontainers to spin up a MongoDB replica set — no manual Docker setup needed. They require the Wolverine source clone for the compliance test base classes.
-
-### Packing Locally
-
-```bash
+# Pack for NuGet (declares WolverineFx package dependency)
 dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false
 ```
 
-The `-p:UseWolverineSource=false` flag ensures the package declares a `WolverineFx` NuGet dependency rather than a project reference.
+Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required.
 
 ---
 
-## Versioning
+## Versioning & Release
 
-Major version tracks Wolverine's major version. Currently `0.x` (pre-release) until node coordination is production-hardened.
-
-| `Wolverine.MongoDB` | `WolverineFx` |
-|---|---|
-| `0.1.x` | `6.x` |
+- Version in `Directory.Build.props` (single source of truth)
+- Major version tracks Wolverine: `0.1.x` ↔ `WolverineFx 6.x`
+- Release: tag `v{version}` → `publish.yml` pushes to NuGet
 
 ---
 
-## CI/CD
+## Important Constraints
 
-| Workflow | Trigger | What it does |
-|----------|---------|--------------|
-| `ci.yml` | Push/PR to main | Builds library + demo, runs demo integration tests |
-| `publish.yml` | Tag `v*` | Packs and pushes to NuGet |
-| `security.yml` | Push/PR to main | Trivy vulnerability scan |
-
----
-
-## Useful Links
-
-- [Wolverine durability docs](https://wolverinefx.net/guide/durability/)
-- [MongoDB .NET driver transactions](https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/transactions/)
-- [MassTransit MongoDB outbox](https://github.com/MassTransit/MassTransit/tree/develop/src/Persistence/MassTransit.MongoDbIntegration/MongoDbIntegration/Outbox) (design reference)
-- Wolverine source: `IMessageStore` in `src/Wolverine/Persistence/Durability/IMessageStore.cs`
+- `IMongoDatabase` does NOT auto-enlist in the transaction. Handlers must accept `IClientSessionHandle` and pass it to all writes for atomicity.
+- The test project depends on `WolverineFx.ComplianceTests` which is not on NuGet — requires local Wolverine source clone. CI skips library tests for now.
+- `Wolverine.MongoDB.Tests` uses `UseWolverineSource` MSBuild property to switch between project-ref (local dev) and package-ref (CI/pack).
 
