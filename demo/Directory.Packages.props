@@ -3,17 +3,17 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="WolverineFx" Version="6.2.2" />
-    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.2.2" />
+    <PackageVersion Include="WolverineFx" Version="6.3.1" />
+    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.3.1" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.16" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.6.0" />
     <!-- Test -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageVersion Include="Testcontainers.MongoDb" Version="4.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <PackageVersion Include="FluentAssertions" Version="7.2.0" />
+    <PackageVersion Include="FluentAssertions" Version="8.10.0" />
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.2.2" />
     <PackageVersion Include="Wolverine.MongoDB" Version="0.1.0-beta.1" />
   </ItemGroup>
