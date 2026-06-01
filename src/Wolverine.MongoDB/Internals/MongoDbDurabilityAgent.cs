@@ -54,6 +54,7 @@ public class MongoDbDurabilityAgent : IAgent
                 try
                 {
                     await _parent.RecoverOrphanedIncomingAsync(_runtime, _combined.Token);
+                    await _parent.RecoverOrphanedOutgoingAsync(_runtime, _combined.Token);
                 }
                 catch (Exception e) when (!_combined.IsCancellationRequested)
                 {

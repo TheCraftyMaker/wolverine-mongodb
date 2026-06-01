@@ -2,6 +2,7 @@ using MongoDB.Driver;
 using Wolverine.Runtime;
 using Wolverine.Runtime.WorkerQueues;
 using Wolverine.Transports;
+using Wolverine.Transports.Sending;
 
 namespace Wolverine.MongoDB.Internals;
 
@@ -80,6 +81,46 @@ public partial class MongoDbMessageStore
             var envelopes = await LoadPageOfGloballyOwnedIncomingAsync(listener, runtime.DurabilitySettings.RecoveryBatchSize);
             await ReassignIncomingAsync(runtime.DurabilitySettings.AssignedNodeNumber, envelopes);
             await circuit.EnqueueDirectlyAsync(envelopes);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort orphan recovery for outgoing envelopes: reassign globally-owned (OwnerId == 0)
+    /// outgoing messages to this node and hand them back to the sending agent for delivery,
+    /// discarding any that have already expired. Mirrors the Cosmos durability agent's outgoing recovery.
+    /// </summary>
+    internal async Task RecoverOrphanedOutgoingAsync(IWolverineRuntime runtime, CancellationToken token)
+    {
+        var b = Builders<OutgoingMessage>.Filter;
+        var filter = b.And(
+            b.Eq(x => x.OwnerId, MongoConstants.AnyNode),
+            b.Ne(x => x.Destination, null));
+
+        var destinations = await Outgoing.Distinct(x => x.Destination, filter, cancellationToken: token).ToListAsync(token);
+
+        foreach (var destinationStr in destinations)
+        {
+            if (destinationStr is null)
+            {
+                continue;
+            }
+
+            var sendingAgent = runtime.Endpoints.GetOrBuildSendingAgent(new Uri(destinationStr));
+            if (sendingAgent.Latched)
+            {
+                continue;
+            }
+
+            var outgoing = await LoadOutgoingAsync(sendingAgent.Destination);
+            var expired = outgoing.Where(x => x.IsExpired()).ToArray();
+            var good = outgoing.Where(x => !x.IsExpired()).ToArray();
+
+            await DiscardAndReassignOutgoingAsync(expired, good, runtime.DurabilitySettings.AssignedNodeNumber);
+
+            foreach (var envelope in good)
+            {
+                await sendingAgent.EnqueueOutgoingAsync(envelope);
+            }
         }
     }
 }

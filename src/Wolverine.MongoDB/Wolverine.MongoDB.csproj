@@ -11,6 +11,9 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Wolverine.MongoDB.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="MongoDB.Driver" />
   </ItemGroup>
   <!-- Wolverine core: NuGet package for ship/CI; local clone project-ref for the compliance loop.
