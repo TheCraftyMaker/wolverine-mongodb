@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The major version tracks Wolverine's major version.
 
+## [Unreleased]
+
+### Added
+- CI workflow with separate library build and demo integration test jobs.
+- Trivy security scanning workflow with SARIF upload to GitHub Security tab.
+- Dependabot configuration for NuGet and GitHub Actions dependencies.
+- `SECURITY.md` with private vulnerability reporting guidance.
+- Repository ruleset enforcing PR reviews and status checks (owner bypass).
+- Secret scanning and push protection enabled.
+- NuGet, Build, Tests, Security, License, and .NET badges in README.
+
+### Changed
+- Demo app now references `Wolverine.MongoDB` from nuget.org (removed local feed).
+- README updated for published beta: installation instructions, demo reference,
+  modern quick-start snippet.
+- `CLAUDE.md` rewritten as a contributor-facing guide (was implementation notes).
+- Added `demo/CLAUDE.md` contributor guide for the demo application.
+
+### Fixed
+- `.devswarm/` directory no longer tracked in git.
+- Publish workflow now also pushes symbol packages (`.snupkg`).
+
 ## [0.1.0-beta.1] - 2026-06-01
 
 ### Added
@@ -90,4 +112,5 @@ Post-review hardening pass (adversarial review of the 0.1.0 implementation):
   `WolverineFx.ComplianceTests` is published to NuGet.
 - Replica set is required; standalone MongoDB is not supported.
 
+[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.1...HEAD
 [0.1.0-beta.1]: https://github.com/TheCraftyMaker/wolverine-mongodb/releases/tag/v0.1.0-beta.1
