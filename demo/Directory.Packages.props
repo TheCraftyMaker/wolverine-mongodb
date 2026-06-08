@@ -3,8 +3,8 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="WolverineFx" Version="6.3.1" />
-    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.3.1" />
+    <PackageVersion Include="WolverineFx" Version="6.5.1" />
+    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.5.1" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.16" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.6.0" />
