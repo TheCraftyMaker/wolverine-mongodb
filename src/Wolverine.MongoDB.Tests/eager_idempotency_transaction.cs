@@ -91,5 +91,15 @@ public class eager_idempotency_transaction
             .Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Id, outgoing.Id))
             .FirstOrDefaultAsync();
         stored.ShouldNotBeNull();
+
+        // Regression guard: the handled marker persisted by the eager idempotency check
+        // must carry KeepUntil, otherwise it is never expired by the TTL index.
+        var incomingCollection = client
+            .GetDatabase(AppFixture.DatabaseName)
+            .GetCollection<IncomingMessage>(MongoConstants.IncomingCollection);
+        var marker = await incomingCollection
+            .Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, incoming.Id))
+            .SingleAsync();
+        marker.KeepUntil.ShouldNotBeNull();
     }
 }

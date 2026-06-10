@@ -1,5 +1,7 @@
+using MongoDB.Driver;
 using Shouldly;
 using Wolverine.ComplianceTests;
+using Wolverine.MongoDB.Internals;
 using Wolverine.Persistence.Durability;
 
 namespace Wolverine.MongoDB.Tests;
@@ -92,5 +94,30 @@ public class inbox
         reloaded.Status.ShouldBe(EnvelopeStatus.Scheduled);
         reloaded.OwnerId.ShouldBe(0);
         reloaded.ScheduledTime!.Value.ShouldBe(scheduledTime, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task handled_marker_stored_via_store_incoming_carries_keep_until()
+    {
+        await _fixture.ClearAll();
+        var store = _fixture.BuildMessageStore();
+
+        var original = ObjectMother.Envelope();
+        original.Destination = new Uri("local://keep-until");
+
+        // This is exactly what Wolverine core's MessageContext does on the lazy
+        // handled path (MessageContext.cs:123-126): ForPersistedHandled sets KeepUntil,
+        // then the envelope goes through plain StoreIncomingAsync.
+        var handled = Envelope.ForPersistedHandled(
+            original, DateTimeOffset.UtcNow, new WolverineOptions().Durability);
+        await store.Inbox.StoreIncomingAsync(handled);
+
+        var doc = await store.Incoming
+            .Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, original.Id))
+            .SingleAsync();
+
+        doc.Status.ShouldBe(EnvelopeStatus.Handled);
+        doc.KeepUntil.ShouldNotBeNull(
+            "a handled marker without KeepUntil is never removed by the TTL index");
     }
 }
