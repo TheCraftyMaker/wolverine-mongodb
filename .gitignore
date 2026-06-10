@@ -13,6 +13,10 @@ local-nuget/
 [Oo]bj/
 artifacts/
 
+# Per-task git worktrees (one isolated working tree per task/agent — see the
+# Git & PR Workflow section of the implementation plans)
+.worktrees/
+
 # IDE / tooling
 .vs/
 *.user
