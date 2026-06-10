@@ -2,6 +2,8 @@
 .devswarm-temp/
 .idea/
 docs/superpowers/*
+# Implementation plans are versioned: task PRs reference them by path on main
+!docs/superpowers/plans/
 
 # Local NuGet feed (packed locally for demo — not for source control)
 local-nuget/
