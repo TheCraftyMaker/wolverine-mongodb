@@ -56,7 +56,7 @@ Commit messages end with the standard `Co-Authored-By: Claude Fable 5 <noreply@a
 | 1 | `fix/outgoing-owner-filter` | fix: LoadOutgoingAsync only returns globally-owned envelopes, batch-limited | — | Sonnet |
 | 2 | `fix/handled-keep-until` | fix: handled inbox markers carry KeepUntil so the TTL index expires them | — | Sonnet |
 | 3 | `fix/dlq-expiration-opt-in` | fix: dead letters only expire when DeadLetterQueueExpirationEnabled is set | — | Sonnet |
-| 4 ✅ | `fix/dead-letter-replay-idempotent` | fix: dead-letter replay converges after crashes | — | Sonnet |
+| 4 | `fix/dead-letter-replay-idempotent` | fix: dead-letter replay converges after crashes | — | Sonnet |
 | 5 | `ci/library-tests-and-fresh-nupkg-demo` | ci: run compliance suite against pinned Wolverine; demo consumes fresh nupkg | — | **Fable 5 / Opus** |
 | 6 | `feat/fail-fast-balanced-mode` | feat: fail fast on DurabilityMode.Balanced | — | Sonnet |
 | 7 | `refactor/per-property-bson-dates` | refactor: per-property BSON DateTime representation | — | Sonnet |
