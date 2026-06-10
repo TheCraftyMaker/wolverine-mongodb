@@ -282,7 +282,7 @@ rtk git commit -m "fix: handled inbox markers carry KeepUntil so the TTL index e
 
 ---
 
-### Task 3: Dead-letter expiration must honor `DeadLetterQueueExpirationEnabled`
+### Task 3: Dead-letter expiration must honor `DeadLetterQueueExpirationEnabled` ✅
 
 Wolverine's `DeadLetterQueueExpirationEnabled` defaults to **false** — RDBMS providers keep dead letters forever unless it is enabled. The Mongo store unconditionally stamps `ExpirationTime` and TTL-deletes every dead letter after 10 days: silent data loss under default settings.
 
@@ -291,7 +291,7 @@ Wolverine's `DeadLetterQueueExpirationEnabled` defaults to **false** — RDBMS p
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Inbox.cs:139-140`
 - Test: Create `src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs`
 
-- [ ] **Step 1: Write the failing tests** — create `src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs`:
+- [x] **Step 1: Write the failing tests** — create `src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -349,12 +349,12 @@ public class dead_letter_expiration
 }
 ```
 
-- [ ] **Step 2: Run to verify the first test fails**
+- [x] **Step 2: Run to verify the first test fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~dead_letter_expiration"`
 Expected: `expiration_disabled_by_default...` FAILS (ExpirationTime is stamped today); the compile may also fail on `ShouldBeNull()` against a non-nullable `DateTimeOffset` — that is the signal for Step 3's type change.
 
-- [ ] **Step 3: Implement** — in `DeadLetterMessage.cs` change the property to nullable and skip nulls so the TTL index ignores unexpirable docs:
+- [x] **Step 3: Implement** — in `DeadLetterMessage.cs` change the property to nullable and skip nulls so the TTL index ignores unexpirable docs:
 
 ```csharp
 [BsonElement("expirationTime")]
@@ -381,12 +381,12 @@ if (_options.Durability.DeadLetterQueueExpirationEnabled)
 }
 ```
 
-- [ ] **Step 4: Run the new tests and the existing DLQ suites**
+- [x] **Step 4: Run the new tests and the existing DLQ suites**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~dead_letter"`
 Expected: PASS (including `dead_letters`, `dead_letter_replay`, `dead_letter_admin_compliance`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 rtk git add src/Wolverine.MongoDB/Internals/DeadLetterMessage.cs src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Inbox.cs src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs
