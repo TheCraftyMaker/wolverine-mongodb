@@ -5,12 +5,23 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  WOLVERINE_TAG: "V6.2.2"   # keep in sync with WolverineFx in Directory.Packages.props (tags are V-prefixed)
+  CI_PACKAGE_VERSION: "0.0.0-ci"
+
 jobs:
-  # ---------- Library build + pack ----------
-  build-library:
+  # ---------- Library build + compliance tests + pack ----------
+  library:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Checkout Wolverine source (compliance test harness)
+        uses: actions/checkout@v6
+        with:
+          repository: JasperFx/wolverine
+          ref: ${{ env.WOLVERINE_TAG }}
+          path: external/wolverine
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -18,26 +29,47 @@ jobs:
             9.0.x
             10.0.x
 
-      - name: Build library
-        run: dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release
+      - name: Run library tests (project-refs the Wolverine clone)
+        env:
+          WOLVERINE_SOURCE: ${{ github.workspace }}/external/wolverine
+        run: >
+          dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
+          -c Release -p:UseWolverineSource=true
+          --logger "GitHubActions"
 
-      # NOTE: WolverineFx.ComplianceTests is not yet published to NuGet, so the
-      # test project cannot build in CI. Once that package ships, uncomment below.
-      # - name: Run library tests
-      #   run: dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj -c Release --logger "GitHubActions"
+      - name: Pack (declares the WolverineFx package dependency)
+        run: >
+          dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj
+          -c Release -o ./artifacts
+          -p:UseWolverineSource=false -p:Version=${{ env.CI_PACKAGE_VERSION }}
 
-      - name: Pack
-        run: dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -o ./artifacts
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: ./artifacts/*.nupkg
 
-  # ---------- Demo app build + integration tests ----------
-  build-demo:
+  # ---------- Demo against the freshly packed nupkg ----------
+  demo:
     runs-on: ubuntu-latest
+    needs: library
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
+
+      - name: Download freshly packed nupkg
+        uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: ./artifacts
+
+      - name: Point the demo at the CI package
+        run: |
+          dotnet nuget add source "$GITHUB_WORKSPACE/artifacts" --name local-ci --configfile demo/nuget.config
+          sed -i 's|<PackageVersion Include="Wolverine.MongoDB" Version="[^"]*"|<PackageVersion Include="Wolverine.MongoDB" Version="${{ env.CI_PACKAGE_VERSION }}"|' demo/Directory.Packages.props
 
       - name: Build demo solution
         working-directory: demo
