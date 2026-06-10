@@ -51,10 +51,13 @@ public class outbox_recovery
 
         await store.RecoverOrphanedOutgoingAsync(runtime, CancellationToken.None);
 
-        var after = await store.Outbox.LoadOutgoingAsync(destination);
+        var after = await store.Admin.AllOutgoingAsync();
         var nodeNumber = runtime.DurabilitySettings.AssignedNodeNumber;
         after.Single().OwnerId.ShouldBe(nodeNumber);
         nodeNumber.ShouldNotBe(0);
+
+        // And the recovery feed itself must now be empty: the envelope is owned.
+        (await store.Outbox.LoadOutgoingAsync(destination)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -86,6 +89,6 @@ public class outbox_recovery
         await store.RecoverOrphanedOutgoingAsync(runtime, CancellationToken.None);
 
         // Expired message must be discarded, not reassigned.
-        (await store.Outbox.LoadOutgoingAsync(destination)).Count.ShouldBe(0);
+        (await store.Admin.AllOutgoingAsync()).Count.ShouldBe(0);
     }
 }
