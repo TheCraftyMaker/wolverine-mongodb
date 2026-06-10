@@ -28,7 +28,7 @@ jobs:
         run: |
           sed -i "s|<Version>.*</Version>|<Version>${{ steps.version.outputs.VERSION }}</Version>|" Directory.Build.props
       - name: Create version bump PR
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore: bump version to ${{ steps.version.outputs.VERSION }}"
           branch: version-bump/${{ steps.version.outputs.VERSION }}
