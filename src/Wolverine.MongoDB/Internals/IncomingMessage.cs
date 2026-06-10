@@ -19,6 +19,7 @@ public class IncomingMessage
         Body = envelope.Status == EnvelopeStatus.Handled ? [] : EnvelopeSerializer.Serialize(envelope);
         MessageType = envelope.MessageType!;
         ReceivedAt = envelope.Destination?.ToString();
+        KeepUntil = envelope.KeepUntil;
     }
 
     [BsonId] public string Id { get; set; } = string.Empty;
@@ -55,6 +56,7 @@ public class IncomingMessage
         envelope.Status = Status;
         envelope.Attempts = Attempts;
         envelope.ScheduledTime = ExecutionTime;
+        envelope.KeepUntil = KeepUntil;
         return envelope;
     }
 }

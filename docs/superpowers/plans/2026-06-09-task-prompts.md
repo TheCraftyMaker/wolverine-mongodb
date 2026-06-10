@@ -26,7 +26,7 @@ Stay strictly within Task 5's scope. If the Wolverine 6.2.2 tag does not exist o
 
 ### A2. Tasks 1–4 — the four correctness bugs *(model: Sonnet; four independent sessions, may run in parallel; no ordering between them)*
 
-**Task 1 — outgoing owner filter:**
+**Task 1 — outgoing owner filter:** ✅
 
 ```
 Execute Task 1 ("LoadOutgoingAsync must only return globally-owned envelopes, batch-limited") of docs/superpowers/plans/2026-06-09-solo-hardening.md using the superpowers:executing-plans skill.
@@ -36,7 +36,7 @@ Follow the plan's "Git & PR Workflow" section: branch fix/outgoing-owner-filter 
 Stay strictly within Task 1's scope. If a plan assumption doesn't hold, stop and report rather than improvising.
 ```
 
-**Task 2 — KeepUntil on handled markers:**
+**Task 2 — KeepUntil on handled markers:** ✅
 
 ```
 Execute Task 2 ("Handled markers must carry KeepUntil so the TTL index can expire them") of docs/superpowers/plans/2026-06-09-solo-hardening.md using the superpowers:executing-plans skill.
@@ -56,7 +56,7 @@ Follow the plan's "Git & PR Workflow" section: branch fix/dlq-expiration-opt-in 
 Stay strictly within Task 3's scope. If a plan assumption doesn't hold, stop and report rather than improvising.
 ```
 
-**Task 4 — idempotent dead-letter replay:**
+**Task 4 ✅ — idempotent dead-letter replay:**
 
 ```
 Execute Task 4 ("Make ReplayDeadLettersAsync idempotent and per-document fault-tolerant") of docs/superpowers/plans/2026-06-09-solo-hardening.md using the superpowers:executing-plans skill.
