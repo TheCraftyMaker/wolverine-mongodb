@@ -1,4 +1,5 @@
 using MongoDB.Driver;
+using Wolverine.Persistence.Durability;
 using Wolverine.Runtime;
 using Wolverine.Runtime.Serialization;
 using Wolverine.Runtime.WorkerQueues;
@@ -24,11 +25,32 @@ public partial class MongoDbMessageStore
 
         foreach (var doc in replayable)
         {
+            if (doc.Body is not { Length: > 0 })
+            {
+                // A poison dead letter without a serialized body cannot be replayed.
+                // Unflag it (instead of failing every tick) and leave it queryable.
+                await DeadLetterDocs.UpdateOneAsync(
+                    Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, doc.Id),
+                    Builders<DeadLetterMessage>.Update.Set(x => x.Replayable, false),
+                    cancellationToken: token);
+                continue;
+            }
+
             var envelope = EnvelopeSerializer.Deserialize(doc.Body);
             envelope.Status = EnvelopeStatus.Incoming;
             envelope.OwnerId = MongoConstants.AnyNode;
 
-            await StoreIncomingAsync(envelope);
+            try
+            {
+                await StoreIncomingAsync(envelope);
+            }
+            catch (DuplicateIncomingEnvelopeException)
+            {
+                // A previous pass (or a competing node) already re-inserted this envelope
+                // and crashed before deleting the DLQ doc. Fall through: removing the
+                // DLQ doc below is what converges the replay.
+            }
+
             await DeadLetterDocs.DeleteOneAsync(
                 Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, doc.Id), token);
         }
