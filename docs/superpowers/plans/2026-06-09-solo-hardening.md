@@ -40,7 +40,7 @@ Commit messages end with the standard `Co-Authored-By: Claude Fable 5 <noreply@a
 | 1 | `fix/outgoing-owner-filter` | fix: LoadOutgoingAsync only returns globally-owned envelopes, batch-limited | — | Sonnet |
 | 2 | `fix/handled-keep-until` | fix: handled inbox markers carry KeepUntil so the TTL index expires them | — | Sonnet |
 | 3 | `fix/dlq-expiration-opt-in` | fix: dead letters only expire when DeadLetterQueueExpirationEnabled is set | — | Sonnet |
-| 4 | `fix/dead-letter-replay-idempotent` | fix: dead-letter replay converges after crashes | — | Sonnet |
+| 4 ✅ | `fix/dead-letter-replay-idempotent` | fix: dead-letter replay converges after crashes | — | Sonnet |
 | 5 | `ci/library-tests-and-fresh-nupkg-demo` | ci: run compliance suite against pinned Wolverine; demo consumes fresh nupkg | — | **Fable 5 / Opus** |
 | 6 | `feat/fail-fast-balanced-mode` | feat: fail fast on DurabilityMode.Balanced | — | Sonnet |
 | 7 | `refactor/per-property-bson-dates` | refactor: per-property BSON DateTime representation | — | Sonnet |
@@ -100,7 +100,7 @@ Every RDBMS provider implements this as `WHERE owner_id = 0 AND destination = @d
 - Modify: `src/Wolverine.MongoDB.Tests/outbox_recovery.cs` (assertions use `LoadOutgoingAsync` post-reassignment, which the fix breaks by design)
 - Test: `src/Wolverine.MongoDB.Tests/outbox.cs` (add test)
 
-- [ ] **Step 1: Write the failing test** — add to `src/Wolverine.MongoDB.Tests/outbox.cs`:
+- [x] **Step 1: Write the failing test** — add to `src/Wolverine.MongoDB.Tests/outbox.cs`:
 
 ```csharp
 [Fact]
@@ -127,12 +127,12 @@ public async Task load_outgoing_only_returns_globally_owned_envelopes()
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~load_outgoing_only_returns_globally_owned"`
 Expected: FAIL — `loaded.Count` is 2.
 
-- [ ] **Step 3: Implement the filter + limit** — replace `LoadOutgoingAsync` in `MongoDbMessageStore.Outbox.cs`:
+- [x] **Step 3: Implement the filter + limit** — replace `LoadOutgoingAsync` in `MongoDbMessageStore.Outbox.cs`:
 
 ```csharp
 public async Task<IReadOnlyList<Envelope>> LoadOutgoingAsync(Uri destination)
@@ -151,7 +151,7 @@ public async Task<IReadOnlyList<Envelope>> LoadOutgoingAsync(Uri destination)
 }
 ```
 
-- [ ] **Step 4: Amend `outbox_recovery.cs`** — both existing tests assert recovery results through `LoadOutgoingAsync`, which now (correctly) returns nothing once the envelope is owned. Switch the post-recovery assertions to `Admin.AllOutgoingAsync()`:
+- [x] **Step 4: Amend `outbox_recovery.cs`** — both existing tests assert recovery results through `LoadOutgoingAsync`, which now (correctly) returns nothing once the envelope is owned. Switch the post-recovery assertions to `Admin.AllOutgoingAsync()`:
 
 In `recovers_orphaned_outgoing_by_reassigning_to_this_node`, replace
 
@@ -180,12 +180,12 @@ In `recovery_discards_expired_outgoing`, replace the final assertion with:
 (await store.Admin.AllOutgoingAsync()).Count.ShouldBe(0);
 ```
 
-- [ ] **Step 5: Run the full outbox test set**
+- [x] **Step 5: Run the full outbox test set**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~outbox"`
 Expected: PASS (new test + both amended recovery tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 rtk git add src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Outbox.cs src/Wolverine.MongoDB.Tests/outbox.cs src/Wolverine.MongoDB.Tests/outbox_recovery.cs
@@ -203,7 +203,7 @@ rtk git commit -m "fix: LoadOutgoingAsync only returns globally-owned envelopes,
 - Test: `src/Wolverine.MongoDB.Tests/inbox.cs` (add test)
 - Modify: `src/Wolverine.MongoDB.Tests/eager_idempotency_transaction.cs` (add end-of-test assertion)
 
-- [ ] **Step 1: Write the failing test** — add to `src/Wolverine.MongoDB.Tests/inbox.cs`:
+- [x] **Step 1: Write the failing test** — add to `src/Wolverine.MongoDB.Tests/inbox.cs`:
 
 ```csharp
 [Fact]
@@ -234,12 +234,12 @@ public async Task handled_marker_stored_via_store_incoming_carries_keep_until()
 
 (Requires `using MongoDB.Driver;` and `using Wolverine.MongoDB.Internals;` — already present in `inbox.cs`.)
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~handled_marker_stored_via_store_incoming_carries_keep_until"`
 Expected: FAIL — `doc.KeepUntil` is null.
 
-- [ ] **Step 3: Map `KeepUntil` in the constructor and `Read()`** — in `IncomingMessage.cs`, add to the envelope constructor (after the `ReceivedAt` assignment):
+- [x] **Step 3: Map `KeepUntil` in the constructor and `Read()`** — in `IncomingMessage.cs`, add to the envelope constructor (after the `ReceivedAt` assignment):
 
 ```csharp
 KeepUntil = envelope.KeepUntil;
@@ -251,12 +251,12 @@ and in `Read()`, after `envelope.ScheduledTime = ExecutionTime;` add:
 envelope.KeepUntil = KeepUntil;
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~handled_marker_stored_via_store_incoming_carries_keep_until"`
 Expected: PASS
 
-- [ ] **Step 5: Guard the eager path too** — in `eager_idempotency_transaction.cs`, after the existing `stored.ShouldNotBeNull();` at the end of the test, add:
+- [x] **Step 5: Guard the eager path too** — in `eager_idempotency_transaction.cs`, after the existing `stored.ShouldNotBeNull();` at the end of the test, add:
 
 ```csharp
 // Regression guard: the handled marker persisted by the eager idempotency check
@@ -270,7 +270,7 @@ var marker = await incomingCollection
 marker.KeepUntil.ShouldNotBeNull();
 ```
 
-- [ ] **Step 6: Run the full inbox + eager suite, then commit**
+- [x] **Step 6: Run the full inbox + eager suite, then commit**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~inbox|FullyQualifiedName~eager_idempotency"`
 Expected: PASS
@@ -403,7 +403,7 @@ A crash between `StoreIncomingAsync` and the DLQ delete leaves a state where eve
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs:19-35`
 - Test: `src/Wolverine.MongoDB.Tests/dead_letter_replay.cs` (add tests)
 
-- [ ] **Step 1: Write the failing tests** — add to `src/Wolverine.MongoDB.Tests/dead_letter_replay.cs`:
+- [x] **Step 1: Write the failing tests** — add to `src/Wolverine.MongoDB.Tests/dead_letter_replay.cs`:
 
 ```csharp
 [Fact]
@@ -469,12 +469,12 @@ public async Task replay_skips_and_unflags_bodyless_poison_dead_letters()
 
 (Required usings in `dead_letter_replay.cs`: `MongoDB.Driver`, `Wolverine.MongoDB.Internals`, `Wolverine.Persistence.Durability.DeadLetterManagement`, `Wolverine.ComplianceTests` — add any missing.)
 
-- [ ] **Step 2: Run to verify both fail**
+- [x] **Step 2: Run to verify both fail**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~dead_letter_replay"`
 Expected: first new test FAILS with `DuplicateIncomingEnvelopeException`; second FAILS on deserialize.
 
-- [ ] **Step 3: Rewrite `ReplayDeadLettersAsync`** in `MongoDbMessageStore.Durability.cs`:
+- [x] **Step 3: Rewrite `ReplayDeadLettersAsync`** in `MongoDbMessageStore.Durability.cs`:
 
 ```csharp
 internal async Task ReplayDeadLettersAsync(CancellationToken token)
@@ -519,12 +519,12 @@ internal async Task ReplayDeadLettersAsync(CancellationToken token)
 
 Add `using Wolverine.Persistence.Durability;` to the file if not already present (for `DuplicateIncomingEnvelopeException`).
 
-- [ ] **Step 4: Run the replay suite**
+- [x] **Step 4: Run the replay suite**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~dead_letter_replay"`
 Expected: PASS (new tests + the pre-existing replay test).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 rtk git add src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs src/Wolverine.MongoDB.Tests/dead_letter_replay.cs
