@@ -14,7 +14,7 @@ Conventions baked into every prompt:
 
 ## Phase A — Solo Hardening (`docs/superpowers/plans/2026-06-09-solo-hardening.md`)
 
-### A1. Task 5 — CI: library tests + fresh-nupkg demo  *(model: Fable 5 or Opus — run FIRST so all later PRs get CI coverage)*
+### A1. Task 5 — CI: library tests + fresh-nupkg demo  *(model: Fable 5 or Opus — run FIRST so all later PRs get CI coverage)* ✅
 
 ```
 Execute Task 5 ("CI — run the library suite against a pinned Wolverine clone; run the demo against the freshly packed nupkg") of docs/superpowers/plans/2026-06-09-solo-hardening.md using the superpowers:executing-plans skill.
@@ -56,7 +56,7 @@ Follow the plan's "Git & PR Workflow" section: branch fix/dlq-expiration-opt-in 
 Stay strictly within Task 3's scope. If a plan assumption doesn't hold, stop and report rather than improvising.
 ```
 
-**Task 4 ✅ — idempotent dead-letter replay:**
+**Task 4 — idempotent dead-letter replay:** ✅
 
 ```
 Execute Task 4 ("Make ReplayDeadLettersAsync idempotent and per-document fault-tolerant") of docs/superpowers/plans/2026-06-09-solo-hardening.md using the superpowers:executing-plans skill.
