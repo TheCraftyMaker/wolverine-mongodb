@@ -136,8 +136,13 @@ public partial class MongoDbMessageStore : IMessageInbox
             dlq = DeadLetterMessage.ForUnserializableEnvelope(envelope, exception, serializeFailure);
         }
 
-        dlq.ExpirationTime = envelope.DeliverBy ??
-                             DateTimeOffset.UtcNow.Add(_options.Durability.DeadLetterQueueExpiration);
+        // Wolverine semantics: dead letters are retained forever unless the application
+        // explicitly opts into expiration. The TTL index skips documents without the field.
+        if (_options.Durability.DeadLetterQueueExpirationEnabled)
+        {
+            dlq.ExpirationTime = envelope.DeliverBy ??
+                                 DateTimeOffset.UtcNow.Add(_options.Durability.DeadLetterQueueExpiration);
+        }
 
         var id = InboxIdentity(envelope);
 

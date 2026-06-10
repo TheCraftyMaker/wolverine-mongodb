@@ -46,7 +46,7 @@ Follow the plan's "Git & PR Workflow" section: branch fix/handled-keep-until fro
 Stay strictly within Task 2's scope. If a plan assumption doesn't hold, stop and report rather than improvising.
 ```
 
-**Task 3 — DLQ expiration opt-in:**
+**Task 3 — DLQ expiration opt-in:** ✅
 
 ```
 Execute Task 3 ("Dead-letter expiration must honor DeadLetterQueueExpirationEnabled") of docs/superpowers/plans/2026-06-09-solo-hardening.md using the superpowers:executing-plans skill.
