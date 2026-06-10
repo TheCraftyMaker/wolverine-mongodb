@@ -58,7 +58,9 @@ public class DeadLetterMessage
     [BsonElement("exceptionMessage")] public string? ExceptionMessage { get; set; }
     [BsonElement("replayable")] public bool Replayable { get; set; }
     [BsonElement("body")] public byte[] Body { get; set; } = [];
-    [BsonElement("expirationTime")] public DateTimeOffset ExpirationTime { get; set; }
+    [BsonElement("expirationTime")]
+    [BsonIgnoreIfNull]
+    public DateTimeOffset? ExpirationTime { get; set; }
 
     public DeadLetterEnvelope ToEnvelope()
     {
