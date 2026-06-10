@@ -7,8 +7,15 @@ public partial class MongoDbMessageStore : IMessageOutbox
 {
     public async Task<IReadOnlyList<Envelope>> LoadOutgoingAsync(Uri destination)
     {
+        // Mirrors the RDBMS providers: only globally-owned (owner 0) envelopes are
+        // recovery candidates, capped at RecoveryBatchSize. Envelopes owned by a live
+        // node are in flight and must not be re-handed to a sending agent.
+        var b = Builders<OutgoingMessage>.Filter;
         var docs = await Outgoing
-            .Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Destination, destination.ToString()))
+            .Find(b.And(
+                b.Eq(x => x.OwnerId, MongoConstants.AnyNode),
+                b.Eq(x => x.Destination, destination.ToString())))
+            .Limit(_options.Durability.RecoveryBatchSize)
             .ToListAsync();
         return docs.Select(x => x.Read()).ToList();
     }
