@@ -25,7 +25,14 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         _client = client;
         _databaseName = databaseName;
         _options = options;
-        _database = client.GetDatabase(databaseName);
+        // The message store's writes ARE the durability guarantee: pin majority +
+        // journaled acknowledgement and majority reads regardless of how the consumer
+        // configured their MongoClient. The app-facing IMongoDatabase registered by
+        // UseMongoDbPersistence is intentionally NOT pinned — domain write concerns
+        // belong to the application.
+        _database = client.GetDatabase(databaseName)
+            .WithWriteConcern(WriteConcern.WMajority.With(journal: true))
+            .WithReadConcern(ReadConcern.Majority);
 
         _inboxIdentity = options.Durability.MessageIdentity == MessageIdentity.IdOnly
             ? e => e.Id.ToString()
