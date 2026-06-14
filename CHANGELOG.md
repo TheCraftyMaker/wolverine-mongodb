@@ -61,6 +61,12 @@ The major version tracks Wolverine's major version.
 - **Server-side aggregation for `SummarizeAllAsync` / `SummarizeAsync`.** Dead-letter
   and scheduled-message summary methods now use `$group` pipelines instead of
   loading all documents into the application process.
+- **Release automation: `release` agent + GitHub Releases.** A
+  `.claude/agents/release.md` agent proposes the next version, prepares a CHANGELOG +
+  version-bump PR (gated on human approval and merge), then tags, monitors the publish
+  workflow, and verifies the NuGet push and the GitHub Release. `publish.yml` now
+  creates a GitHub Release from the released version's `CHANGELOG.md` section, extracted
+  by `.github/scripts/extract-changelog.sh`.
 
 ### Changed
 
@@ -85,6 +91,10 @@ Previously, a consumer who forgot to set `Solo` got a subtly broken cluster.
   with `[BsonRepresentation(BsonType.DateTime)]`. The `MongoSerializerRegistration`
   class and its `[ModuleInitializer]` call have been removed. The library no longer
   mutates the host application's BSON registry.
+- **Release flow bumps version + CHANGELOG before tagging.** `Directory.Build.props`
+  and the `CHANGELOG.md` version section are now set in the release PR on `main`
+  before the tag is pushed, so the tagged commit is self-consistent. The previous
+  post-publish auto-bump PR has been removed.
 
 ## [0.1.0-beta.2] - 2026-06-08
 
