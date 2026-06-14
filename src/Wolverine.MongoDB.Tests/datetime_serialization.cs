@@ -96,7 +96,8 @@ public class datetime_serialization
         raw["executionTime"].BsonType.ShouldBe(BsonType.DateTime);
 
         // A $lte UtcNow scan must match the past-scheduled message.
-        var dueFilter = Builders<BsonDocument>.Filter.Lte("executionTime", DateTimeOffset.UtcNow);
+        // DateTime maps natively to BSON Date; no global serializer required for raw filters.
+        var dueFilter = Builders<BsonDocument>.Filter.Lte("executionTime", DateTime.UtcNow);
         var dueCount = await RawIncoming.CountDocumentsAsync(dueFilter);
         dueCount.ShouldBe(1);
     }

@@ -24,7 +24,7 @@ public class OutgoingMessage
     public Guid Id { get; set; }
     [BsonElement("ownerId")] public int OwnerId { get; set; }
     [BsonElement("destination")] public string? Destination { get; set; }
-    [BsonElement("deliverBy")] public DateTimeOffset? DeliverBy { get; set; }
+    [BsonElement("deliverBy")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset? DeliverBy { get; set; }
     [BsonElement("body")] public byte[] Body { get; set; } = [];
     [BsonElement("attempts")] public int Attempts { get; set; }
     [BsonElement("messageType")] public string MessageType { get; set; } = string.Empty;

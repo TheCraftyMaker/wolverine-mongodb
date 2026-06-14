@@ -51,8 +51,8 @@ public class DeadLetterMessage
     public Guid Id { get; set; }
     [BsonElement("messageType")] public string? MessageType { get; set; }
     [BsonElement("receivedAt")] public string? ReceivedAt { get; set; }
-    [BsonElement("sentAt")] public DateTimeOffset? SentAt { get; set; }
-    [BsonElement("scheduledTime")] public DateTimeOffset? ScheduledTime { get; set; }
+    [BsonElement("sentAt")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset? SentAt { get; set; }
+    [BsonElement("scheduledTime")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset? ScheduledTime { get; set; }
     [BsonElement("source")] public string? Source { get; set; }
     [BsonElement("exceptionType")] public string? ExceptionType { get; set; }
     [BsonElement("exceptionMessage")] public string? ExceptionMessage { get; set; }
@@ -60,6 +60,7 @@ public class DeadLetterMessage
     [BsonElement("body")] public byte[] Body { get; set; } = [];
     [BsonElement("expirationTime")]
     [BsonIgnoreIfNull]
+    [BsonRepresentation(BsonType.DateTime)]
     public DateTimeOffset? ExpirationTime { get; set; }
 
     public DeadLetterEnvelope ToEnvelope()

@@ -26,12 +26,12 @@ public class IncomingMessage
     [BsonElement("envelopeId")] [BsonGuidRepresentation(GuidRepresentation.Standard)] public Guid EnvelopeId { get; set; }
     [BsonElement("status")] [BsonRepresentation(BsonType.String)] public EnvelopeStatus Status { get; set; } = EnvelopeStatus.Incoming;
     [BsonElement("ownerId")] public int OwnerId { get; set; }
-    [BsonElement("executionTime")] public DateTimeOffset? ExecutionTime { get; set; }
+    [BsonElement("executionTime")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset? ExecutionTime { get; set; }
     [BsonElement("attempts")] public int Attempts { get; set; }
     [BsonElement("body")] public byte[] Body { get; set; } = [];
     [BsonElement("messageType")] public string MessageType { get; set; } = string.Empty;
     [BsonElement("receivedAt")] public string? ReceivedAt { get; set; }
-    [BsonElement("keepUntil")] public DateTimeOffset? KeepUntil { get; set; }
+    [BsonElement("keepUntil")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset? KeepUntil { get; set; }
 
     public Envelope Read()
     {

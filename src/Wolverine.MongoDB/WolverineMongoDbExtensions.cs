@@ -40,10 +40,6 @@ public static class WolverineMongoDbExtensions
     /// <returns></returns>
     public static WolverineOptions UseMongoDbPersistence(this WolverineOptions options, string databaseName)
     {
-        // Idempotent (guarded); ensures the UTC DateTimeOffset serializer is registered for
-        // host usage even if module-initializer timing ever differs.
-        MongoSerializerRegistration.Register();
-
         options.Services.AddSingleton<IMessageStore>(sp =>
         {
             var client = sp.GetRequiredService<IMongoClient>();
