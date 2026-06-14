@@ -36,7 +36,8 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
         // Handlers that declare the session (or the unit-of-work helper, Task 9) as a
         // method parameter explicitly opt into the transaction.
         if (chain.HandlerCalls().Any(call => call.Method.GetParameters().Any(p =>
-                p.ParameterType == typeof(IClientSessionHandle))))
+                p.ParameterType == typeof(IClientSessionHandle)
+                || p.ParameterType == typeof(MongoDbUnitOfWork))))
         {
             return true;
         }

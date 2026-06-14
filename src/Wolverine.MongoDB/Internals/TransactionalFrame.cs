@@ -24,6 +24,7 @@ internal class TransactionalFrame : AsyncFrame, IFlushesMessages
     private Variable? _cancellation;
     private Variable? _client;
     private Variable? _context;
+    private Variable? _database;
 
     public TransactionalFrame(IChain chain)
     {
@@ -32,9 +33,15 @@ internal class TransactionalFrame : AsyncFrame, IFlushesMessages
         // The MongoDB session this frame opens. Downstream frames (the commit
         // postprocessor) discover it through this created variable.
         Session = new Variable(typeof(IClientSessionHandle), "mongoSession", this);
+
+        // The session-bound unit of work, constructed from the open session +
+        // database. Handlers that take a MongoDbUnitOfWork parameter resolve it here.
+        UnitOfWork = new Variable(typeof(MongoDbUnitOfWork), "mongoUnitOfWork", this);
     }
 
     public Variable Session { get; }
+
+    public Variable UnitOfWork { get; }
 
     public override IEnumerable<Variable> FindVariables(IMethodVariables chain)
     {
@@ -44,6 +51,11 @@ internal class TransactionalFrame : AsyncFrame, IFlushesMessages
         // IMongoClient is registered by UseMongoDbPersistence
         _client = chain.FindVariable(typeof(IMongoClient));
         yield return _client;
+
+        // IMongoDatabase is registered by UseMongoDbPersistence; the unit of work is
+        // built from it together with the session this frame opens.
+        _database = chain.FindVariable(typeof(IMongoDatabase));
+        yield return _database;
 
         _context = chain.TryFindVariable(typeof(IMessageContext), VariableSource.NotServices);
 
@@ -60,6 +72,10 @@ internal class TransactionalFrame : AsyncFrame, IFlushesMessages
         writer.Write(
             $"using var {Session.Usage} = await {_client!.Usage}.{nameof(IMongoClient.StartSessionAsync)}(cancellationToken: {_cancellation!.Usage}).ConfigureAwait(false);");
         writer.Write($"{Session.Usage}.{nameof(IClientSessionHandle.StartTransaction)}();");
+
+        writer.WriteComment("Session-bound unit of work for handlers that take MongoDbUnitOfWork");
+        writer.Write(
+            $"var {UnitOfWork.Usage} = new {typeof(MongoDbUnitOfWork).FullNameInCode()}({Session.Usage}, {_database!.Usage});");
 
         if (_context != null)
         {
