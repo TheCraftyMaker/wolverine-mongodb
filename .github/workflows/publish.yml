@@ -28,13 +28,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          notes="$(bash .github/scripts/extract-changelog.sh "${{ steps.version.outputs.VERSION }}")"
+          if ! notes="$(bash .github/scripts/extract-changelog.sh "${{ steps.version.outputs.VERSION }}")"; then
+            echo "::error::Could not extract CHANGELOG notes for ${{ steps.version.outputs.VERSION }}" >&2
+            exit 1
+          fi
           prerelease=""
           case "${{ steps.version.outputs.VERSION }}" in
             *-*) prerelease="--prerelease" ;;
           esac
-          gh release create "${GITHUB_REF_NAME}" \
-            ./artifacts/*.nupkg \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "$notes" \
-            $prerelease
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; updating it."
+            gh release edit "${GITHUB_REF_NAME}" --notes "$notes" $prerelease
+            gh release upload "${GITHUB_REF_NAME}" ./artifacts/*.nupkg --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              ./artifacts/*.nupkg \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "$notes" \
+              $prerelease
+          fi
