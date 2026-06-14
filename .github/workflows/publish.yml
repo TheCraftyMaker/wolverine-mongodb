@@ -30,6 +30,7 @@ jobs:
       - name: Create version bump PR
         uses: peter-evans/create-pull-request@v8
         with:
+          base: main
           commit-message: "chore: bump version to ${{ steps.version.outputs.VERSION }}"
           branch: version-bump/${{ steps.version.outputs.VERSION }}
           title: "chore: bump version to ${{ steps.version.outputs.VERSION }}"
