@@ -14,6 +14,7 @@ public class scheduled_job_compliance : ScheduledJobCompliance
 
     public override void ConfigurePersistence(WolverineOptions opts)
     {
+        opts.Durability.Mode = DurabilityMode.Solo;
         opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
         opts.UseMongoDbPersistence(AppFixture.DatabaseName);
         opts.Transports.NodeControlEndpoint =

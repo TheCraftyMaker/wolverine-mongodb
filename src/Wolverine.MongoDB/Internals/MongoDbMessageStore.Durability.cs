@@ -88,8 +88,11 @@ public partial class MongoDbMessageStore
             // still Scheduled. The Status==Scheduled guard means a competing node (or a prior
             // pass) cannot also claim it, so a due message is published exactly once. If the
             // claim returns null another node already took it, so skip. A crash after the flip
-            // but before enqueue leaves the doc Incoming owned by this node, which the incoming
-            // orphan-recovery loop re-picks — it is never silently stranded.
+            // but before enqueue leaves the doc Incoming owned by this node's number. The
+            // orphan-recovery loop only matches OwnerId == AnyNode, so the doc is NOT re-picked
+            // while owned; it is rescued at the next Solo-mode startup, which releases all
+            // ownership (NodeAgentController.StartLocally). Balanced-mode recovery of this
+            // window is part of the multinode plan.
             var claimed = await Incoming.FindOneAndUpdateAsync(
                 Builders<IncomingMessage>.Filter.And(
                     Builders<IncomingMessage>.Filter.Eq(x => x.Id, message.Id),

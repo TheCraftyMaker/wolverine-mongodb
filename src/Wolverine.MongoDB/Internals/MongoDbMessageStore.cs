@@ -55,15 +55,34 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
 
     internal string InboxIdentity(Envelope envelope) => _inboxIdentity(envelope);
 
-    public void Initialize(IWolverineRuntime runtime) { }
+    public void Initialize(IWolverineRuntime runtime) => AssertSupportedDurabilityMode(runtime);
 
     public DatabaseDescriptor Describe() => new(this) { Engine = "mongodb", DatabaseName = _databaseName };
 
     public Task DrainAsync() => Task.CompletedTask;
 
-    public IAgent StartScheduledJobs(IWolverineRuntime runtime) => BuildAgent(runtime);
+    public IAgent StartScheduledJobs(IWolverineRuntime runtime)
+    {
+        AssertSupportedDurabilityMode(runtime);
+        return BuildAgent(runtime);
+    }
 
-    public IAgent BuildAgent(IWolverineRuntime runtime) => new MongoDbDurabilityAgent(runtime, this);
+    public IAgent BuildAgent(IWolverineRuntime runtime)
+    {
+        AssertSupportedDurabilityMode(runtime);
+        return new MongoDbDurabilityAgent(runtime, this);
+    }
+
+    private static void AssertSupportedDurabilityMode(IWolverineRuntime runtime)
+    {
+        if (runtime.Options.Durability.Mode == DurabilityMode.Balanced)
+        {
+            throw new InvalidOperationException(
+                "Wolverine.MongoDB currently supports single-node durability only. " +
+                "Set opts.Durability.Mode = DurabilityMode.Solo. " +
+                "Multi-node (Balanced) support is tracked in FOLLOWUPS.md.");
+        }
+    }
 
     public IAgentFamily? BuildAgentFamily(IWolverineRuntime runtime) => null;
 
