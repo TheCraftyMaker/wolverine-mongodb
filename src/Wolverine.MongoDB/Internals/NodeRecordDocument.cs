@@ -9,7 +9,7 @@ public class NodeRecordDocument
     [BsonId] public string Id { get; set; } = Guid.NewGuid().ToString();
     [BsonElement("nodeNumber")] public int NodeNumber { get; set; }
     [BsonElement("recordType")] [BsonRepresentation(BsonType.String)] public NodeRecordType RecordType { get; set; }
-    [BsonElement("timestamp")] public DateTimeOffset Timestamp { get; set; }
+    [BsonElement("timestamp")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset Timestamp { get; set; }
     [BsonElement("description")] public string Description { get; set; } = string.Empty;
     [BsonElement("serviceName")] public string ServiceName { get; set; } = string.Empty;
 

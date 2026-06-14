@@ -10,7 +10,7 @@ public class NodeDocument
     [BsonElement("assignedNodeNumber")] public int AssignedNodeNumber { get; set; }
     [BsonElement("description")] public string Description { get; set; } = string.Empty;
     [BsonElement("controlUri")] public string? ControlUri { get; set; }
-    [BsonElement("started")] public DateTimeOffset Started { get; set; }
+    [BsonElement("started")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset Started { get; set; }
     [BsonElement("lastHealthCheck")] public DateTime LastHealthCheck { get; set; }
     [BsonElement("capabilities")] public List<string> Capabilities { get; set; } = new();
     [BsonElement("version")] public string? Version { get; set; }
