@@ -210,7 +210,7 @@ rtk git commit -m "fix: LoadOutgoingAsync only returns globally-owned envelopes,
 
 ---
 
-### Task 2: Handled markers must carry `KeepUntil` so the TTL index can expire them
+### Task 2: Handled markers must carry `KeepUntil` so the TTL index can expire them ✅
 
 `IncomingMessage`'s constructor drops `envelope.KeepUntil` (`DateTimeOffset?`). Handled markers stored through `StoreIncomingAsync` (Wolverine core's lazy path) and `MongoDbEnvelopeTransaction.PersistIncomingAsync` (eager path) therefore never expire → unbounded `wolverine_incoming_envelopes` growth.
 
