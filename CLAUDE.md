@@ -116,21 +116,26 @@ end-to-end integration tests against it, so every PR exercises the freshly built
 
 ## Versioning & Release
 
-- Version in `Directory.Build.props` (kept in sync via auto-bump PR after publish)
+- Version in `Directory.Build.props` (set in the gate-2 release PR before tagging)
 - Major version tracks Wolverine: `0.1.x` ↔ `WolverineFx 6.x`
 - The publish workflow extracts version from the git tag (`-p:Version`), so the tag is the source of truth
 
-**Release flow:**
-1. Merge your branch into main (via PR or direct push)
-2. Tag main from any branch:
-   ```bash
-   git tag v0.1.0-beta.3 origin/main
-   git push origin v0.1.0-beta.3
-   ```
-3. The `publish.yml` workflow triggers, packs with the tag version, and pushes to NuGet
-4. A PR is auto-created to bump `Directory.Build.props` to match
+**Release flow (via the `release` agent):**
+1. Invoke the release agent with intent, e.g. "cut the next beta" or "release 0.1.0-beta.6".
+2. Approve the proposed version (gate 1).
+3. Review and merge the CHANGELOG + version-bump PR it opens (gate 2).
+4. The agent tags `main`, the `publish.yml` workflow packs + pushes to NuGet and
+   creates the GitHub Release from the CHANGELOG section, and the agent verifies
+   NuGet + the GitHub Release before reporting.
 
-⚠️ **Always tag a commit on main** — the workflow runs the `publish.yml` from the tagged commit, so that commit must contain the latest workflow file.
+The **git tag is the version source of truth** for the pack. `Directory.Build.props`
+is bumped in the gate-2 PR *before* tagging, so the tagged commit already matches —
+there is no post-publish auto-bump PR.
+
+Day-to-day, add notes under `## [Unreleased]` in `CHANGELOG.md` as you merge work.
+
+⚠️ **Always tag a commit on main** — the workflow runs from the tagged commit, so
+that commit must contain the latest workflow file and the matching CHANGELOG section.
 
 ---
 
