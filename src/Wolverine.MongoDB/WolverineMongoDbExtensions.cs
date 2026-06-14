@@ -20,19 +20,22 @@ public static class WolverineMongoDbExtensions
     /// transaction" guarantee only holds when the handler enlists its own MongoDB writes in
     /// the Wolverine-managed transaction. Wolverine opens an <see cref="IClientSessionHandle"/>
     /// for the handler and persists outgoing/inbox envelopes on that session; for a domain
-    /// write to commit atomically with those envelopes, the handler MUST accept the generated
-    /// <see cref="IClientSessionHandle"/> as a parameter and pass it to every MongoDB write it
-    /// performs (for example <c>collection.InsertOneAsync(session, doc)</c>).
+    /// write to commit atomically with those envelopes, every write must run on that session.
+    /// </para>
+    /// <para>
+    /// The recommended handler write surface is <see cref="MongoDbUnitOfWork"/>: accept it as a
+    /// handler parameter and the generated frame threads the active
+    /// <see cref="IClientSessionHandle"/> into every write performed through
+    /// <see cref="MongoDbUnitOfWork.Collection{T}"/>, making it impossible to forget the session.
+    /// The raw <see cref="IClientSessionHandle"/> parameter pattern remains valid for
+    /// repository-based handlers: accept the generated session and pass it to every MongoDB
+    /// write you perform (for example <c>collection.InsertOneAsync(session, doc)</c>).
     /// </para>
     /// <para>
     /// The <see cref="IMongoDatabase"/> registered by this method does NOT auto-enlist in the
     /// transaction. A handler that resolves the database (or a collection) and writes WITHOUT
     /// the session writes outside the transaction, so its domain write is NOT atomic with the
     /// outbox and can be lost or duplicated on failure.
-    /// </para>
-    /// <para>
-    /// A session-bound write helper that removes the need to thread the session manually is a
-    /// planned future enhancement (follow-up).
     /// </para>
     /// </remarks>
     /// <param name="options"></param>
