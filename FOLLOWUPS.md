@@ -12,14 +12,6 @@ the first public release.
   `IMessageStoreAdmin.RebuildAsync`/`ClearAllAsync` is the full reset and the
   node-level one is intentionally narrow).
 
-- **Missing `EnvelopeId` index (perf).** `wolverine_incoming_envelopes` has no
-  index on `EnvelopeId`; scheduled/dead-letter queries that filter by envelope id
-  do a scan. Add an index if profiling shows it matters.
-
-- **Unbounded `wolverine_node_records`.** Node-event records grow without bound.
-  Add a TTL index or implement the `DeleteOldNodeRecordsAsync(int retainCount)`
-  override (it currently uses the interface default no-op).
-
 - **Node-number allocation.** The counter is monotonically increasing and never
   reuses freed slots. A lowest-free-slot reuse strategy would keep node numbers
   compact across restarts.
@@ -39,25 +31,23 @@ the first public release.
   remain out of scope for 0.1.0. The `leadership_election_compliance` suite is
   compile-gated behind `#if RUN_MULTINODE`; the single-node leader-lock facts pass,
   multi-node balancing facts are flaky (deferred), mirroring how Cosmos marks its
-  own as `[Flaky]`.
+  own as `[Flaky]`. Tracked in `docs/superpowers/plans/2026-06-09-multinode-support.md`.
 
-## Surfaced during the hardening pass
+- **Demo app has no `MongoDbUnitOfWork` example.** The demo uses the repository
+  pattern with explicit `IClientSessionHandle` threading, which is the fuller
+  production example. Add a second handler (or a variant endpoint) that accepts
+  `MongoDbUnitOfWork` directly so consumers can compare both patterns side by side.
 
-- **Process-wide `DateTimeOffset` serializer.** The fix for TTL/range/ordering
-  registers a `DateTimeOffsetSerializer(BsonType.DateTime)` globally (via a
-  `[ModuleInitializer]`, guarded against double-registration). This mutates the
-  process-wide BSON registry: if the host app or another library in the same
-  process persists `DateTimeOffset` expecting the driver's default
-  `[ticks, offset]` array representation, this changes their format too. Consider
-  scoping the representation to this library's document types via class maps /
-  a convention pack instead of a global registration.
+- **Old single-field indexes not dropped on existing deployments.** The hardening
+  pass replaced single-field `executionTime` and outgoing `ownerId` indexes with
+  compound alternatives. Existing deployments keep the old indexes harmlessly (pre-1.0
+  beta; no migration planned). Add an explicit index migration step before 1.0 if
+  needed.
 
-- **Session-bound write helper for domain-write atomicity.** The
-  "domain write + outbox write in one transaction" guarantee only holds if the
-  handler accepts the generated `IClientSessionHandle` and threads it into its own
-  MongoDB writes; the registered `IMongoDatabase` does not auto-enlist. A
-  session-bound write helper (or an auto-enlisting `IMongoDatabase` wrapper) would
-  make this ergonomic and less error-prone. Documented in README/CONTRIBUTING.
+- **`DeleteOldNodeRecordsAsync` override not implemented.** The TTL index on
+  `wolverine_node_records` (added in the hardening pass) handles automatic expiry
+  at 14 days. The `DeleteOldNodeRecordsAsync(int retainCount)` interface method
+  still uses the no-op default. Implement if count-based pruning is needed.
 
 ## Untested-but-inspected paths (add deterministic coverage later)
 

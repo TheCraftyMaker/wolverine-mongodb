@@ -8,7 +8,7 @@ CQRS order-management API demonstrating `Wolverine.MongoDB` with RabbitMQ. Write
 **Message bus:** Wolverine 6.x  
 **Persistence:** MongoDB (replica set required)  
 **Transport:** RabbitMQ  
-**Outbox:** `Wolverine.MongoDB` (from nuget.org)
+**Outbox:** `Wolverine.MongoDB` (consumed from the CI-packed nupkg in CI; from nuget.org for local dev)
 
 ---
 
@@ -26,7 +26,7 @@ demo/
     OrderDemo.IntegrationTests/ ← Testcontainers-based end-to-end tests
   docker-compose.yml            ← MongoDB replica set + RabbitMQ
   Directory.Packages.props      ← Central package versions (independent from root)
-  nuget.config                  ← Points to nuget.org
+  nuget.config                  ← Points to nuget.org (local-ci source added by CI)
 ```
 
 ---
@@ -52,14 +52,16 @@ HTTP POST /orders
 ## Key Wolverine Configuration (Program.cs)
 
 - `opts.UseMongoDbPersistence(databaseName)` — registers MongoDB outbox/inbox
-- `opts.Durability.Mode = DurabilityMode.Solo` — single-node (no cluster coordination)
+- `opts.Durability.Mode = DurabilityMode.Solo` — single-node (required; startup throws on Balanced)
 - `opts.Policies.AutoApplyTransactions()` — auto-wraps handlers using `IMongoDatabase` in a transaction
 - `.UseDurableInbox()` on the projection queue — inbox persistence for at-least-once delivery
 - `opts.PublishMessage<T>().ToRabbitExchange(...)` — outbox-backed publish routing
 
 ## Transaction Atomicity Pattern
 
-Handlers accept `IClientSessionHandle` (injected by Wolverine's generated frame). All MongoDB writes must use this session to be atomic with the outbox:
+The demo uses the **repository pattern** with explicit `IClientSessionHandle` threading.
+Handlers accept `IClientSessionHandle` (injected by Wolverine's generated frame) and pass it
+to repository methods so all MongoDB writes are scoped to the same transaction:
 
 ```csharp
 public static async Task<AppEvent> Handle(Command cmd, IClientSessionHandle session, IOrderRepository repo, ...)
@@ -71,6 +73,12 @@ public static async Task<AppEvent> Handle(Command cmd, IClientSessionHandle sess
 ```
 
 Repositories accept `IClientSessionHandle` on all mutating methods. Read methods don't need it.
+
+**Alternative — `MongoDbUnitOfWork`:** for handlers that write directly to collections without
+a repository layer, the library provides `MongoDbUnitOfWork` as a handler parameter. It
+threads the session automatically so it cannot be forgotten. The demo does not use it (the
+repository pattern is the fuller example), but it is documented in the library
+[README](../README.md#domain-write-atomicity).
 
 ---
 
@@ -111,4 +119,8 @@ Test classes:
 
 ## Dependencies
 
-References `Wolverine.MongoDB` from nuget.org (version pinned in `Directory.Packages.props`). This is a separate solution from the library — no project reference to `src/Wolverine.MongoDB`.
+References `Wolverine.MongoDB` from nuget.org for local development (version pinned in
+`Directory.Packages.props`). In CI, the `demo` job downloads the nupkg packed from the
+same commit (`0.0.0-ci`) and adds it as a local NuGet source, so the integration tests
+always exercise the freshly built library rather than a previously published version. This
+is a separate solution from the library — no project reference to `src/Wolverine.MongoDB`.
