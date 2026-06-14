@@ -33,10 +33,22 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
 
     public bool CanApply(IChain chain, IServiceContainer container)
     {
+        // Handlers that declare the session (or the unit-of-work helper, Task 9) as a
+        // method parameter explicitly opt into the transaction.
+        if (chain.HandlerCalls().Any(call => call.Method.GetParameters().Any(p =>
+                p.ParameterType == typeof(IClientSessionHandle))))
+        {
+            return true;
+        }
+
         var serviceDependencies = chain
-            .ServiceDependencies(container, new[] { typeof(IMongoDatabase) })
+            .ServiceDependencies(container, new[] { typeof(IMongoDatabase), typeof(IMongoClient) })
             .ToArray();
-        return serviceDependencies.Any(x => x == typeof(IMongoDatabase));
+
+        return serviceDependencies.Any(x =>
+            x == typeof(IMongoDatabase)
+            || x == typeof(IMongoClient)
+            || (x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IMongoCollection<>)));
     }
 
     public bool CanPersist(Type entityType, IServiceContainer container, out Type persistenceService)
