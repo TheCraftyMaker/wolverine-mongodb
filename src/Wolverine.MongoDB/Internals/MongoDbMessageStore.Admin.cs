@@ -21,10 +21,14 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
         {
             new CreateIndexModel<IncomingMessage>(
                 Builders<IncomingMessage>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.OwnerId)),
+            // Compound index for the scheduled-message poll: Status == Scheduled && ExecutionTime <= now.
             new CreateIndexModel<IncomingMessage>(
-                Builders<IncomingMessage>.IndexKeys.Ascending(x => x.ExecutionTime)),
+                Builders<IncomingMessage>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.ExecutionTime)),
             new CreateIndexModel<IncomingMessage>(
                 Builders<IncomingMessage>.IndexKeys.Ascending(x => x.OwnerId).Ascending(x => x.ReceivedAt)),
+            // Reassignment CAS and reschedule filter by EnvelopeId.
+            new CreateIndexModel<IncomingMessage>(
+                Builders<IncomingMessage>.IndexKeys.Ascending(x => x.EnvelopeId)),
             new CreateIndexModel<IncomingMessage>(
                 Builders<IncomingMessage>.IndexKeys.Ascending(x => x.KeepUntil),
                 new CreateIndexOptions { ExpireAfter = TimeSpan.Zero })
@@ -32,7 +36,10 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
 
         await Outgoing.Indexes.CreateManyAsync(new[]
         {
-            new CreateIndexModel<OutgoingMessage>(Builders<OutgoingMessage>.IndexKeys.Ascending(x => x.OwnerId)),
+            // Compound index serves LoadOutgoingAsync (OwnerId == 0 && Destination == X)
+            // and the distinct-destinations recovery scan.
+            new CreateIndexModel<OutgoingMessage>(
+                Builders<OutgoingMessage>.IndexKeys.Ascending(x => x.OwnerId).Ascending(x => x.Destination)),
             new CreateIndexModel<OutgoingMessage>(Builders<OutgoingMessage>.IndexKeys.Ascending(x => x.Destination)),
             new CreateIndexModel<OutgoingMessage>(Builders<OutgoingMessage>.IndexKeys.Ascending(x => x.DeliverBy))
         });
@@ -42,9 +49,18 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.SentAt)),
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.MessageType)),
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.ExceptionType)),
+            new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.Replayable)),
             new CreateIndexModel<DeadLetterMessage>(
                 Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.ExpirationTime),
                 new CreateIndexOptions { ExpireAfter = TimeSpan.Zero })
+        });
+
+        // Node-event records: retain two weeks, then let TTL discard them.
+        await RecordDocs.Indexes.CreateManyAsync(new[]
+        {
+            new CreateIndexModel<NodeRecordDocument>(
+                Builders<NodeRecordDocument>.IndexKeys.Ascending(x => x.Timestamp),
+                new CreateIndexOptions { ExpireAfter = TimeSpan.FromDays(14) })
         });
     }
 

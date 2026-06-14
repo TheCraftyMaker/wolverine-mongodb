@@ -58,11 +58,13 @@ public partial class MongoDbMessageStore : IScheduledMessages
 
     async Task<IReadOnlyList<ScheduledMessageCount>> IScheduledMessages.SummarizeAsync(string serviceName, CancellationToken token)
     {
-        var docs = await Incoming
-            .Find(Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Scheduled))
+        var grouped = await Incoming.Aggregate()
+            .Match(Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Scheduled))
+            .Group(x => x.MessageType, g => new { MessageType = g.Key, Count = g.Count() })
             .ToListAsync(token);
-        return docs.GroupBy(x => x.MessageType)
-            .Select(g => new ScheduledMessageCount(serviceName, g.Key, Uri, g.Count()))
+
+        return grouped
+            .Select(g => new ScheduledMessageCount(serviceName, g.MessageType, Uri, g.Count))
             .ToList();
     }
 }

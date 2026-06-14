@@ -38,16 +38,20 @@ public partial class MongoDbMessageStore : IDeadLetters
         if (range.From.HasValue) filter &= b.Gte(x => x.SentAt, range.From.Value);
         if (range.To.HasValue) filter &= b.Lte(x => x.SentAt, range.To.Value);
 
-        var docs = await DeadLetterDocs.Find(filter).ToListAsync(token);
-        return docs
-            .GroupBy(x => new { ReceivedAt = x.ReceivedAt ?? "", x.MessageType, x.ExceptionType })
+        var grouped = await DeadLetterDocs.Aggregate()
+            .Match(filter)
+            .Group(x => new { x.ReceivedAt, x.MessageType, x.ExceptionType },
+                g => new { g.Key.ReceivedAt, g.Key.MessageType, g.Key.ExceptionType, Count = g.Count() })
+            .ToListAsync(token);
+
+        return grouped
             .Select(g => new DeadLetterQueueCount(
                 serviceName,
-                g.Key.ReceivedAt.IsNotEmpty() ? new Uri(g.Key.ReceivedAt) : Uri,
-                g.Key.MessageType ?? "",
-                g.Key.ExceptionType ?? "",
+                g.ReceivedAt.IsNotEmpty() ? new Uri(g.ReceivedAt!) : Uri,
+                g.MessageType ?? "",
+                g.ExceptionType ?? "",
                 Uri,
-                g.Count()))
+                g.Count))
             .ToList();
     }
 
