@@ -20,3 +20,6 @@ artifacts/
 # IDE / tooling
 .vs/
 *.user
+
+# /teach workspace (personal learning materials — not part of the package)
+.teach/
