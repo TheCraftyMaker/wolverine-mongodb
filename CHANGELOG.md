@@ -8,6 +8,86 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- **`LoadOutgoingAsync` now returns only globally-owned envelopes, batch-limited.**
+  Previously the query filtered by destination only, which caused orphan recovery
+  to re-claim in-flight envelopes (duplicate sends) and load unbounded result sets.
+  The query now filters `OwnerId == 0` and applies `Limit(RecoveryBatchSize)`,
+  mirroring all RDBMS providers.
+- **Handled inbox markers carry `KeepUntil` for TTL expiry.**
+  `IncomingMessage` previously dropped `envelope.KeepUntil`, leaving handled markers
+  with no expiry — the TTL index never fired and the inbox grew without bound.
+  Both the lazy (`StoreIncomingAsync`) and eager (`PersistIncomingAsync`) paths
+  now preserve `KeepUntil`.
+- **Dead-letter replay is now idempotent and per-document fault-tolerant.**
+  A crash between the re-insert and the DLQ delete previously left the next replay
+  tick throwing `DuplicateIncomingEnvelopeException`, aborting the whole batch
+  permanently. The loop now catches the duplicate and falls through to delete the
+  DLQ document, converging the state. Body-less poison dead letters are unflagged
+  (not retried every tick) and remain queryable.
+- **Write concerns pinned on the message store.**
+  The store constructor now wraps its database handle with
+  `WriteConcern.WMajority.With(journal: true)` and `ReadConcern.Majority`,
+  independent of the consumer's `MongoClient` configuration. A `w:1` client no
+  longer weakens inbox/outbox durability.
+- **Transaction frame applied to `IMongoCollection<T>`, `IMongoClient`, and
+  `IClientSessionHandle` handlers.** Previously only handlers whose dependency
+  tree contained `IMongoDatabase` received the transactional frame. Handlers
+  injecting `IMongoCollection<T>` silently ran without a transaction; handlers
+  declaring `IClientSessionHandle` directly failed code generation.
+
+### Added
+- **CI runs the full compliance test suite on every PR.** The `library` job checks
+  out the Wolverine source at tag `V6.2.2` and runs
+  `dotnet test src/Wolverine.MongoDB.Tests` with `UseWolverineSource=true`. The
+  `demo` job downloads the freshly packed nupkg (`0.0.0-ci`) and runs the
+  end-to-end integration tests against it, so no stale NuGet version is exercised.
+- **`MongoDbUnitOfWork` — session-bound write helper.** Handlers can accept
+  `MongoDbUnitOfWork` as a parameter instead of (or alongside) `IClientSessionHandle`.
+  Writes through `uow.Collection<T>("name")` automatically participate in the
+  handler's transaction — the session cannot be forgotten. `SessionBoundCollection<T>`
+  exposes `InsertOneAsync`, `InsertManyAsync`, `ReplaceOneAsync`, `UpdateOneAsync`,
+  `UpdateManyAsync`, `DeleteOneAsync`, `DeleteManyAsync`, `FindOneAndUpdateAsync`,
+  and `Find`.
+- **Compound and TTL indexes on all envelope collections.** New indexes:
+  - Incoming: `(Status, ExecutionTime)` for scheduled-message poll; `EnvelopeId`
+    for reassignment/reschedule; `(OwnerId, ReceivedAt)` for orphan recovery;
+    `KeepUntil` TTL.
+  - Outgoing: `(OwnerId, Destination)` serving the fixed `LoadOutgoingAsync`;
+    existing `Destination` and `DeliverBy` indexes retained.
+  - Dead letters: `ExpirationTime` TTL (no-op when field absent, i.e. expiration
+    disabled); `SentAt`, `MessageType`, `ExceptionType`, `Replayable` indexes.
+  - Node records: `Timestamp` TTL (14-day retention).
+- **Server-side aggregation for `SummarizeAllAsync` / `SummarizeAsync`.** Dead-letter
+  and scheduled-message summary methods now use `$group` pipelines instead of
+  loading all documents into the application process.
+
+### Changed
+
+> **Behavior change:** Dead letters no longer expire by default.
+
+Previously, `MoveToDeadLetterStorageAsync` unconditionally stamped `ExpirationTime`,
+causing TTL deletion after 10 days under the library's default settings — silent
+data loss. Now, `ExpirationTime` is only written when
+`opts.Durability.DeadLetterQueueExpirationEnabled = true` (Wolverine's default is
+`false`). Existing deployments that relied on automatic expiry must opt in explicitly.
+
+> **Behavior change:** Startup now throws on `DurabilityMode.Balanced`.
+
+`Wolverine.MongoDB` only supports single-node (`DurabilityMode.Solo`) deployments.
+Previously, a consumer who forgot to set `Solo` got a subtly broken cluster.
+`Initialize`, `StartScheduledJobs`, and `BuildAgent` now throw
+`InvalidOperationException` if `DurabilityMode.Balanced` is detected. Set
+`opts.Durability.Mode = DurabilityMode.Solo` in your host configuration.
+
+- **Per-property BSON `DateTime` representation instead of a process-global serializer.**
+  All `DateTimeOffset`/`DateTimeOffset?` fields on document types are now annotated
+  with `[BsonRepresentation(BsonType.DateTime)]`. The `MongoSerializerRegistration`
+  class and its `[ModuleInitializer]` call have been removed. The library no longer
+  mutates the host application's BSON registry.
+
+## [0.1.0-beta.2] - 2026-06-08
+
 ### Added
 - CI workflow with separate library build and demo integration test jobs.
 - Trivy security scanning workflow with SARIF upload to GitHub Security tab.
@@ -112,5 +192,6 @@ Post-review hardening pass (adversarial review of the 0.1.0 implementation):
   `WolverineFx.ComplianceTests` is published to NuGet.
 - Replica set is required; standalone MongoDB is not supported.
 
-[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/TheCraftyMaker/wolverine-mongodb/releases/tag/v0.1.0-beta.1

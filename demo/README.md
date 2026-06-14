@@ -136,6 +136,28 @@ The `IClientSessionHandle` is available as a parameter in handler methods — re
 | Read model upsert (idempotent) | `OrderSummaryRepository.cs` |
 | Handler in non-entry assembly | `Program.cs` — `opts.Discovery.IncludeAssembly(...)` |
 
+## Session-bound writes
+
+The demo's repository pattern (explicit `IClientSessionHandle` threading through
+repository methods) is the full-control approach — repositories own the session
+lifetime contract and are testable in isolation.
+
+For handlers that write directly to MongoDB collections without a repository
+layer, `MongoDbUnitOfWork` is a lighter-weight alternative — accept it as a
+handler parameter and the session is threaded automatically:
+
+```csharp
+// No repository needed — the unit of work threads the session for you.
+public static async Task<OrderPlaced> Handle(PlaceOrder cmd, MongoDbUnitOfWork mongo, CancellationToken ct)
+{
+    await mongo.Collection<Order>("orders").InsertOneAsync(new Order(cmd.OrderId), ct);
+    return new OrderPlaced(cmd.OrderId);
+}
+```
+
+See the library [README](../README.md#domain-write-atomicity) for the full
+`MongoDbUnitOfWork` API.
+
 ## Configuration
 
 | Key | Default (local dev) | Docker value |

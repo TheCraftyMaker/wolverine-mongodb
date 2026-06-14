@@ -50,10 +50,13 @@ builder.Services.AddSingleton<IMongoClient>(
 
 builder.Host.UseWolverine(opts =>
 {
+    // Required: this store only supports single-node durability.
+    opts.Durability.Mode = DurabilityMode.Solo;
+
     // Register the MongoDB transactional outbox/inbox
     opts.UseMongoDbPersistence("my_database");
 
-    // Automatically wrap handlers that use IMongoDatabase in a transaction
+    // Automatically wrap handlers that use MongoDB types in a transaction
     opts.Policies.AutoApplyTransactions();
 });
 ```
@@ -62,18 +65,42 @@ builder.Host.UseWolverine(opts =>
 can configure the client however you like (Atlas connection string, custom
 `MongoClientSettings`, etc.) before the call.
 
+### Durability mode
+
+`Wolverine.MongoDB` currently supports single-node deployments only.
+**`opts.Durability.Mode = DurabilityMode.Solo` is required.** The host will
+throw `InvalidOperationException` at startup if the mode is left at the default
+`DurabilityMode.Balanced`. Multi-node agent balancing is tracked in the
+follow-up plan.
+
 ### Domain-write atomicity
 
 When a handler both modifies a MongoDB document and publishes outgoing messages,
 the outbox write is committed inside a single MongoDB multi-document transaction
 — this is why a replica set is required.
 
-**Important:** the domain write is only atomic with the outbox write if the
-handler enlists its own MongoDB writes in the Wolverine-managed transaction.
-Wolverine opens an `IClientSessionHandle` for the handler and persists the
-outgoing/inbox envelopes on that session. For your domain write to commit (or
-roll back) atomically with those envelopes, the handler **must** accept the
-generated `IClientSessionHandle` and pass it to every MongoDB write it performs:
+The simplest way to enlist domain writes in the Wolverine-managed transaction is
+`MongoDbUnitOfWork`. Accept it as a handler parameter and call writes through
+it — the session is threaded automatically:
+
+```csharp
+public static async Task<OrderPlaced> Handle(PlaceOrder cmd, MongoDbUnitOfWork mongo, CancellationToken ct)
+{
+    // Every write through the unit of work participates in the outbox transaction —
+    // the session cannot be forgotten.
+    await mongo.Collection<Order>("orders").InsertOneAsync(new Order(cmd.OrderId), ct);
+    return new OrderPlaced(cmd.OrderId);
+}
+```
+
+`MongoDbUnitOfWork` exposes `InsertOneAsync`, `InsertManyAsync`, `ReplaceOneAsync`,
+`UpdateOneAsync`, `UpdateManyAsync`, `DeleteOneAsync`, `DeleteManyAsync`,
+`FindOneAndUpdateAsync`, and `Find` — all automatically scoped to the active
+transaction session.
+
+**Advanced / repository pattern:** if you prefer to thread the session through
+your own repository layer, accept `IClientSessionHandle` directly and pass it to
+every MongoDB write:
 
 ```csharp
 public static async Task Handle(MyCommand command, IClientSessionHandle session,
@@ -81,8 +108,6 @@ public static async Task Handle(MyCommand command, IClientSessionHandle session,
 {
     // Pass the session so this write joins the Wolverine-managed transaction.
     await database.GetCollection<Order>("orders").InsertOneAsync(session, order);
-
-    // Outgoing messages published here are persisted on the SAME session/transaction.
 }
 ```
 
@@ -90,6 +115,33 @@ The `IMongoDatabase` registered by `UseMongoDbPersistence` does **not**
 auto-enlist in the transaction. A handler that writes without the session writes
 outside the transaction, so its domain change is **not** atomic with the outbox
 and can be lost or duplicated on failure.
+
+The transaction frame is applied automatically when a handler's dependency tree
+includes `IMongoDatabase`, `IMongoClient`, `IMongoCollection<T>`,
+`IClientSessionHandle`, or `MongoDbUnitOfWork`.
+
+### Write durability
+
+The message store internally pins **`w:majority` (journaled) write concern** and
+**majority read concern** on all envelope collections. This is independent of
+how the consumer's `MongoClient` is configured — a `w:1` client does not weaken
+the durability of the inbox/outbox writes. The app-facing `IMongoDatabase`
+registered by `UseMongoDbPersistence` is **not** modified; domain write concerns
+remain the application's choice.
+
+### Dead-letter retention
+
+Dead letters are **kept forever by default**, matching the behavior of the RDBMS
+providers. To opt into TTL-based expiry, set:
+
+```csharp
+opts.Durability.DeadLetterQueueExpirationEnabled = true;
+opts.Durability.DeadLetterQueueExpiration = TimeSpan.FromDays(10); // default
+```
+
+When expiration is disabled (the default), the TTL index on
+`wolverine_dead_letters` is a no-op — documents without an `expirationTime`
+field are ignored by MongoDB's TTL background thread.
 
 ## Demo application
 
@@ -126,10 +178,13 @@ variable or `-p:WolverineSourcePath=...`). When the clone is present, both the
 library and the test project project-reference it so there is a single
 consistent `Wolverine.dll`.
 
-When the clone is absent (for example in CI), the test project is not built and
-the library uses the `WolverineFx` NuGet package. To pack the library locally,
-pass `-p:UseWolverineSource=false` so the produced package declares the
-`WolverineFx` dependency rather than a project reference:
+CI runs the full compliance suite against a pinned Wolverine clone (tag
+`V6.2.2`) and then packs the library; the demo job downloads the freshly packed
+nupkg and runs end-to-end integration tests against it — no stale NuGet version
+is exercised.
+
+When the clone is absent, the library can still be built and packed using the
+`WolverineFx` NuGet package:
 
 ```
 dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false
@@ -148,11 +203,9 @@ required beyond Docker Desktop.
 
 - **Standalone MongoDB is not supported** — a replica set is required for
   transactions.
-- **Single-node coordination only currenly.** Multi-node agent balancing
-  (having the `DurabilityAgent` distribute work across a cluster of application
-  instances) and orphan-recovery hardening are deferred to a follow-up release.
-  The lock-based leader election and heartbeat mechanism work correctly for a
-  single running node.
+- **Single-node coordination only.** `DurabilityMode.Solo` is required; startup
+  throws on `DurabilityMode.Balanced`. Multi-node agent balancing is deferred
+  to a follow-up release.
 - **Node coordination is approximate.** MongoDB has no advisory-lock primitive;
   leader election and agent assignment use a lock document with TTL-based expiry
   via `findAndModify`. This is the least mature part of the library pre-`1.0.0`.
