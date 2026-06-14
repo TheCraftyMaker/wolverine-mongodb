@@ -33,6 +33,11 @@ the first public release.
   multi-node balancing facts are flaky (deferred), mirroring how Cosmos marks its
   own as `[Flaky]`. Tracked in `docs/superpowers/plans/2026-06-09-multinode-support.md`.
 
+- **Demo app has no `MongoDbUnitOfWork` example.** The demo uses the repository
+  pattern with explicit `IClientSessionHandle` threading, which is the fuller
+  production example. Add a second handler (or a variant endpoint) that accepts
+  `MongoDbUnitOfWork` directly so consumers can compare both patterns side by side.
+
 - **Old single-field indexes not dropped on existing deployments.** The hardening
   pass replaced single-field `executionTime` and outgoing `ownerId` indexes with
   compound alternatives. Existing deployments keep the old indexes harmlessly (pre-1.0
