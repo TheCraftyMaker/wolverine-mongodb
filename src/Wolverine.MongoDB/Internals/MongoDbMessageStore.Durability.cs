@@ -197,9 +197,36 @@ public partial class MongoDbMessageStore
             var expired = outgoing.Where(x => x.IsExpired()).ToArray();
             var good = outgoing.Where(x => !x.IsExpired()).ToArray();
 
-            await DiscardAndReassignOutgoingAsync(expired, good, runtime.DurabilitySettings.AssignedNodeNumber);
+            if (expired.Length > 0)
+            {
+                await DeleteOutgoingAsync(expired);
+            }
 
-            foreach (var envelope in good)
+            if (good.Length == 0)
+            {
+                continue;
+            }
+
+            // CAS claim: only flip envelopes still globally owned. A competing node that
+            // claimed one of these ids between our load and this write keeps it.
+            var nodeNumber = runtime.DurabilitySettings.AssignedNodeNumber;
+            var ids = good.Select(e => e.Id).ToList();
+            await Outgoing.UpdateManyAsync(
+                Builders<OutgoingMessage>.Filter.And(
+                    Builders<OutgoingMessage>.Filter.In(x => x.Id, ids),
+                    Builders<OutgoingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
+                Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, nodeNumber),
+                cancellationToken: token);
+
+            // Re-read which ids this node actually won and enqueue exactly those.
+            var claimedIds = (await Outgoing.Distinct(x => x.Id,
+                    Builders<OutgoingMessage>.Filter.And(
+                        Builders<OutgoingMessage>.Filter.In(x => x.Id, ids),
+                        Builders<OutgoingMessage>.Filter.Eq(x => x.OwnerId, nodeNumber)),
+                    cancellationToken: token).ToListAsync(token))
+                .ToHashSet();
+
+            foreach (var envelope in good.Where(e => claimedIds.Contains(e.Id)))
             {
                 await sendingAgent.EnqueueOutgoingAsync(envelope);
             }
