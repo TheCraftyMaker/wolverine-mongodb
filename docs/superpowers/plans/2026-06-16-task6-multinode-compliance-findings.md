@@ -288,15 +288,20 @@ under load / in CI** — precisely the failure class the multinode plan calls ou
 
 ## Decision
 
-Reviewed with the maintainer. Decision: **keep this as the report; do not change library code
-now.** The deterministic-election fix (the "lowest live node wins" guard above) is tracked as a
-follow-up in `FOLLOWUPS.md`. `leadership_election_compliance` therefore **stays gated** until that
-library work is done; this branch is the analysis record, not a merge candidate.
+Reviewed with the maintainer. Decision: **land this analysis; do not change library code now.**
+The deterministic-election fix (the "lowest live node wins" guard above) is tracked as a follow-up
+in `FOLLOWUPS.md`. `leadership_election_compliance` therefore **stays compile-gated** behind
+`RUN_MULTINODE` until that library work lands — un-gating it now would run a flaky category in CI
+(which runs `dotnet test` with no category filter), and the HARD RULES forbid shipping a
+luck-dependent suite.
 
-## What's in this branch
+## What's in this PR
 
-- `leadership_election_compliance.cs`: gate removed, `[Trait("Category","multinode")]`, lease 5s
-  (exactly the plan's Task 6 Step 1 content). **Not merge-ready** — the category is not five-green.
-- This findings document and a `FOLLOWUPS.md` entry.
+- `leadership_election_compliance.cs`: **kept gated** behind `#if RUN_MULTINODE`, with the
+  explanatory comment rewritten to point here and to record that the body is the intended
+  un-gated form (`[Trait("Category","multinode")]`, lease 5s — the plan's Task 6 Step 1 content)
+  to drop in once the fix lands.
+- This findings document and a `FOLLOWUPS.md` entry tracking the deterministic-election fix.
 
-No PR has been opened, per the escalation rule.
+CI stays green; no library or production behaviour changes. Un-gating + the separate CI category
+step (plan Task 8) follow the deterministic-election fix.
