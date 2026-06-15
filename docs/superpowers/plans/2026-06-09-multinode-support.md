@@ -14,15 +14,40 @@
 
 ## Git & PR Workflow (one branch + one PR per task)
 
-Same procedure as the Solo Hardening plan: each task is its own feature branch forked from the **current** `origin/main`, delivered as its own PR, independently green. The inline "Commit" step at the end of each task is followed by:
+**Every task is delivered as its own feature branch and its own PR against `main`.** The inline "Commit" step at the end of each task stays as written; it is followed by the push/PR steps below. Each PR must be independently green: the task's own tests pass, plus the full library suite.
+
+**Per-task procedure (one git worktree per task — safe for parallel agents):**
+
+> **Why a worktree, not `git checkout`:** a clone has exactly one working tree, one `HEAD`, and one index, all global to the directory. Two task-agents sharing one checkout clobber each other — a `git checkout` / `reset` / `stash` in one silently reverts the other's uncommitted work, or bleeds edits across branches. Each task therefore gets its **own** working directory backed by the shared `.git`. `.worktrees/` is gitignored.
+
+> **Already isolated?** If you were dispatched as a subagent with worktree isolation (the `Agent` / `Workflow` `isolation: "worktree"` option, or a native `EnterWorktree` / `/worktree` tool), you are **already** in your own worktree — do not nest another. Confirm with `git branch --show-current`, then skip straight to the task's steps.
 
 ```bash
+# Start: from the main checkout, cut an isolated worktree off the CURRENT main
+# (so already-merged prerequisite tasks are included).
+rtk git fetch origin
+rtk git worktree add .worktrees/<branch-name> -b <branch-name> origin/main
+cd .worktrees/<branch-name>          # every later step — incl. the task's Commit step — runs HERE
+
+# ... execute the task's steps in this directory, ending with its Commit step ...
+
+# Finish: push and open the PR from inside the worktree
 rtk git push -u origin <branch-name>
-rtk gh pr create --base main --title "<PR title>" --body "<summary + reference to docs/superpowers/plans/2026-06-09-multinode-support.md Task N>"
+rtk gh pr create --base main --head <branch-name> \
+  --title "<PR title>" \
+  --body "<one-paragraph summary: what was broken/missing, what changed, how it is tested. Reference docs/superpowers/plans/2026-06-09-multinode-support.md Task N.>"
 rtk gh pr checks --watch
+
+# After the PR is MERGED by the owner: drop the worktree from the main checkout
+cd <repo-root>
+rtk git worktree remove .worktrees/<branch-name>
 ```
 
-Branch creation at task start: `rtk git fetch origin && rtk git checkout -b <branch-name> origin/main`. Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged** — this plan is much more sequential than the hardening plan.
+- **`--head <branch-name>` is now required:** `gh` would infer the head from the current branch, but stating it explicitly keeps the PR unambiguous no matter which worktree it is invoked from. `gh` reads the shared `.git`, so it behaves identically in every worktree.
+- A slashed branch name (e.g. `feat/mongodb-persistence-options`) just nests one extra directory level under `.worktrees/` — that is fine.
+- Each worktree has its own `bin` / `obj`, so parallel `dotnet build` / `dotnet test` runs never collide. A branch can be checked out in only one worktree at a time; since every task has a distinct branch, this never conflicts.
+
+Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged** — this plan is much more sequential than the hardening plan.
 
 | Task | Branch | PR title | Depends on | Model |
 |---|---|---|---|---|
