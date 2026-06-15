@@ -153,6 +153,27 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
         return docs.Select(d => d.ToRecord()).ToList();
     }
 
+    public async Task DeleteOldNodeRecordsAsync(int retainCount)
+    {
+        if (retainCount <= 0) return;
+
+        // Find the timestamp of the oldest record we want to KEEP, then delete
+        // everything strictly older.
+        var newest = await RecordDocs.Find(FilterDefinition<NodeRecordDocument>.Empty)
+            .Sort(Builders<NodeRecordDocument>.Sort.Descending(x => x.Timestamp))
+            .Limit(retainCount)
+            .ToListAsync();
+
+        if (newest.Count < retainCount)
+        {
+            return; // fewer records than the retain count: nothing to trim
+        }
+
+        var cutoff = newest[^1].Timestamp;
+        await RecordDocs.DeleteManyAsync(
+            Builders<NodeRecordDocument>.Filter.Lt(x => x.Timestamp, cutoff));
+    }
+
     public async Task ClearAllAsync(CancellationToken cancellationToken)
     {
         await NodeDocs.DeleteManyAsync(FilterDefinition<NodeDocument>.Empty, cancellationToken);

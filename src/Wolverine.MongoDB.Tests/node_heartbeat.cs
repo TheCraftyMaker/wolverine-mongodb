@@ -6,6 +6,33 @@ namespace Wolverine.MongoDB.Tests;
 [Collection("mongodb")]
 public class node_heartbeat
 {
+    [Fact]
+    public async Task delete_old_node_records_keeps_only_the_newest_n()
+    {
+        await _fixture.ClearAll();
+        var store = _fixture.BuildMessageStore();
+
+        var baseTime = DateTimeOffset.UtcNow.AddMinutes(-10);
+        for (var i = 0; i < 10; i++)
+        {
+            await store.Nodes.LogRecordsAsync(new NodeRecord
+            {
+                NodeNumber = 1,
+                RecordType = NodeRecordType.NodeStarted,
+                Timestamp = baseTime.AddSeconds(i),
+                Description = $"record {i}",
+                ServiceName = "test"
+            });
+        }
+
+        await store.Nodes.DeleteOldNodeRecordsAsync(3);
+
+        var remaining = await store.Nodes.FetchRecentRecordsAsync(100);
+        remaining.Count.ShouldBe(3);
+        remaining.Select(x => x.Description).ShouldBe(new[] { "record 7", "record 8", "record 9" });
+    }
+
+
     private readonly AppFixture _fixture;
     public node_heartbeat(AppFixture fixture) => _fixture = fixture;
 
