@@ -49,21 +49,24 @@ rtk git worktree remove .worktrees/<branch-name>
 
 Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged** — this plan is much more sequential than the hardening plan.
 
-| Task | Branch | PR title | Depends on | Model |
-|---|---|---|---|---|
-| 1 | `feat/mongodb-persistence-options` | feat: MongoDbPersistenceOptions; allow DurabilityMode.Balanced | Solo plan merged | Sonnet |
-| 2 | `feat/configurable-leader-lease` | feat: configurable leader lock lease with renewal margin | **Task 1** | **Fable 5 / Opus** |
-| 3 | `fix/cas-outgoing-recovery` | fix: CAS-guarded outgoing recovery prevents cross-node double-claims | Solo plan merged | **Fable 5 / Opus** |
-| 4 | `feat/release-dead-node-ownership` | feat: release envelope ownership held by dead node numbers | Solo plan merged | Sonnet |
-| 5 | `feat/delete-old-node-records` | feat: implement DeleteOldNodeRecordsAsync | Solo plan merged | Sonnet |
-| 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first — balancing facts exercise recovery) | **Fable 5** |
-| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Fable 5** |
-| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 6** (the category must exist) | Sonnet |
-| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet |
-| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet |
-| 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet |
+| Task | Branch | PR title | Depends on | Model | Status (2026-06-16) |
+|---|---|---|---|---|---|
+| 1 | `feat/mongodb-persistence-options` | feat: MongoDbPersistenceOptions; allow DurabilityMode.Balanced | Solo plan merged | Sonnet | ✅ Merged (#63) |
+| 2 | `feat/configurable-leader-lease` | feat: configurable leader lock lease with renewal margin | **Task 1** | **Fable 5 / Opus** | ✅ Merged (#67) |
+| 3 | `fix/cas-outgoing-recovery` | fix: CAS-guarded outgoing recovery prevents cross-node double-claims | Solo plan merged | **Fable 5 / Opus** | ✅ Merged (#68) |
+| 4 | `feat/release-dead-node-ownership` | feat: release envelope ownership held by dead node numbers | Solo plan merged | Sonnet | ✅ Merged (#69) |
+| 5 | `feat/delete-old-node-records` | feat: implement DeleteOldNodeRecordsAsync | Solo plan merged | Sonnet | ✅ Merged (#70) |
+| 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first — balancing facts exercise recovery) | **Fable 5** | ⚠️ Partial (#71) — **blocked**; suite kept **gated**, findings doc landed |
+| **6b** | `fix/deterministic-leader-election` | fix: deterministic lowest-live-node leadership election | **Tasks 1–4** | **Fable 5 / Opus** | ⛔ **Not started — prerequisite to un-gating Task 6 and to Task 8** |
+| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Fable 5** | ⛔ Not started — keep behind `RUN_MULTINODE` until 6b |
+| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 6b** (suite must be un-gated & green) | Sonnet | ⛔ Blocked on 6b |
+| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ⛔ Not started (unblocked — independent) |
+| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document multinode honestly (6b pending) |
+| 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
 
-**Recommended merge order:** 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`.
+**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71) — the compliance suite is **not** un-gated and is **not** green (see the Task 6 status note and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`). The remaining critical path is **6b → drop the `RUN_MULTINODE` gate (completes 6) → 8**. Task 9 (demo) is independent and may land anytime. Task 7 may proceed but must stay compile-gated behind `RUN_MULTINODE` until 6b lands. Then 10 (docs — describe multinode honestly), 11 on `main`.
+
+> _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
 **Model guidance.** This plan skews to a stronger tier than the hardening plan because the failure modes are distributed-systems races, not transcription errors (Agent tool `model` parameter: `sonnet`, `opus`, `fable`):
 
@@ -109,7 +112,7 @@ Multinode work needs Balanced hosts to start. Replace the hard throw (Solo plan 
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs`
 - Modify: `src/Wolverine.MongoDB.Tests/durability_mode_guard.cs`
 
-- [ ] **Step 1: Amend the guard test** — in `durability_mode_guard.cs`, replace `balanced_mode_fails_fast_at_startup` with:
+- [x] **Step 1: Amend the guard test** — in `durability_mode_guard.cs`, replace `balanced_mode_fails_fast_at_startup` with:
 
 ```csharp
 [Fact]
@@ -131,12 +134,12 @@ public async Task balanced_mode_starts_with_a_control_endpoint()
 
 Add `using Wolverine.Transports.Tcp;`. Keep `solo_mode_starts_normally` unchanged.
 
-- [ ] **Step 2: Run to verify it fails** (the Solo-plan guard still throws)
+- [x] **Step 2: Run to verify it fails** (the Solo-plan guard still throws)
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~durability_mode_guard"`
 Expected: `balanced_mode_starts_with_a_control_endpoint` FAILS with the `InvalidOperationException` from the guard.
 
-- [ ] **Step 3: Create the options type** — `src/Wolverine.MongoDB/MongoDbPersistenceOptions.cs`:
+- [x] **Step 3: Create the options type** — `src/Wolverine.MongoDB/MongoDbPersistenceOptions.cs`:
 
 ```csharp
 namespace Wolverine.MongoDB;
@@ -159,7 +162,7 @@ public class MongoDbPersistenceOptions
 
 (Note: default changes from the previously hardcoded 5 minutes to 1 minute — 5 minutes makes leader failover unacceptably slow and is the root of the compliance-suite flakiness. CHANGELOG-worthy.)
 
-- [ ] **Step 4: Thread the options through** — in `WolverineMongoDbExtensions.cs` change the signature and store construction:
+- [x] **Step 4: Thread the options through** — in `WolverineMongoDbExtensions.cs` change the signature and store construction:
 
 ```csharp
 public static WolverineOptions UseMongoDbPersistence(this WolverineOptions options, string databaseName,
@@ -196,7 +199,7 @@ public MongoDbMessageStore(IMongoClient client, string databaseName, WolverineOp
 }
 ```
 
-- [ ] **Step 5: Replace the throw with a warning** — in `MongoDbMessageStore.cs` replace `AssertSupportedDurabilityMode` and its call sites:
+- [x] **Step 5: Replace the throw with a warning** — in `MongoDbMessageStore.cs` replace `AssertSupportedDurabilityMode` and its call sites:
 
 ```csharp
 public void Initialize(IWolverineRuntime runtime) => WarnOnBalancedMode(runtime);
@@ -225,7 +228,7 @@ private void WarnOnBalancedMode(IWolverineRuntime runtime)
 
 (Add `using Microsoft.Extensions.Logging;`.)
 
-- [ ] **Step 6: Run the guard tests + full suite, then commit**
+- [x] **Step 6: Run the guard tests + full suite, then commit**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests` → PASS.
 
@@ -244,7 +247,7 @@ Use `LockLeaseDuration` instead of the hardcoded 5 minutes, and make `HasLeaders
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs`
 - Test: Create `src/Wolverine.MongoDB.Tests/leader_lease.cs`
 
-- [ ] **Step 1: Write the failing tests** — create `src/Wolverine.MongoDB.Tests/leader_lease.cs`:
+- [x] **Step 1: Write the failing tests** — create `src/Wolverine.MongoDB.Tests/leader_lease.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -301,12 +304,12 @@ public class leader_lease
 }
 ```
 
-- [ ] **Step 2: Run to verify failures**
+- [x] **Step 2: Run to verify failures**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~leader_lease"`
 Expected: both FAIL (lease is hardcoded to 5 minutes; `HasLeadershipLock` trusts the full lease).
 
-- [ ] **Step 3: Implement** — in `MongoDbMessageStore.Locking.cs`:
+- [x] **Step 3: Implement** — in `MongoDbMessageStore.Locking.cs`:
 
 Replace `now.AddMinutes(5)` in `TryAttainAsync` with:
 
@@ -343,7 +346,7 @@ catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategor
 }
 ```
 
-- [ ] **Step 4: Run the lease tests + full suite, then commit**
+- [x] **Step 4: Run the lease tests + full suite, then commit**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests` → PASS.
 
@@ -362,7 +365,7 @@ After the Solo plan, `LoadOutgoingAsync` only returns owner-0 envelopes — but 
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs` (`RecoverOrphanedOutgoingAsync`)
 - Test: Create `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs`
 
-- [ ] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs`:
+- [x] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -435,14 +438,14 @@ public class outgoing_recovery_contention
 
 Note: this is deterministic only if the claim happens *after* the load. With the current implementation (load → `DiscardAndReassignOutgoingAsync` unguarded `UpdateMany` on ids), the competitor's ownership IS overwritten — the test fails. That is exactly the bug.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~outgoing_recovery_contention"`
 Expected: FAIL — `stolenDoc.OwnerId` is this node's number, not 999.
 
 Caveat: because `LoadOutgoingAsync` (post Solo plan) already filters owner-0 at load time, the load in `RecoverOrphanedOutgoingAsync` happens before the test's manual flip only if the flip is applied after `StoreOutgoingAsync` but before recovery — which it is. The unguarded `UpdateMany` in `DiscardAndReassignOutgoingAsync` then overwrites. If the test unexpectedly passes, verify by inspecting `DiscardAndReassignOutgoingAsync` — the filter must currently be `In(ids)` only.
 
-- [ ] **Step 3: Implement the CAS claim** — in `MongoDbMessageStore.Durability.cs`, rewrite the body of `RecoverOrphanedOutgoingAsync`'s per-destination block:
+- [x] **Step 3: Implement the CAS claim** — in `MongoDbMessageStore.Durability.cs`, rewrite the body of `RecoverOrphanedOutgoingAsync`'s per-destination block:
 
 ```csharp
 foreach (var destinationStr in destinations)
@@ -500,7 +503,7 @@ foreach (var destinationStr in destinations)
 
 (`DiscardAndReassignOutgoingAsync` itself keeps its current unguarded semantics — it is an `IMessageOutbox` interface member with broader contracts — but the recovery loop no longer routes through it.)
 
-- [ ] **Step 4: Run the contention test + existing recovery tests, then commit**
+- [x] **Step 4: Run the contention test + existing recovery tests, then commit**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~outgoing_recovery|FullyQualifiedName~outbox_recovery"`
 Expected: PASS.
@@ -521,7 +524,7 @@ In Balanced mode there is no startup `ReleaseAllOwnershipAsync()`. Core's leader
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbDurabilityAgent.cs` (wire into recovery loop)
 - Test: Create `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs`
 
-- [ ] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs`:
+- [x] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -580,12 +583,12 @@ public class dead_node_ownership_release
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails to compile** (`ReleaseDeadNodeOwnershipAsync` doesn't exist)
+- [x] **Step 2: Run to verify it fails to compile** (`ReleaseDeadNodeOwnershipAsync` doesn't exist)
 
 Run: `dotnet build src/Wolverine.MongoDB.Tests`
 Expected: CS1061.
 
-- [ ] **Step 3: Implement** — add to `MongoDbMessageStore.Durability.cs`:
+- [x] **Step 3: Implement** — add to `MongoDbMessageStore.Durability.cs`:
 
 ```csharp
 /// <summary>
@@ -616,7 +619,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 }
 ```
 
-- [ ] **Step 4: Wire into the recovery loop** — in `MongoDbDurabilityAgent.StartTimers()`, inside the recovery task's `try` block, add as the FIRST call (release before recover, so the same tick can pick up what it released), guarded to non-Solo modes:
+- [x] **Step 4: Wire into the recovery loop** — in `MongoDbDurabilityAgent.StartTimers()`, inside the recovery task's `try` block, add as the FIRST call (release before recover, so the same tick can pick up what it released), guarded to non-Solo modes:
 
 ```csharp
 if (_settings.Mode != DurabilityMode.Solo)
@@ -630,7 +633,7 @@ await _parent.ReplayDeadLettersAsync(_combined.Token);
 
 (`DurabilitySettings.Mode` — verify the property name on `DurabilitySettings` in the Wolverine clone; it is `Mode` per `DurabilitySettings.cs`.)
 
-- [ ] **Step 5: Run the test + full suite, then commit**
+- [x] **Step 5: Run the test + full suite, then commit**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests` → PASS.
 
@@ -649,7 +652,7 @@ The interface default is a no-op; the leader calls it to trim node-event history
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.NodeAgents.cs`
 - Test: `src/Wolverine.MongoDB.Tests/node_heartbeat.cs` (add test; it already exercises node persistence)
 
-- [ ] **Step 1: Write the failing test** — add to `node_heartbeat.cs`:
+- [x] **Step 1: Write the failing test** — add to `node_heartbeat.cs`:
 
 ```csharp
 [Fact]
@@ -681,12 +684,12 @@ public async Task delete_old_node_records_keeps_only_the_newest_n()
 
 (`NodeRecord.Timestamp` is settable; `LogRecordsAsync` takes `params NodeRecord[]`. Add `using Wolverine.Runtime.Agents;` if missing.)
 
-- [ ] **Step 2: Run to verify it fails** (default no-op → 10 remain)
+- [x] **Step 2: Run to verify it fails** (default no-op → 10 remain)
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~delete_old_node_records"`
 Expected: FAIL — count is 10.
 
-- [ ] **Step 3: Implement** — add to `MongoDbMessageStore.NodeAgents.cs`:
+- [x] **Step 3: Implement** — add to `MongoDbMessageStore.NodeAgents.cs`:
 
 ```csharp
 public async Task DeleteOldNodeRecordsAsync(int retainCount)
@@ -709,7 +712,7 @@ public async Task DeleteOldNodeRecordsAsync(int retainCount)
 }
 ```
 
-- [ ] **Step 4: Run + commit**
+- [x] **Step 4: Run + commit**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~node"` → PASS.
 
@@ -721,6 +724,8 @@ rtk git commit -m "feat: implement DeleteOldNodeRecordsAsync node-record trimmin
 ---
 
 ### Task 6: Un-gate and stabilize the multinode compliance suite
+
+> **Status (2026-06-16): ⚠️ Blocked — merged as a gated findings PR (#71).** Five-consecutive-green is **not** reachable via test config: `leader_switchover_between_nodes` (and the dependent `singular_agent_is_only_running_on_one`) hinge on a leadership-claim race Wolverine core decides by lock-arrival order, which our durable (`w:majority+j:true`) Mongo lock loses ~half the time. The suite is therefore **kept compile-gated behind `RUN_MULTINODE`**; the actual un-gate is deferred to **Task 6b**. Full diagnosis, the ~45-run config matrix, observed interleavings, a MassTransit comparison, the suggested code change, and model guidance: `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. The steps below were executed (un-gate → stabilize attempts → re-gate); the acceptance bar (5× green) was not met, so they are intentionally left **unchecked**.
 
 The suite is currently compile-gated behind `#if RUN_MULTINODE` because the balancing facts raced the hardcoded 5-minute lease. With the lease now configurable (Task 2) and defaulting to 1 minute, configure a short lease for tests and run the suite for real.
 
@@ -788,6 +793,29 @@ Expected: PASS.
 rtk git add src/Wolverine.MongoDB.Tests/leadership_election_compliance.cs
 rtk git commit -m "test: un-gate multinode leadership election compliance with short test lease"
 ```
+
+---
+
+### Task 6b: Deterministic leader election (un-gate prerequisite)
+
+> **New task (added 2026-06-16) — the real unblocker for Task 6.** Rationale, root cause, and the exact code in `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
+
+Wolverine core elects a leader as "whichever node's heartbeat grabs the lock first"; the compliance suite expects the **lowest-numbered surviving node** to win. Fast stores (RavenDb/Postgres) win that race emergently via low-latency CAS; our durable Mongo lock does not. Make it explicit: a node attains the leader lock only when no lower-numbered, non-stale node exists.
+
+**Files:**
+- Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs` (`TryAttainLeadershipLockAsync` node-number guard; leave `TryAttainScheduledJobLockAsync` unchanged)
+- Test: add a focused unit test in `src/Wolverine.MongoDB.Tests` (lowest live node wins; concede when a lower live node exists)
+- Then: `src/Wolverine.MongoDB.Tests/leadership_election_compliance.cs` (drop `#if RUN_MULTINODE`, keep `[Trait("Category","multinode")]`)
+
+- [ ] **Step 1:** Implement the "Suggested code change (option 1)" from the findings doc, honoring its four caveats: leader-lock-only scope; the real (not default) `AssignedNodeNumber`; staleness window = `StaleNodeTimeout`; cost is one tiny `wolverine_nodes` read.
+- [ ] **Step 2:** TDD the focused unit test first — watch it fail, then implement.
+- [ ] **Step 3:** Drop the compile gate in `leadership_election_compliance.cs`; run `dotnet test --filter "Category=multinode"` **five times in a row** plus the full suite once, against the V6.2.2 worktree (`-p:WolverineSourcePath=C:\source\external\wolverine-V6.2.2`). No retries, no skips, no timeout lengthening.
+- [ ] **Step 4:** Re-run the Task 2/3/4 tests (`leader_lease`, `outgoing_recovery_contention`, `dead_node_ownership_release`) — the change touches the shared leader-lock path.
+- [ ] **Step 5:** Commit; open the PR; watch checks. If five-in-a-row still cannot be reached, **stop and extend the findings doc** rather than weakening assertions (same escalation rule that produced it).
+
+**Model:** **Fable 5 / Opus** — a race-sensitive concurrency change where a subtly wrong predicate passes locally and only fails under load/CI. Do **not** use Sonnet/Haiku for the implementation; review on Fable 5/Opus with concurrency scrutiny.
+
+This task **completes Task 6** (un-gating) and **unblocks Task 8**.
 
 ---
 
@@ -924,6 +952,8 @@ rtk git commit -m "test: cross-node exactly-once scheduling and dead-node rescue
 ---
 
 ### Task 8: CI runs the multinode category
+
+> **Status (2026-06-16): ⛔ Blocked on Task 6b.** Dependency corrected from "Task 6" to "Task 6b". While the suite stays compile-gated, a `--filter "Category=multinode"` step matches **zero** compiled tests and passes vacuously — do not add it until 6b un-gates the suite and it runs green.
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`
