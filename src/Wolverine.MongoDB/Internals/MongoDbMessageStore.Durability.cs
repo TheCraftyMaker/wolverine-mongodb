@@ -167,6 +167,33 @@ public partial class MongoDbMessageStore
     }
 
     /// <summary>
+    /// Releases incoming/outgoing ownership held by node numbers that have no
+    /// registered node document (crashed nodes). Mirrors the RDBMS
+    /// ReleaseOrphanedMessagesOperation. Safe to run on any node, any time:
+    /// a live node always has a node document, so its in-flight work is never touched.
+    /// </summary>
+    internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
+    {
+        var liveNumbers = await NodeDocs
+            .Find(FilterDefinition<NodeDocument>.Empty)
+            .Project(x => x.AssignedNodeNumber)
+            .ToListAsync(token);
+
+        // AnyNode (0) is by definition not "owned".
+        liveNumbers.Add(MongoConstants.AnyNode);
+
+        await Incoming.UpdateManyAsync(
+            Builders<IncomingMessage>.Filter.Nin(x => x.OwnerId, liveNumbers),
+            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode),
+            cancellationToken: token);
+
+        await Outgoing.UpdateManyAsync(
+            Builders<OutgoingMessage>.Filter.Nin(x => x.OwnerId, liveNumbers),
+            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode),
+            cancellationToken: token);
+    }
+
+    /// <summary>
     /// Best-effort orphan recovery for outgoing envelopes: reassign globally-owned (OwnerId == 0)
     /// outgoing messages to this node and hand them back to the sending agent for delivery,
     /// discarding any that have already expired. Mirrors the Cosmos durability agent's outgoing recovery.

@@ -53,6 +53,10 @@ public class MongoDbDurabilityAgent : IAgent
             {
                 try
                 {
+                    if (_settings.Mode != DurabilityMode.Solo)
+                    {
+                        await _parent.ReleaseDeadNodeOwnershipAsync(_combined.Token);
+                    }
                     await _parent.RecoverOrphanedIncomingAsync(_runtime, _combined.Token);
                     await _parent.RecoverOrphanedOutgoingAsync(_runtime, _combined.Token);
                     await _parent.ReplayDeadLettersAsync(_combined.Token);
