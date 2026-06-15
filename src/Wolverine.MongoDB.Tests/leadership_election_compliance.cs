@@ -7,29 +7,25 @@ using Xunit.Abstractions;
 
 namespace Wolverine.MongoDB.Tests;
 
-// DEFERRED MULTI-NODE SUITE — excluded from the default (green MVP) build.
+// MULTI-NODE LEADERSHIP-ELECTION COMPLIANCE — still compile-gated behind RUN_MULTINODE.
 //
-// The single-node leader lock is correct and the leader-election facts here pass
-// reliably (the_only_known_node_is_automatically_the_leader,
-// leader_switchover_between_nodes, persist_and_load_node_records, etc.).
+// Task 6 of the multinode plan attempted to un-gate this suite. 9–10 of the 12 facts pass
+// reliably, but `leader_switchover_between_nodes` (and the dependent
+// `singular_agent_is_only_running_on_one`) cannot reach five consecutive green runs: they hinge
+// on a non-deterministic leadership-claim race that Wolverine core decides by lock-arrival order,
+// which our durable (w:majority+j:true) Mongo lock loses ~half the time. No test-config knob
+// (lease / heartbeat-period sweeps, RavenDb-style config) fixes it; the real fix is a
+// library-level deterministic "lowest live node wins" election in
+// MongoDbMessageStore.Locking.TryAttainLeadershipLockAsync.
 //
-// However, the full multi-node *agent assignment balancing* and failover facts
-// (e.g. singular_agent_is_only_running_on_one, take_over_leader_ship_if_leader_becomes_stale,
-// add_second_node_see_balanced_nodes) are flaky: their cluster-balance assertions
-// race against the lease TTL — exactly as the Cosmos equivalent documents, which is
-// itself marked [Trait("Category","Flaky")] for the same reason. Multi-node agent
-// balancing is explicitly DEFERRED to a post-0.1.0 spec; the 0.1.0 scope is
-// single-node-correct durability.
+// Full diagnosis, the config matrix, observed interleavings, a MassTransit comparison, the
+// suggested code change, and model guidance:
+//   docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md
+// Tracked in FOLLOWUPS.md. Keep this gated until that fix lands; then drop the gate, keep the
+// [Trait("Category","multinode")] below, and wire the separate CI category step (plan Task 8).
 //
-// This suite is compiled and run only when the RUN_MULTINODE constant is defined,
-// so it never gates the green MVP suite. To work on the multi-node coordination
-// spec locally, build/test with:  dotnet test -p:DefineConstants=RUN_MULTINODE
-//
-// (xUnit 2.9.3's dynamic-skip token is NOT honored by xunit.runner.visualstudio
-// under `dotnet test`, and the compliance facts live on an abstract base so they
-// cannot carry a static [Fact(Skip=...)] — hence a compile-time gate rather than
-// an in-class Skip.)
-[Trait("Category", "multi-node-deferred")]
+// To work the suite locally: dotnet test -p:DefineConstants=RUN_MULTINODE
+[Trait("Category", "multinode")]
 [Collection("mongodb")]
 public class leadership_election_compliance : LeadershipElectionCompliance
 {
@@ -42,13 +38,13 @@ public class leadership_election_compliance : LeadershipElectionCompliance
 
     protected override void configureNode(WolverineOptions opts)
     {
-        // MongoDB has no native control transport (unlike Cosmos, which ships
-        // CosmosDbControlTransport). Mirror the RavenDb NoSQL provider, which
-        // uses TCP for the inter-node control endpoint required by Balanced mode.
+        // MongoDB has no native control transport (unlike Cosmos); use TCP for the
+        // inter-node control endpoint required by Balanced mode, like RavenDb does.
         opts.UseTcpForControlEndpoint();
 
         opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
-        opts.UseMongoDbPersistence(AppFixture.DatabaseName);
+        opts.UseMongoDbPersistence(AppFixture.DatabaseName,
+            mongo => mongo.LockLeaseDuration = TimeSpan.FromSeconds(5));
     }
 
     protected override Task beforeBuildingHost()
