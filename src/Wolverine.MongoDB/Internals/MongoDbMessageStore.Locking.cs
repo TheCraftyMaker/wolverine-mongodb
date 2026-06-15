@@ -17,7 +17,7 @@ public partial class MongoDbMessageStore
             b.Or(b.Lt(x => x.ExpiresAt, now), b.Eq(x => x.NodeId, NodeId)));
         var update = Builders<LockDocument>.Update
             .Set(x => x.NodeId, NodeId)
-            .Set(x => x.ExpiresAt, now.AddMinutes(5))
+            .Set(x => x.ExpiresAt, now.Add(_persistenceOptions.LockLeaseDuration))
             .SetOnInsert(x => x.Id, lockId);
 
         try
@@ -33,10 +33,12 @@ public partial class MongoDbMessageStore
         }
         catch (MongoCommandException e) when (e.Code == 11000)
         {
+            if (lockId == MongoConstants.LeaderLockId) _leaderLock = null;
             return false;
         }
         catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategory.DuplicateKey)
         {
+            if (lockId == MongoConstants.LeaderLockId) _leaderLock = null;
             return false;
         }
     }
@@ -47,7 +49,14 @@ public partial class MongoDbMessageStore
             Builders<LockDocument>.Filter.Eq(x => x.NodeId, NodeId)));
 
     public bool HasLeadershipLock()
-        => _leaderLock != null && _leaderLock.NodeId == NodeId && _leaderLock.ExpiresAt > DateTime.UtcNow;
+    {
+        if (_leaderLock is null || _leaderLock.NodeId != NodeId) return false;
+
+        // Report leadership only while comfortably inside the lease (75%): a paused or
+        // clock-skewed node must stop acting as leader BEFORE another node can take over.
+        var margin = TimeSpan.FromTicks(_persistenceOptions.LockLeaseDuration.Ticks / 4);
+        return _leaderLock.ExpiresAt - margin > DateTime.UtcNow;
+    }
 
     public Task<bool> TryAttainLeadershipLockAsync(CancellationToken token)
         => TryAttainAsync(MongoConstants.LeaderLockId, token);
