@@ -5,6 +5,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 env:
   WOLVERINE_TAG: "V6.2.2"   # keep in sync with WolverineFx in Directory.Packages.props (tags are V-prefixed)
   CI_PACKAGE_VERSION: "0.0.0-ci"
