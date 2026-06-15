@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MongoDB.Driver;
 using Shouldly;
+using Wolverine.Transports.Tcp;
 
 namespace Wolverine.MongoDB.Tests;
 
@@ -12,24 +13,19 @@ public class durability_mode_guard
     public durability_mode_guard(AppFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task balanced_mode_fails_fast_at_startup()
+    public async Task balanced_mode_starts_with_a_control_endpoint()
     {
         await _fixture.ClearAll();
-
-        var ex = await Should.ThrowAsync<InvalidOperationException>(async () =>
-        {
-            using var host = await Host.CreateDefaultBuilder()
-                .UseWolverine(opts =>
-                {
-                    // Balanced is Wolverine's DEFAULT mode — not setting Solo must fail loudly,
-                    // not run a subtly broken cluster.
-                    opts.Durability.Mode = DurabilityMode.Balanced;
-                    opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
-                    opts.UseMongoDbPersistence(AppFixture.DatabaseName);
-                }).StartAsync();
-        });
-
-        ex.Message.ShouldContain("DurabilityMode.Solo");
+        using var host = await Host.CreateDefaultBuilder()
+            .UseWolverine(opts =>
+            {
+                opts.Durability.Mode = DurabilityMode.Balanced;
+                // MongoDB has no native control transport; Balanced requires one.
+                opts.UseTcpForControlEndpoint();
+                opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
+                opts.UseMongoDbPersistence(AppFixture.DatabaseName);
+            }).StartAsync();
+        host.ShouldNotBeNull();
     }
 
     [Fact]

@@ -44,7 +44,7 @@ jobs:
           -p:UseWolverineSource=false -p:Version=${{ env.CI_PACKAGE_VERSION }}
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nupkg
           path: ./artifacts/*.nupkg
@@ -61,7 +61,7 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Download freshly packed nupkg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nupkg
           path: ./artifacts

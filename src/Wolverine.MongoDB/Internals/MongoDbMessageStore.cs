@@ -1,4 +1,5 @@
 using JasperFx.Descriptors;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using Wolverine.Persistence;
 using Wolverine.Persistence.Durability;
@@ -15,13 +16,21 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     private readonly WolverineOptions _options;
     private readonly IMongoDatabase _database;
     private readonly Func<Envelope, string> _inboxIdentity;
+    private readonly MongoDbPersistenceOptions _persistenceOptions;
 
     internal IMongoCollection<IncomingMessage> Incoming { get; }
     internal IMongoCollection<OutgoingMessage> Outgoing { get; }
     internal IMongoCollection<DeadLetterMessage> DeadLetterDocs { get; }
 
     public MongoDbMessageStore(IMongoClient client, string databaseName, WolverineOptions options)
+        : this(client, databaseName, options, new MongoDbPersistenceOptions())
     {
+    }
+
+    public MongoDbMessageStore(IMongoClient client, string databaseName, WolverineOptions options,
+        MongoDbPersistenceOptions persistenceOptions)
+    {
+        _persistenceOptions = persistenceOptions;
         _client = client;
         _databaseName = databaseName;
         _options = options;
@@ -62,33 +71,31 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
 
     internal string InboxIdentity(Envelope envelope) => _inboxIdentity(envelope);
 
-    public void Initialize(IWolverineRuntime runtime) => AssertSupportedDurabilityMode(runtime);
+    public void Initialize(IWolverineRuntime runtime) => WarnOnBalancedMode(runtime);
 
     public DatabaseDescriptor Describe() => new(this) { Engine = "mongodb", DatabaseName = _databaseName };
 
     public Task DrainAsync() => Task.CompletedTask;
 
-    public IAgent StartScheduledJobs(IWolverineRuntime runtime)
-    {
-        AssertSupportedDurabilityMode(runtime);
-        return BuildAgent(runtime);
-    }
+    public IAgent StartScheduledJobs(IWolverineRuntime runtime) => BuildAgent(runtime);
 
     public IAgent BuildAgent(IWolverineRuntime runtime)
     {
-        AssertSupportedDurabilityMode(runtime);
+        WarnOnBalancedMode(runtime);
         return new MongoDbDurabilityAgent(runtime, this);
     }
 
-    private static void AssertSupportedDurabilityMode(IWolverineRuntime runtime)
+    private bool _warnedOnBalanced;
+
+    private void WarnOnBalancedMode(IWolverineRuntime runtime)
     {
-        if (runtime.Options.Durability.Mode == DurabilityMode.Balanced)
-        {
-            throw new InvalidOperationException(
-                "Wolverine.MongoDB currently supports single-node durability only. " +
-                "Set opts.Durability.Mode = DurabilityMode.Solo. " +
-                "Multi-node (Balanced) support is tracked in FOLLOWUPS.md.");
-        }
+        if (runtime.Options.Durability.Mode != DurabilityMode.Balanced || _warnedOnBalanced) return;
+        _warnedOnBalanced = true;
+        runtime.LoggerFactory.CreateLogger<MongoDbMessageStore>().LogInformation(
+            "Wolverine.MongoDB is running in Balanced (multi-node) mode. " +
+            "A control endpoint is required (e.g. opts.UseTcpForControlEndpoint()) and node clocks " +
+            "must be synchronized to well within the lock lease ({Lease}).",
+            _persistenceOptions.LockLeaseDuration);
     }
 
     public IAgentFamily? BuildAgentFamily(IWolverineRuntime runtime) => null;

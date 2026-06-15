@@ -40,14 +40,19 @@ public static class WolverineMongoDbExtensions
     /// </remarks>
     /// <param name="options"></param>
     /// <param name="databaseName">The MongoDB database name to use</param>
+    /// <param name="configure">Optional callback to tune MongoDB-specific persistence options such as lock lease duration</param>
     /// <returns></returns>
-    public static WolverineOptions UseMongoDbPersistence(this WolverineOptions options, string databaseName)
+    public static WolverineOptions UseMongoDbPersistence(this WolverineOptions options, string databaseName,
+        Action<MongoDbPersistenceOptions>? configure = null)
     {
+        var persistenceOptions = new MongoDbPersistenceOptions();
+        configure?.Invoke(persistenceOptions);
+
         options.Services.AddSingleton<IMessageStore>(sp =>
         {
             var client = sp.GetRequiredService<IMongoClient>();
             var wolverineOptions = sp.GetRequiredService<WolverineOptions>();
-            return new MongoDbMessageStore(client, databaseName, wolverineOptions);
+            return new MongoDbMessageStore(client, databaseName, wolverineOptions, persistenceOptions);
         });
 
         // Register the MongoDB database for use by code-generated handlers
