@@ -180,6 +180,112 @@ low-latency store does. Closing the gap requires a **library** change, e.g. one 
 Either is **out of Task 6's scope** (test-only) and belongs with the Task 2/3 leader-election work
 or a dedicated follow-up. Until then `take_over` is stabilizable but `leader_switchover` is not.
 
+## Suggested code change (option 1 — recommended)
+
+Make leadership election deterministic by node number, in
+`src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs`. Only the lowest-numbered
+**live** node contends for the lock; every other node defers. Core then cleanly makes that node
+the leader, and a node that discovers a lower-numbered live peer steps down via the existing
+`NodeAgentController.HeartBeat.cs:103-106` path. Field names verified against `NodeDocument.cs`
+and `MongoDbMessageStore.cs` on this branch.
+
+Replace the one-liner:
+
+```csharp
+public Task<bool> TryAttainLeadershipLockAsync(CancellationToken token)
+    => TryAttainAsync(MongoConstants.LeaderLockId, token);
+```
+
+with:
+
+```csharp
+public async Task<bool> TryAttainLeadershipLockAsync(CancellationToken token)
+{
+    // Deterministic leadership election. Wolverine core elects "whichever node's heartbeat
+    // grabs the lock first" (NodeAgentController.HeartBeat.cs:87). For a durable
+    // w:majority+j:true Mongo lock that is a race the LeadershipElectionCompliance suite
+    // loses — it expects the LOWEST-numbered surviving node to win. Gate the claim on node
+    // number so the winner is deterministic (matching the latency-driven emergent behaviour
+    // of the RavenDb/Postgres providers): only the lowest-numbered live node contends; all
+    // others defer. Returning false while IsLeader makes a now-too-high node step down.
+    var myNumber = _options.Durability.AssignedNodeNumber;
+    var staleCutoff = DateTime.UtcNow - _options.Durability.StaleNodeTimeout;
+
+    var lowerLiveNodeExists = await NodeDocs
+        .Find(Builders<NodeDocument>.Filter.And(
+            Builders<NodeDocument>.Filter.Lt(x => x.AssignedNodeNumber, myNumber),
+            Builders<NodeDocument>.Filter.Gte(x => x.LastHealthCheck, staleCutoff)))
+        .AnyAsync(token);
+
+    if (lowerLiveNodeExists)
+    {
+        _leaderLock = null; // not eligible to lead right now; drop any stale cached belief
+        return false;
+    }
+
+    return await TryAttainAsync(MongoConstants.LeaderLockId, token);
+}
+```
+
+Notes / things the implementer must get right (these are exactly why this is not a mechanical
+change):
+
+- **Scope to the leader lock only.** `TryAttainScheduledJobLockAsync` must keep calling
+  `TryAttainAsync` directly — the scheduled-job lock is competing-claim, not leader-elected.
+- **`AssignedNodeNumber` must be the real sequential number, not the `DurabilitySettings`
+  default.** The default is a random hash (`DurabilitySettings.cs:174`); core overwrites it with
+  the sequential number during node registration. Confirm it is assigned before the first
+  leadership attempt, or guard the unassigned case. (Single-node `the_only_known_node...` is safe
+  regardless — the `< myNumber` filter matches no other node.)
+- **Staleness must match core's notion.** Use `_options.Durability.StaleNodeTimeout` (default
+  1 min) so "live" here agrees with core's `ejectStaleNodes`. The compliance tests force
+  staleness via a 1-hour backdate / graceful delete, so both the disabled-leader and
+  shutdown-leader paths resolve correctly.
+- **Cost is negligible** — one read of the tiny `wolverine_nodes` collection per leadership
+  heartbeat; no new index needed.
+- **`take_over` keeps passing** for the same reason it can be stabilized today (its synchronous
+  `CheckAgentHealth` driver), and now becomes deterministic rather than interference-sensitive,
+  so the test no longer needs the short-lease/large-period tuning — the plan's plain `lease 5s`
+  config should hold.
+
+Alternative (option 2, no code given): lower the lock collection's write concern (e.g.
+`w:majority` without `j:true`) to shrink latency variance so the phase-lead wins as it does for
+RavenDb. Smaller change but it weakens lock durability semantics and is a probabilistic
+mitigation, not a guarantee — prefer option 1.
+
+### How to verify the fix
+
+1. **TDD first:** add a focused unit test in `Wolverine.MongoDB.Tests` — build two stores with
+   distinct `AssignedNodeNumber`s (the lower one with a fresh heartbeat), assert the
+   higher-numbered store's `TryAttainLeadershipLockAsync` returns `false` while the lower one
+   returns `true`; then mark the lower node stale and assert the higher one takes over. Watch it
+   fail, then implement.
+2. **Then the suite:** un-gate `leadership_election_compliance` (this branch already does) and run
+   `dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"` **five times in a row**,
+   plus the full suite once. Run against the CI version — a `V6.2.2` Wolverine worktree exists at
+   `C:\source\external\wolverine-V6.2.2`; pass `-p:WolverineSourcePath=C:\source\external\wolverine-V6.2.2`
+   (the local `C:\source\external\wolverine` clone has drifted to 6.5.1).
+3. **Guard the merged work:** re-run the Task 2/3/4 tests (`leader_lease`, `outgoing_recovery_contention`,
+   `dead_node_ownership_release`) — the change touches the shared leader-lock path.
+
+## Recommended model for the implementation
+
+This is a **distributed-systems concurrency change**, not a transcription task: a subtly wrong
+election predicate (off-by-one on `<` vs `<=`, wrong staleness window, missing the unassigned-number
+case, or applying the gate to the scheduled lock) **passes locally most of the time and only races
+under load / in CI** — precisely the failure class the multinode plan calls out.
+
+- **Use Fable 5 or Opus** (the plan's strongest tier — the same it mandates for Tasks 2, 3, 6, 7).
+  **Do not use Sonnet or Haiku** for the implementation: the plan reserves Sonnet for
+  "fully-specified code with deterministic tests", which this is not, and forbids Haiku anywhere.
+- **Drive it with TDD** (step 1 above) and treat the five-in-a-row `Category=multinode` bar as the
+  acceptance gate — no retries, no skips, no timeout lengthening (same HARD RULES as this task).
+- **Code review on Fable 5 / Opus with explicit concurrency scrutiny**, per the plan's
+  between-tasks review rule ("concurrency bugs that pass a green suite are precisely what review
+  must catch here").
+- **Escalation:** if five-in-a-row still cannot be reached after the change, stop and extend this
+  report rather than weakening assertions — the same escalation rule that produced this document.
+
 ## Decision
 
 Reviewed with the maintainer. Decision: **keep this as the report; do not change library code
