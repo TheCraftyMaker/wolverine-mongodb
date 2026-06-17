@@ -5,17 +5,23 @@ welcome — bug reports, docs fixes, tests, and features.
 
 ## Getting started
 
-1. Fork and clone the repo.
+1. Fork and clone the repo **with submodules**: `git clone --recursive <url>`
+   (already cloned? run `git submodule update --init`).
 2. Restore dependencies: `dotnet restore`.
 3. Build: `dotnet build`.
 
+The Wolverine source lives at a fixed in-repo path, `external/wolverine`, as a git submodule
+pinned to the matching `WolverineFx` version (see [Running tests](#running-tests) for why).
+Because the path is the same for everyone, `Wolverine.MongoDB.slnx` lists those source projects
+directly, so IDEs (e.g. Rider) resolve them instead of flagging missing dependencies — no
+per-machine configuration needed.
+
 ## Running tests
 
-Tests require a local clone of the Wolverine source at
-`C:\source\external\wolverine` (or set the `WOLVERINE_SOURCE` environment
-variable), because `WolverineFx.ComplianceTests` is not yet published to NuGet.
-They also require **Docker** — Testcontainers starts a MongoDB replica set for
-the run. These tests are excluded from CI until the compliance package ships.
+Tests project-reference the Wolverine source at `external/wolverine` because
+`WolverineFx.ComplianceTests` is not yet published to NuGet — so the submodule
+must be initialised (`git submodule update --init`). They also require **Docker**
+— Testcontainers starts a MongoDB replica set for the run.
 
 Tests run against a **real MongoDB replica set** — in-memory mocking misses the
 concurrency behaviour this library depends on. The quickest local setup is a

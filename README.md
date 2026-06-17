@@ -170,21 +170,20 @@ Collections and indexes are created automatically when Wolverine starts.
 
 ## Building and testing
 
-The compliance test suite currently requires a local clone of the Wolverine
-source, because `WolverineFx.ComplianceTests` is not yet published to NuGet. The
-clone is auto-detected via the `WolverineSourcePath` MSBuild property (default
-`C:\source\external\wolverine`; override with the `WOLVERINE_SOURCE` environment
-variable or `-p:WolverineSourcePath=...`). When the clone is present, both the
-library and the test project project-reference it so there is a single
-consistent `Wolverine.dll`.
+The compliance test suite currently requires the Wolverine source, because
+`WolverineFx.ComplianceTests` is not yet published to NuGet. It is vendored as a
+git submodule at `external/wolverine`, pinned to the matching `WolverineFx`
+version — clone with `git clone --recursive` (or run `git submodule update
+--init`). Both the library and the test project project-reference it so there is
+a single consistent `Wolverine.dll`. The path is overridable via the
+`WOLVERINE_SOURCE` environment variable or `-p:WolverineSourcePath=...`.
 
-CI runs the full compliance suite against a pinned Wolverine clone (tag
-`V6.2.2`) and then packs the library; the demo job downloads the freshly packed
-nupkg and runs end-to-end integration tests against it — no stale NuGet version
-is exercised.
+CI initialises the submodule, runs the full compliance suite, then packs the
+library; the demo job downloads the freshly packed nupkg and runs end-to-end
+integration tests against it — no stale NuGet version is exercised.
 
-When the clone is absent, the library can still be built and packed using the
-`WolverineFx` NuGet package:
+When the submodule is absent, the library can still be built and packed using
+the `WolverineFx` NuGet package:
 
 ```
 dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false

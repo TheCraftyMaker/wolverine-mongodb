@@ -97,8 +97,9 @@ Two public entry points:
 # Build library only (no Wolverine source clone needed)
 dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj
 
-# Build + test (requires Wolverine source clone for compliance tests)
-# Clone location: C:\source\external\wolverine or WOLVERINE_SOURCE env var
+# Build + test (compliance tests project-ref the Wolverine submodule at external/wolverine)
+# Initialise it first: git submodule update --init   (or clone with --recursive)
+# Override the path if needed: WOLVERINE_SOURCE env var or -p:WolverineSourcePath=...
 dotnet test src/Wolverine.MongoDB.Tests/
 
 # Pack for NuGet (declares WolverineFx package dependency)
@@ -107,10 +108,11 @@ dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolv
 
 Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required.
 
-**CI:** the `library` job checks out the Wolverine source at tag `V6.2.2` (set in
-`WOLVERINE_TAG` in `.github/workflows/ci.yml`), runs the full compliance suite, then packs
-the library at version `0.0.0-ci`. The `demo` job downloads that nupkg and runs the
-end-to-end integration tests against it, so every PR exercises the freshly built package.
+**CI:** the `library` job checks out with `submodules: recursive` (the Wolverine source is the
+`external/wolverine` submodule, pinned to the `V6.2.2` commit — keep the pin in sync with
+`WolverineFx` in `Directory.Packages.props`), runs the full compliance suite, then packs the
+library at version `0.0.0-ci`. The `demo` job downloads that nupkg and runs the end-to-end
+integration tests against it, so every PR exercises the freshly built package.
 
 ---
 

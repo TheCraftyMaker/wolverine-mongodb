@@ -9,7 +9,6 @@ permissions:
   contents: read
 
 env:
-  WOLVERINE_TAG: "V6.2.2"   # keep in sync with WolverineFx in Directory.Packages.props (tags are V-prefixed)
   CI_PACKAGE_VERSION: "0.0.0-ci"
 
 jobs:
@@ -17,14 +16,11 @@ jobs:
   library:
     runs-on: ubuntu-latest
     steps:
+      # The Wolverine compliance harness lives at external/wolverine as a submodule
+      # pinned to the WolverineFx version (keep the pin in sync with Directory.Packages.props).
       - uses: actions/checkout@v6
-
-      - name: Checkout Wolverine source (compliance test harness)
-        uses: actions/checkout@v6
         with:
-          repository: JasperFx/wolverine
-          ref: ${{ env.WOLVERINE_TAG }}
-          path: external/wolverine
+          submodules: recursive
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -32,9 +28,7 @@ jobs:
             9.0.x
             10.0.x
 
-      - name: Run library tests (project-refs the Wolverine clone)
-        env:
-          WOLVERINE_SOURCE: ${{ github.workspace }}/external/wolverine
+      - name: Run library tests (project-refs the Wolverine submodule)
         run: >
           dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
           -c Release -p:UseWolverineSource=true

@@ -3,4 +3,17 @@
     <Project Path="src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj" />
     <Project Path="src/Wolverine.MongoDB/Wolverine.MongoDB.csproj" />
   </Folder>
+  <!-- Wolverine source projects, referenced by the compliance test loop (UseWolverineSource=true).
+       They live at the fixed in-repo submodule path external/wolverine; initialise it with
+       `git submodule update` (or clone the repo recursively). The dotnet CLI resolves these
+       out-of-solution ProjectReferences transitively, but IDEs that build their project graph from
+       the solution (e.g. Rider) need them listed explicitly. CI never opens this solution; it
+       builds the .csproj files directly. -->
+  <Folder Name="/wolverine-source/">
+    <Project Path="external/wolverine/src/Wolverine/Wolverine.csproj" />
+    <Project Path="external/wolverine/src/Testing/Wolverine.ComplianceTests/Wolverine.ComplianceTests.csproj" />
+    <Project Path="external/wolverine/src/Persistence/Wolverine.RDBMS/Wolverine.RDBMS.csproj" />
+    <Project Path="external/wolverine/src/Wolverine.RuntimeCompilation/Wolverine.RuntimeCompilation.csproj" />
+    <Project Path="external/wolverine/src/Extensions/Wolverine.Newtonsoft/Wolverine.Newtonsoft.csproj" />
+  </Folder>
 </Solution>
