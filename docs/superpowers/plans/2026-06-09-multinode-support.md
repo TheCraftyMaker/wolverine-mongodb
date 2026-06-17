@@ -49,7 +49,7 @@ rtk git worktree remove .worktrees/<branch-name>
 
 Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged** — this plan is much more sequential than the hardening plan.
 
-| Task | Branch | PR title | Depends on | Model | Status (2026-06-16) |
+| Task | Branch | PR title | Depends on | Model | Status (2026-06-17) |
 |---|---|---|---|---|---|
 | 1 | `feat/mongodb-persistence-options` | feat: MongoDbPersistenceOptions; allow DurabilityMode.Balanced | Solo plan merged | Sonnet | ✅ Merged (#63) |
 | 2 | `feat/configurable-leader-lease` | feat: configurable leader lock lease with renewal margin | **Task 1** | **Fable 5 / Opus** | ✅ Merged (#67) |
@@ -58,13 +58,13 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 5 | `feat/delete-old-node-records` | feat: implement DeleteOldNodeRecordsAsync | Solo plan merged | Sonnet | ✅ Merged (#70) |
 | 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first — balancing facts exercise recovery) | **Fable 5** | ⚠️ Partial (#71) — **blocked**; suite kept **gated**, findings doc landed |
 | ~~6b~~ | *(none — documented only)* | deterministic lowest-live-node leadership election | n/a | n/a | 📋 **Documented option, NOT a planned task** — analyzed & declined for production (see the note after Task 6 + the findings doc) |
-| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ⛔ Not started — **production-confidence path** (message guarantees; leader-identity-independent) |
-| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ⛔ Not started — depends on Task 7 |
+| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76) — production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
+| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ⛔ Not started (unblocked — Task 7 merged) |
 | 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ⛔ Not started (unblocked — independent) |
 | 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document the any-node model honestly (leadership compliance gated like Cosmos) |
 | 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
 
-**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. Remaining work: **Task 7** (cross-node message guarantees — the production-confidence path) and **Task 9** (demo) are independent and ready; then **Task 8** (run Task 7's multinode tests as a separate CI step), **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`.
+**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). Remaining work: **Task 9** (demo — independent and ready) and **Task 8** (run Task 7's multinode tests as a separate CI step — now unblocked); then **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`.
 
 > _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
@@ -808,12 +808,14 @@ Wolverine core elects a leader as "whichever node's heartbeat grabs the lock fir
 
 ### Task 7: Cross-node end-to-end integration tests
 
+> **Status (2026-06-17): ✅ Done — merged (#76).** Both facts reached the acceptance bar of **five consecutive green runs** on net9.0 + net10.0 (no skips, no retries, no assertion-weakening); the full library suite is green (107/107 per TFM) and CI (`library` + `demo`) passed. Control-endpoint API resolved against the pinned V6.2.2 submodule — see the implementation note below.
+
 Compliance covers election/balancing; these tests cover the *message* guarantees across nodes: scheduled exactly-once claim, and dead-node envelope rescue end to end.
 
 **Files:**
 - Test: Create `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs`
 
-- [ ] **Step 1: Write the tests** — create `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs`:
+- [x] **Step 1: Write the tests** — create `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -923,13 +925,14 @@ Implementation notes for the engineer:
 - `opts.ListenAtPort(port, x => x.UseForControlEndpoint())` — verify the exact control-endpoint API against the Wolverine clone (`UseTcpForControlEndpoint()` picks its own port; the explicit-port form is preferred here for clarity, but if only the parameterless form exists, use it and drop the PortFinder).
 - `opts.LocalQueueFor<T>()` — verify name (`PublishMessage<T>().ToLocalQueue(...)` is the fallback).
 - The static `Handled` list is shared across both in-proc nodes — that is the point: it observes total executions process-wide.
+- **API resolution (verified against the pinned V6.2.2 `external/wolverine` submodule):** `opts.ListenAtPort(port, x => x.UseForControlEndpoint())` does **not** exist — there is no `ListenAtPort(int, Action)` overload and no `UseForControlEndpoint` method. Used the documented fallback `opts.UseTcpForControlEndpoint()`, which grabs its own OS-assigned free port internally (`PortFinder.GetAvailablePort`), so two in-proc nodes never collide and `PortFinder` is dropped. `PortFinder` actually lives in `Wolverine.Util` (core), not `Wolverine.ComplianceTests`. `LocalQueueFor<T>()` + `UseDurableInbox()`, `Discovery.IncludeType`, and `ScheduledJob{PollingTime,FirstExecution}` all exist and are used as written. The bus is obtained via `host.MessageBus()` (the Wolverine-blessed scoped-bus accessor) rather than resolving `IMessageBus` from the root container, which the upstream convention warns is wrong for durable scheduling.
 
-- [ ] **Step 2: Run, iterate, and stabilize** (same 5-in-a-row bar as Task 6)
+- [x] **Step 2: Run, iterate, and stabilize** (same 5-in-a-row bar as Task 6)
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~multinode_end_to_end"`
 Expected: PASS, five consecutive runs.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 rtk git add src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs
