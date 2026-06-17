@@ -14,15 +14,21 @@ namespace Wolverine.MongoDB.Tests;
 // `singular_agent_is_only_running_on_one`) cannot reach five consecutive green runs: they hinge
 // on a non-deterministic leadership-claim race that Wolverine core decides by lock-arrival order,
 // which our durable (w:majority+j:true) Mongo lock loses ~half the time. No test-config knob
-// (lease / heartbeat-period sweeps, RavenDb-style config) fixes it; the real fix is a
-// library-level deterministic "lowest live node wins" election in
-// MongoDbMessageStore.Locking.TryAttainLeadershipLockAsync.
+// (lease / heartbeat-period sweeps, RavenDb-style config) fixes it.
 //
-// Full diagnosis, the config matrix, observed interleavings, a MassTransit comparison, the
-// suggested code change, and model guidance:
+// DECISION (2026-06-16): keep this suite GATED — deliberately, not pending work. The provider
+// keeps the production-appropriate "any healthy node leads" model rather than constraining
+// production to satisfy this upstream test's lowest-node assertion, matching how Wolverine's
+// own Cosmos provider gates the same facts [Flaky]. The "lowest live node wins" election that
+// would make these facts pass was analyzed and DECLINED for production (it degrades real
+// failover); it is documented as an upstream-parity option only. Production confidence for
+// multinode comes from the cross-node message-guarantee tests (plan Task 7), which are
+// leader-identity-independent — not from this leadership-identity suite.
+//
+// Full diagnosis, config matrix, interleavings, MassTransit comparison, and the documented
+// (declined) code change:
 //   docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md
-// Tracked in FOLLOWUPS.md. Keep this gated until that fix lands; then drop the gate, keep the
-// [Trait("Category","multinode")] below, and wire the separate CI category step (plan Task 8).
+// (decision recorded in FOLLOWUPS.md).
 //
 // To work the suite locally: dotnet test -p:DefineConstants=RUN_MULTINODE
 [Trait("Category", "multinode")]
