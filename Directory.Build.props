@@ -16,15 +16,17 @@
     <Version>0.1.0-beta.5</Version>
   </PropertyGroup>
 
-  <!-- WolverineFx.ComplianceTests is not yet published on NuGet. When a local Wolverine clone
-       is present, project-reference it so the test project resolves a single consistent
-       Wolverine.dll. In CI/pack (no clone) the library uses the WolverineFx NuGet package and
-       the test project is not built. TODO: flip the test project to a PackageReference on
-       WolverineFx.ComplianceTests once that package is published upstream. -->
+  <!-- WolverineFx.ComplianceTests is not yet published on NuGet. The Wolverine source lives at a
+       fixed, repo-relative path as a git submodule (external/wolverine, pinned to the WolverineFx
+       version; run `git submodule update` to initialise it). When present, the library and test projects
+       project-reference it so they resolve a single consistent Wolverine.dll; for pack the library
+       uses the WolverineFx NuGet package instead (UseWolverineSource=false). WOLVERINE_SOURCE / -p:
+       WolverineSourcePath still override the path if needed. TODO: flip the test project to a
+       PackageReference on WolverineFx.ComplianceTests once that package is published upstream. -->
   <PropertyGroup>
     <WolverineSourcePath Condition="'$(WolverineSourcePath)' == '' and '$(WOLVERINE_SOURCE)' != ''">$(WOLVERINE_SOURCE)</WolverineSourcePath>
-    <WolverineSourcePath Condition="'$(WolverineSourcePath)' == ''">C:\source\external\wolverine</WolverineSourcePath>
-    <UseWolverineSource Condition="'$(UseWolverineSource)' == '' and Exists('$(WolverineSourcePath)')">true</UseWolverineSource>
+    <WolverineSourcePath Condition="'$(WolverineSourcePath)' == ''">$(MSBuildThisFileDirectory)external\wolverine</WolverineSourcePath>
+    <UseWolverineSource Condition="'$(UseWolverineSource)' == '' and Exists('$(WolverineSourcePath)\src\Wolverine\Wolverine.csproj')">true</UseWolverineSource>
     <UseWolverineSource Condition="'$(UseWolverineSource)' == ''">false</UseWolverineSource>
   </PropertyGroup>
 

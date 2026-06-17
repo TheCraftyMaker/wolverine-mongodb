@@ -1,0 +1,3 @@
+[submodule "external/wolverine"]
+	path = external/wolverine
+	url = https://github.com/JasperFx/wolverine.git
