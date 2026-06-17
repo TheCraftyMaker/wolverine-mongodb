@@ -150,7 +150,7 @@ This task runs on main itself: rtk git checkout main && rtk git pull, run the fu
 
 **Precondition for ALL Phase B prompts: Phase A is fully merged and Task 13's verification report is clean.**
 
-> **Status (2026-06-16):** Tasks 1–5 merged (#63/#67/#68/#69/#70). Task 6 produced a **gated findings PR** (#71) — the compliance suite is **not** un-gated or green; un-gating moved to the new **Task 6b** below, which is the real prerequisite for Tasks 8/10/11. See the plan's task-table status column and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
+> **Status (2026-06-16):** Tasks 1–5 merged (#63/#67/#68/#69/#70). Task 6 produced a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept); the lowest-node fix (formerly "Task 6b") is **documented-only, not planned**. Remaining work: **Task 7** (production-confidence path) and **Task 9** (independent), then Tasks 8/10/11. See the plan + `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
 
 ### B1. Task 1 — MongoDbPersistenceOptions + allow Balanced *(model: Sonnet)* ✅ Merged (#63)
 
@@ -204,7 +204,7 @@ Stay strictly within Task 5's scope. If a plan assumption doesn't hold, stop and
 
 ### B3. Task 6 — un-gate multinode compliance *(model: **Fable 5 mandatory**)* — ⚠️ Done → blocked (#71)
 
-> **Outcome (2026-06-16):** executed; five-consecutive-green was **not** reachable via test config. Merged as a gated findings PR (#71); the suite is kept behind `RUN_MULTINODE`. Un-gating is now **Task 6b** (below), which must land first. The prompt below is retained for history; see `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
+> **Outcome (2026-06-16):** executed; five-consecutive-green was **not** reachable via test config. Merged as a gated findings PR (#71). **Decision:** the suite **stays gated** (the production-appropriate any-healthy-node model is kept); the lowest-node fix is **documented-only, not planned** (see below). The prompt is retained for history; see `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
 
 ```
 Execute Task 6 ("Un-gate and stabilize the multinode compliance suite") of docs/superpowers/plans/2026-06-09-multinode-support.md using the superpowers:executing-plans skill.
@@ -214,23 +214,13 @@ Precondition: verify the PRs for multinode Tasks 1, 2, 3, and 4 are merged to ma
 When stable: run the FULL suite, commit, push, open the PR titled "test: un-gate multinode leadership election compliance". Watch checks until green.
 ```
 
-### B3b. Task 6b — deterministic leader election (un-gate prerequisite) *(model: Fable 5 / Opus; after Tasks 1–4 merged — this is what actually un-gates the Task 6 suite)*
+### B3b. ~~Task 6b — deterministic leader election~~ — NOT a planned task
 
-```
-Execute Task 6b ("Deterministic leader election (un-gate prerequisite)") of docs/superpowers/plans/2026-06-09-multinode-support.md using the superpowers:executing-plans skill.
-
-First read docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md in full — it has the root cause, the exact "Suggested code change (option 1)", the four correctness caveats, and the verification recipe. Precondition: verify the PRs for multinode Tasks 1–4 are merged to main. Then: branch fix/deterministic-leader-election from origin/main.
-
-Implement the node-number-guarded TryAttainLeadershipLockAsync in src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs — attain the leader lock only when no lower-numbered, non-stale node exists — honoring ALL four caveats: leader-lock-only scope (leave TryAttainScheduledJobLockAsync unchanged); use the real assigned node number, not the DurabilitySettings default; staleness window = StaleNodeTimeout; cost is one tiny wolverine_nodes read. TDD a focused unit test FIRST (lowest live node wins; a node with a lower-numbered live peer concedes). Then drop the #if RUN_MULTINODE gate in leadership_election_compliance.cs (keep [Trait("Category","multinode")]).
-
-Acceptance bar: FIVE consecutive green runs of dotnet test --filter "Category=multinode" against the V6.2.2 worktree (-p:WolverineSourcePath=C:\source\external\wolverine-V6.2.2), plus the full suite once, plus the Task 2/3/4 tests (leader_lease, outgoing_recovery_contention, dead_node_ownership_release) since this touches the shared leader-lock path. HARD RULES: no skips, no retries, no timeout lengthening. If five-in-a-row still cannot be reached, stop and extend the findings doc rather than weakening assertions (the same escalation rule that produced it).
-
-When stable: commit, push, open the PR titled "fix: deterministic lowest-live-node leadership election". Watch checks until green. This completes Task 6 (un-gating) and unblocks Task 8.
-```
+> **Decision (2026-06-16): declined for production; documented-only — do NOT dispatch a session for this.** "Lowest node wins" is an upstream-test tie-breaker, not a production requirement, and implementing it would degrade real failover. The full analysis and the declined code live in the plan's "Deferred option" note and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`; it is retained only as an upstream-parity option. Production confidence comes from **Task 7** below.
 
 ### B4. Tasks 7 and 9 *(parallel once their preconditions hold)*
 
-**Task 7 — cross-node end-to-end tests** *(model: **Fable 5 mandatory**; after Tasks 1–4 merged; until Task 6b lands, keep the new tests compile-gated behind `#if RUN_MULTINODE` so they don't run un-gated in CI)*:
+**Task 7 — cross-node end-to-end tests** *(model: **Opus 4.8**; after Tasks 1–4 merged — the **production-confidence path**: validates the cross-node message guarantees, independent of leader identity)*:
 
 ```
 Execute Task 7 ("Cross-node end-to-end integration tests") of docs/superpowers/plans/2026-06-09-multinode-support.md using the superpowers:executing-plans skill.
@@ -248,12 +238,12 @@ Execute Task 9 ("Demo — config-driven durability mode + multinode runbook") of
 Precondition: verify the multinode Task 1 PR is merged to main. Then: branch demo/config-driven-durability-mode from origin/main; implement the Program.cs/appsettings changes and the README runbook exactly as written; build the demo solution and run its integration tests (they stay Solo). The manual two-instance smoke (plan Step 6) is recommended if Docker + RabbitMQ are available — record the outcome in the PR description either way. Commit, push, open the PR titled "demo: config-driven durability mode with multinode runbook". Watch checks until green.
 ```
 
-### B5. Task 8 — CI multinode category *(model: Sonnet; **only after Task 6b is merged and the suite is un-gated & green**)*
+### B5. Task 8 — CI multinode category *(model: Sonnet; after Task 7 lands runnable multinode tests)*
 
 ```
 Execute Task 8 ("CI runs the multinode category") of docs/superpowers/plans/2026-06-09-multinode-support.md using the superpowers:executing-plans skill.
 
-Precondition: verify the multinode Task 6b PR is merged to main AND the multinode suite is un-gated and runs green. (While the suite is still compile-gated, a `--filter "Category=multinode"` step matches zero compiled tests and passes vacuously — do NOT add the CI step against a gated suite.) Then: branch ci/multinode-category from origin/main; split the CI test step per the plan; commit, push, open the PR titled "ci: run multinode test category as a separate step"; watch checks until BOTH test steps are green. If the multinode step flakes on CI but not locally, do NOT add retries — report back so Task 6's stabilization can be revisited.
+Precondition: verify Task 7 is merged to main — it provides the runnable [Category=multinode] cross-node tests. The leadership compliance facts stay gated (decision), so this step runs Task 7's tests as a separate CI step. Then: branch ci/multinode-category from origin/main; split the CI test step per the plan; commit, push, open the PR titled "ci: run multinode test category as a separate step"; watch checks until BOTH test steps are green. If the multinode step flakes on CI but not locally, do NOT add retries — report back so Task 7's stabilization can be revisited.
 ```
 
 ### B6. Task 10 — documentation sweep *(model: Sonnet; **only after Tasks 1–9 PRs are all merged**)*

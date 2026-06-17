@@ -57,14 +57,14 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 4 | `feat/release-dead-node-ownership` | feat: release envelope ownership held by dead node numbers | Solo plan merged | Sonnet | ✅ Merged (#69) |
 | 5 | `feat/delete-old-node-records` | feat: implement DeleteOldNodeRecordsAsync | Solo plan merged | Sonnet | ✅ Merged (#70) |
 | 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first — balancing facts exercise recovery) | **Fable 5** | ⚠️ Partial (#71) — **blocked**; suite kept **gated**, findings doc landed |
-| **6b** | `fix/deterministic-leader-election` | fix: deterministic lowest-live-node leadership election | **Tasks 1–4** | **Fable 5 / Opus** | ⛔ **Not started — prerequisite to un-gating Task 6 and to Task 8** |
-| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Fable 5** | ⛔ Not started — keep behind `RUN_MULTINODE` until 6b |
-| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 6b** (suite must be un-gated & green) | Sonnet | ⛔ Blocked on 6b |
+| ~~6b~~ | *(none — documented only)* | deterministic lowest-live-node leadership election | n/a | n/a | 📋 **Documented option, NOT a planned task** — analyzed & declined for production (see the note after Task 6 + the findings doc) |
+| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ⛔ Not started — **production-confidence path** (message guarantees; leader-identity-independent) |
+| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ⛔ Not started — depends on Task 7 |
 | 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ⛔ Not started (unblocked — independent) |
-| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document multinode honestly (6b pending) |
+| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document the any-node model honestly (leadership compliance gated like Cosmos) |
 | 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
 
-**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71) — the compliance suite is **not** un-gated and is **not** green (see the Task 6 status note and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`). The remaining critical path is **6b → drop the `RUN_MULTINODE` gate (completes 6) → 8**. Task 9 (demo) is independent and may land anytime. Task 7 may proceed but must stay compile-gated behind `RUN_MULTINODE` until 6b lands. Then 10 (docs — describe multinode honestly), 11 on `main`.
+**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. Remaining work: **Task 7** (cross-node message guarantees — the production-confidence path) and **Task 9** (demo) are independent and ready; then **Task 8** (run Task 7's multinode tests as a separate CI step), **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`.
 
 > _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
@@ -725,7 +725,7 @@ rtk git commit -m "feat: implement DeleteOldNodeRecordsAsync node-record trimmin
 
 ### Task 6: Un-gate and stabilize the multinode compliance suite
 
-> **Status (2026-06-16): ⚠️ Blocked — merged as a gated findings PR (#71).** Five-consecutive-green is **not** reachable via test config: `leader_switchover_between_nodes` (and the dependent `singular_agent_is_only_running_on_one`) hinge on a leadership-claim race Wolverine core decides by lock-arrival order, which our durable (`w:majority+j:true`) Mongo lock loses ~half the time. The suite is therefore **kept compile-gated behind `RUN_MULTINODE`**; the actual un-gate is deferred to **Task 6b**. Full diagnosis, the ~45-run config matrix, observed interleavings, a MassTransit comparison, the suggested code change, and model guidance: `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. The steps below were executed (un-gate → stabilize attempts → re-gate); the acceptance bar (5× green) was not met, so they are intentionally left **unchecked**.
+> **Status (2026-06-16): ⚠️ Blocked — merged as a gated findings PR (#71).** Five-consecutive-green is **not** reachable via test config: `leader_switchover_between_nodes` (and the dependent `singular_agent_is_only_running_on_one`) hinge on a leadership-claim race Wolverine core decides by lock-arrival order, which our durable (`w:majority+j:true`) Mongo lock loses ~half the time. The suite is therefore **kept compile-gated behind `RUN_MULTINODE`** — a **deliberate decision** to keep the production-appropriate any-healthy-node model rather than constrain production for an upstream test (matching Wolverine's Cosmos provider, which gates the same facts `[Flaky]`). The lowest-node fix (formerly "Task 6b") was **analyzed and declined for production** — documented as an upstream-parity option only (see the note below). Full diagnosis, the ~45-run config matrix, observed interleavings, a MassTransit comparison, the suggested code change, and model guidance: `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. The steps below were executed (un-gate → stabilize attempts → re-gate); the acceptance bar (5× green) was not met, so they are intentionally left **unchecked**.
 
 The suite is currently compile-gated behind `#if RUN_MULTINODE` because the balancing facts raced the hardcoded 5-minute lease. With the lease now configurable (Task 2) and defaulting to 1 minute, configure a short lease for tests and run the suite for real.
 
@@ -796,26 +796,13 @@ rtk git commit -m "test: un-gate multinode leadership election compliance with s
 
 ---
 
-### Task 6b: Deterministic leader election (un-gate prerequisite)
+### Deferred option (documented, NOT a planned task): deterministic lowest-live-node leader election
 
-> **New task (added 2026-06-16) — the real unblocker for Task 6.** Rationale, root cause, and the exact code in `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
+> **Decision (2026-06-16): declined for production.** This was briefly framed as "Task 6b"; it is **not** a planned task. It is recorded here only as a documented option in case the Wolverine/JasperFx team ever wants the provider to match the compliance suite's lowest-node expectation (upstream parity).
 
-Wolverine core elects a leader as "whichever node's heartbeat grabs the lock first"; the compliance suite expects the **lowest-numbered surviving node** to win. Fast stores (RavenDb/Postgres) win that race emergently via low-latency CAS; our durable Mongo lock does not. Make it explicit: a node attains the leader lock only when no lower-numbered, non-stale node exists.
+Wolverine core elects a leader as "whichever node's heartbeat grabs the lock first"; the upstream `LeadershipElectionCompliance` suite expects the **lowest-numbered surviving node** to win — an emergent property only fast/low-variance stores satisfy. The provider *could* conform by making `TryAttainLeadershipLockAsync` attain the leader lock only when no lower-numbered, non-stale node exists (full code: the "Suggested code change" in `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`).
 
-**Files:**
-- Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs` (`TryAttainLeadershipLockAsync` node-number guard; leave `TryAttainScheduledJobLockAsync` unchanged)
-- Test: add a focused unit test in `src/Wolverine.MongoDB.Tests` (lowest live node wins; concede when a lower live node exists)
-- Then: `src/Wolverine.MongoDB.Tests/leadership_election_compliance.cs` (drop `#if RUN_MULTINODE`, keep `[Trait("Category","multinode")]`)
-
-- [ ] **Step 1:** Implement the "Suggested code change (option 1)" from the findings doc, honoring its four caveats: leader-lock-only scope; the real (not default) `AssignedNodeNumber`; staleness window = `StaleNodeTimeout`; cost is one tiny `wolverine_nodes` read.
-- [ ] **Step 2:** TDD the focused unit test first — watch it fail, then implement.
-- [ ] **Step 3:** Drop the compile gate in `leadership_election_compliance.cs`; run `dotnet test --filter "Category=multinode"` **five times in a row** plus the full suite once, against the V6.2.2 worktree (`-p:WolverineSourcePath=C:\source\external\wolverine-V6.2.2`). No retries, no skips, no timeout lengthening.
-- [ ] **Step 4:** Re-run the Task 2/3/4 tests (`leader_lease`, `outgoing_recovery_contention`, `dead_node_ownership_release`) — the change touches the shared leader-lock path.
-- [ ] **Step 5:** Commit; open the PR; watch checks. If five-in-a-row still cannot be reached, **stop and extend the findings doc** rather than weakening assertions (same escalation rule that produced it).
-
-**Model:** **Fable 5 / Opus** — a race-sensitive concurrency change where a subtly wrong predicate passes locally and only fails under load/CI. Do **not** use Sonnet/Haiku for the implementation; review on Fable 5/Opus with concurrency scrutiny.
-
-This task **completes Task 6** (un-gating) and **unblocks Task 8**.
+**Why it's declined for production:** "lowest node wins" is a test tie-breaker, not a production requirement, and the change would *degrade* real failover (couples failover latency to `StaleNodeTimeout`; pins leadership to a degraded-but-heartbeating lowest node) purely to satisfy an upstream test. The current any-healthy-node model is the better production behavior. Production confidence comes from **Task 7** (cross-node message guarantees), not from conforming to the leadership-identity assertion. If ever pursued for upstream parity, use Opus 4.8, and pair it with a failover-window refinement (see the findings doc).
 
 ---
 
@@ -953,7 +940,7 @@ rtk git commit -m "test: cross-node exactly-once scheduling and dead-node rescue
 
 ### Task 8: CI runs the multinode category
 
-> **Status (2026-06-16): ⛔ Blocked on Task 6b.** Dependency corrected from "Task 6" to "Task 6b". While the suite stays compile-gated, a `--filter "Category=multinode"` step matches **zero** compiled tests and passes vacuously — do not add it until 6b un-gates the suite and it runs green.
+> **Status (2026-06-16): ⛔ Not started — depends on Task 7.** The leadership compliance suite stays gated (decision), so this step's value is to run **Task 7's** cross-node `[Category=multinode]` tests as a separate CI step once they exist. (Dependency re-pointed from the former "Task 6b".)
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`

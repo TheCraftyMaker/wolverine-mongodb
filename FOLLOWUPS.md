@@ -33,21 +33,22 @@ the first public release.
   multi-node balancing facts are flaky (deferred), mirroring how Cosmos marks its
   own as `[Flaky]`. Tracked in `docs/superpowers/plans/2026-06-09-multinode-support.md`.
 
-- **Deterministic leader election for the multinode compliance suite.** Un-gating
-  `leadership_election_compliance` (multinode plan Task 6) cannot reach five
-  consecutive green runs: `leader_switchover_between_nodes` (and the dependent
-  `singular_agent_is_only_running_on_one`) require the lowest-numbered surviving
-  node to win a leadership-claim race that Wolverine core decides purely by
-  "whoever's heartbeat grabs the lock first" — fast stores (RavenDb/Postgres) win
-  it emergently via low-latency CAS; our `w:majority+j:true` lock cannot. No
-  `configureNode` knob fixes it (lease/heartbeat sweeps all worse). MassTransit was
-  reviewed for comparison — it avoids the problem by having **no** leader election
-  (competing-consumers claims), so it offers no retrofit. The fix is library-level:
-  make `TryAttainLeadershipLockAsync` deterministic by attaining only when no
-  lower-numbered, non-stale node exists. Full analysis, config matrix, and observed
-  interleavings: `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
-  Until then the suite stays gated. `take_over_leader_ship_if_leader_becomes_stale`
-  is separately fixable (it has a synchronous `CheckAgentHealth` driver).
+- **Multinode leadership compliance is gated (by decision, not pending work).** The upstream
+  `leadership_election_compliance` facts (`leader_switchover_between_nodes`,
+  `singular_agent_is_only_running_on_one`) require the lowest-numbered surviving node to win a
+  leadership-claim race that Wolverine core decides by "whoever's heartbeat grabs the lock
+  first" — fast stores (RavenDb/Postgres) win it emergently via low-latency CAS; our
+  `w:majority+j:true` lock cannot, and no `configureNode` knob fixes it (lease/heartbeat sweeps
+  all worse; MassTransit has no leader election to borrow from). **Decision (2026-06-16):
+  declined to chase it.** "Lowest node wins" is a test tie-breaker, not a production
+  requirement; the provider keeps the production-appropriate any-healthy-node model and the
+  suite stays compile-gated behind `RUN_MULTINODE`, exactly as Wolverine's own Cosmos provider
+  gates the same facts `[Flaky]`. A deterministic lowest-node election *could* make them pass
+  but would degrade real failover — documented as an **upstream-parity option only** (full
+  analysis + the declined code):
+  `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. Production
+  confidence for multinode comes from the cross-node message-guarantee tests (plan Task 7),
+  which are leader-identity-independent.
 
 - **Demo app has no `MongoDbUnitOfWork` example.** The demo uses the repository
   pattern with explicit `IClientSessionHandle` threading, which is the fuller
