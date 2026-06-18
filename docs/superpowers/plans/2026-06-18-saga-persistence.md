@@ -113,8 +113,8 @@ rtk git worktree remove .worktrees/<branch-name>
 |---|---|---|---|---|---|
 | **S1** | `docs/saga-repo-analysis` | docs: saga — repository & convention analysis | Prereqs merged | ✅ Done | Sonnet |
 | **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | ✅ Done | Sonnet |
-| **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | Can start immediately | Sonnet |
-| **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | Blocked by: S1, S2, S3 | **Opus / Fable 5** |
+| **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | ✅ Done (PR #87 merged) | Sonnet |
+| **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | ✅ Done | **Opus / Fable 5** |
 | **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | ✅ **Done** — merged #89 | Sonnet |
 | **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | Blocked by: S4 | **Fable 5 / Opus** |
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | Blocked by: S6 | **Fable 5 / Opus** |
@@ -227,8 +227,8 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 - **Dependencies:** **S1, S2, S3.**
 - **Blocking status:** **Blocked by: S1, S2, S3.**
 
-- [ ] **Step 1:** Synthesize S1–S3 notes; resolve each decision 1–7 above.
-- [ ] **Step 2:** Write the design doc; state the chosen Option and the downscope path. Commit (`docs: MongoDB saga document model & concurrency design`).
+- [x] **Step 1:** Synthesize S1–S3 notes; resolve each decision 1–7 above.
+- [x] **Step 2:** Write the design doc; state the chosen Option and the downscope path. Commit (`docs: MongoDB saga document model & concurrency design`).
 
 ### Task S5: Demo saga flow design + library/demo test inventory
 
