@@ -111,7 +111,7 @@ rtk git worktree remove .worktrees/<branch-name>
 
 | Task | Branch | PR title | Depends on | Blocking status | Model |
 |---|---|---|---|---|---|
-| **S1** | `docs/saga-repo-analysis` | docs: saga — repository & convention analysis | Prereqs merged | Can start immediately | Sonnet |
+| **S1** | `docs/saga-repo-analysis` | docs: saga — repository & convention analysis | Prereqs merged | ✅ Done | Sonnet |
 | **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | ✅ Done | Sonnet |
 | **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | Can start immediately | Sonnet |
 | **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | Blocked by: S1, S2, S3 | **Opus / Fable 5** |
@@ -180,10 +180,10 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 - **Dependencies:** none (prereq plans merged).
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Read and summarize `MongoDbPersistenceFrameProvider.cs`, `TransactionalFrame.cs`, `WolverineMongoDbExtensions.cs`, `MongoConstants.cs`, `MongoDbMessageStore.Admin.cs`.
-- [ ] **Step 2:** Read and summarize `AppFixture.cs`, one compliance subclass (`message_store_compliance.cs`), and the demo `OrderRepository.cs` + `PlaceOrderHandler.cs`.
-- [ ] **Step 3:** Write the notes doc; cross-check each "Verified Fact" still holds on `main`; flag any drift.
-- [ ] **Step 4:** Commit (`docs: saga repository & convention analysis`).
+- [x] **Step 1:** Read and summarize `MongoDbPersistenceFrameProvider.cs`, `TransactionalFrame.cs`, `WolverineMongoDbExtensions.cs`, `MongoConstants.cs`, `MongoDbMessageStore.Admin.cs`.
+- [x] **Step 2:** Read and summarize `AppFixture.cs`, one compliance subclass (`message_store_compliance.cs`), and the demo `OrderRepository.cs` + `PlaceOrderHandler.cs`.
+- [x] **Step 3:** Write the notes doc; cross-check each "Verified Fact" still holds on `main`; flag any drift.
+- [x] **Step 4:** Commit (`docs: saga repository & convention analysis`).
 
 ### Task S2: Wolverine saga API discovery
 
