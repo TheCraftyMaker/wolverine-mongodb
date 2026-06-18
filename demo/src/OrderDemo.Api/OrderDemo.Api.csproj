@@ -4,6 +4,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WolverineFx" />
+    <!-- WolverineFx 6.9 moved the runtime (Roslyn) code generator out of core. The API
+         compiles handler/middleware code at runtime (TypeLoadMode.Dynamic), so it needs
+         this package to register an IAssemblyGenerator; without it, the host throws at
+         startup. (The test project already references it, which is why tests boot.) -->
+    <PackageReference Include="WolverineFx.RuntimeCompilation" />
     <PackageReference Include="WolverineFx.RabbitMQ" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Scalar.AspNetCore" />

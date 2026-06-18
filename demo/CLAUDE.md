@@ -52,7 +52,7 @@ HTTP POST /orders
 ## Key Wolverine Configuration (Program.cs)
 
 - `opts.UseMongoDbPersistence(databaseName)` — registers MongoDB outbox/inbox
-- `opts.Durability.Mode = DurabilityMode.Solo` — single-node (required; startup throws on Balanced)
+- Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination with a TCP control endpoint
 - `opts.Policies.AutoApplyTransactions()` — auto-wraps handlers using `IMongoDatabase` in a transaction
 - `.UseDurableInbox()` on the projection queue — inbox persistence for at-least-once delivery
 - `opts.PublishMessage<T>().ToRabbitExchange(...)` — outbox-backed publish routing
