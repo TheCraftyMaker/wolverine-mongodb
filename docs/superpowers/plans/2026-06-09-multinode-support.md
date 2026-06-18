@@ -49,7 +49,7 @@ rtk git worktree remove .worktrees/<branch-name>
 
 Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged** — this plan is much more sequential than the hardening plan.
 
-| Task | Branch | PR title | Depends on | Model | Status (2026-06-17) |
+| Task | Branch | PR title | Depends on | Model | Status (2026-06-18) |
 |---|---|---|---|---|---|
 | 1 | `feat/mongodb-persistence-options` | feat: MongoDbPersistenceOptions; allow DurabilityMode.Balanced | Solo plan merged | Sonnet | ✅ Merged (#63) |
 | 2 | `feat/configurable-leader-lease` | feat: configurable leader lock lease with renewal margin | **Task 1** | **Fable 5 / Opus** | ✅ Merged (#67) |
@@ -60,11 +60,12 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | ~~6b~~ | *(none — documented only)* | deterministic lowest-live-node leadership election | n/a | n/a | 📋 **Documented option, NOT a planned task** — analyzed & declined for production (see the note after Task 6 + the findings doc) |
 | 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76) — production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
 | 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ⛔ Not started (unblocked — Task 7 merged) |
-| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ⛔ Not started (unblocked — independent) |
+| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | 🔜 PR open (#79) — all checks green, awaiting merge; also adds `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core) |
 | 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document the any-node model honestly (leadership compliance gated like Cosmos) |
 | 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
+| 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ⛔ Not started — published `0.1.0-beta.5` still throws on Balanced; this ships a Task-1+ release and re-points the demo at it |
 
-**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). Remaining work: **Task 9** (demo — independent and ready) and **Task 8** (run Task 7's multinode tests as a separate CI step — now unblocked); then **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`.
+**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). Remaining work: **Task 9** (demo — independent and ready) and **Task 8** (run Task 7's multinode tests as a separate CI step — now unblocked); then **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
 
 > _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
@@ -99,6 +100,9 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | `demo/src/OrderDemo.Api/Program.cs` + `appsettings*.json` | Config-driven durability mode + control port |
 | `.github/workflows/ci.yml` | Run the multinode test category |
 | `README.md`, `CLAUDE.md`, `FOLLOWUPS.md`, `CHANGELOG.md`, `demo/README.md`, `demo/CLAUDE.md` | Documentation |
+| `demo/src/OrderDemo.Api/OrderDemo.Api.csproj` | Add `WolverineFx.RuntimeCompilation` (6.9 moved the runtime compiler out of core) so the demo API starts (Task 9) |
+| `Directory.Build.props` | Version bump for the multinode release (Task 12, set in the release PR before tagging) |
+| `demo/Directory.Packages.props` | Bump demo `Wolverine.MongoDB` to the published multinode version (Task 12) |
 
 ---
 
@@ -979,6 +983,8 @@ rtk git commit -m "ci: run multinode test category as a separate step"
 
 Then follow the per-task PR procedure from the workflow section (`rtk git push -u ...`, `rtk gh pr create ...`, `rtk gh pr checks --watch`). Iterate until green. If the multinode step flakes on CI but not locally, revisit Task 6's stabilization levers before merging — do not add retries.
 
+- [ ] **Step 3: Check Task 8 off in the plan** — as part of this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
+
 ---
 
 ### Task 9: Demo — config-driven durability mode + multinode runbook
@@ -1097,6 +1103,8 @@ rtk git add README.md CLAUDE.md FOLLOWUPS.md CHANGELOG.md
 rtk git commit -m "docs: multinode support — requirements, semantics, tuning, and known limits"
 ```
 
+- [ ] **Step 7: Check Task 10 off in the plan** — in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
+
 ---
 
 ### Task 11: Final verification (on `main`, after the Task 10 PR merges — no branch, no PR)
@@ -1123,3 +1131,25 @@ rtk git log --oneline -12
 ```
 
 Confirm CI on main is green including the multinode step, one merged PR per task (1–10), and every file in the File Structure Overview was touched across those merges.
+
+- [ ] **Step 4: Check Task 11 off in the plan** — tick this task's `- [ ]` step checkboxes and update its row in the status table. This task has no PR, so commit the doc edit directly to `main`.
+
+---
+
+### Task 12: Publish the multinode release to NuGet and point the demo at it
+
+Until a new package is published, the multinode work (Tasks 1–11) lives only in source and in CI's freshly packed `0.0.0-ci` nupkg. The **published** `Wolverine.MongoDB` (`0.1.0-beta.5` at time of writing) still **hard-throws on `DurabilityMode.Balanced`** — it predates Task 1's guard downgrade — so the demo's "Running multiple instances" runbook only works against a Task-1+ build (e.g. a local pack). This task ships the release that includes multinode/Balanced support and re-points the demo at the published package, so the runbook works for end users, not just CI.
+
+**Files:**
+- Modify: `Directory.Build.props` (version) and `CHANGELOG.md` (release section) — produced by the release agent's gate-2 PR
+- Modify: `demo/Directory.Packages.props` (bump `Wolverine.MongoDB` to the newly published version)
+
+- [ ] **Step 1: Cut and publish the release** — invoke the `release` agent (see `CLAUDE.md` → "Versioning & Release"). This is the first release that includes Balanced/multinode support, so it is a notable version bump; per the versioning policy (major tracks WolverineFx 6.x ↔ `0.1.x`), the agent **proposes the version and waits for approval at gate 1**, then opens the CHANGELOG + version-bump PR (gate 2). After you merge gate 2, the agent tags `main`; `publish.yml` packs + pushes to NuGet and creates the GitHub Release; the agent verifies NuGet + the Release before reporting. **Confirm the published package allows Balanced** (the durability-mode guard is now a warning, not a throw — Task 1).
+
+- [ ] **Step 2: Point the demo at the published version** — in `demo/Directory.Packages.props`, bump `<PackageVersion Include="Wolverine.MongoDB" ... />` from the pre-multinode beta to the version published in Step 1. (CI's `demo` job already consumes the fresh `0.0.0-ci` nupkg; this bump is for local-dev users so the README "Running multiple instances" runbook runs against the published package.)
+
+- [ ] **Step 3: Verify the demo against the published package** — from `demo/`: `dotnet build OrderDemo.slnx -c Release && dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release` → PASS. Recommended (Docker + RabbitMQ up): re-run the two-instance Balanced smoke from the README — now that the **published** package supports Balanced, no local pack is needed — and record the outcome in the PR.
+
+- [ ] **Step 4: Commit, push, open the PR** on branch `demo/use-multinode-release`, title `demo: consume the multinode release of Wolverine.MongoDB`. Follow the per-task PR procedure; watch checks until green.
+
+- [ ] **Step 5: Check Task 12 off in the plan** — in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note). The task is not "done" until the doc reflects it.
