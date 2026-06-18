@@ -62,7 +62,7 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ✅ Merged (#78) |
 | 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ✅ Merged (#79) — config-driven durability + multinode runbook; also added `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core); two-instance Balanced smoke passed |
 | 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ✅ Merged (#81) |
-| 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
+| 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ✅ Done (2026-06-18) — 105/105 suite (both TFMs), 5× multinode green, pack ok, demo 27/27, CI green (multinode step passes) |
 | 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ⛔ Not started — published `0.1.0-beta.5` still throws on Balanced; this ships a Task-1+ release and re-points the demo at it |
 
 **Recommended merge order (updated 2026-06-18):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). **Task 8** (#78, run Task 7's multinode tests as a separate CI step) and **Task 9** (#79, demo config-driven durability + runbook) are now **merged**. **Task 10** (docs sweep) is **merged** (#81). Remaining work: **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
@@ -1109,7 +1109,7 @@ rtk git commit -m "docs: multinode support — requirements, semantics, tuning, 
 
 ### Task 11: Final verification (on `main`, after the Task 10 PR merges — no branch, no PR)
 
-- [ ] **Step 1: Full suite on merged main, five consecutive runs of the multinode category**
+- [x] **Step 1: Full suite on merged main, five consecutive runs of the multinode category**
 
 ```bash
 rtk git checkout main && rtk git pull
@@ -1118,12 +1118,12 @@ rtk git checkout main && rtk git pull
 Run: `dotnet test src/Wolverine.MongoDB.Tests` → PASS
 Run (PowerShell): `for ($i=0; $i -lt 5; $i++) { dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"; if ($LASTEXITCODE -ne 0) { break } }` → all PASS
 
-- [ ] **Step 2: Package build + demo**
+- [x] **Step 2: Package build + demo**
 
 Run: `dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false -o ./artifacts` → succeeds
 Run (from `demo/`): `dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release` → PASS
 
-- [ ] **Step 3: Confirm main CI green and review the merged history**
+- [x] **Step 3: Confirm main CI green and review the merged history**
 
 ```bash
 rtk gh run list --branch main --limit 3
@@ -1132,7 +1132,7 @@ rtk git log --oneline -12
 
 Confirm CI on main is green including the multinode step, one merged PR per task (1–10), and every file in the File Structure Overview was touched across those merges.
 
-- [ ] **Step 4: Check Task 11 off in the plan** — tick this task's `- [ ]` step checkboxes and update its row in the status table. This task has no PR, so commit the doc edit directly to `main`.
+- [x] **Step 4: Check Task 11 off in the plan** — tick this task's `- [ ]` step checkboxes and update its row in the status table. This task has no PR, so commit the doc edit directly to `main`.
 
 ---
 
