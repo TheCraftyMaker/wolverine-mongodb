@@ -112,7 +112,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | Task | Branch | PR title | Depends on | Blocking status | Model |
 |---|---|---|---|---|---|
 | **S1** | `docs/saga-repo-analysis` | docs: saga — repository & convention analysis | Prereqs merged | Can start immediately | Sonnet |
-| **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | Can start immediately | Sonnet |
+| **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | ✅ Done | Sonnet |
 | **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | Can start immediately | Sonnet |
 | **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | Blocked by: S1, S2, S3 | **Opus / Fable 5** |
 | **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | Can start immediately (refined after S4) | Sonnet |
@@ -194,9 +194,9 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Grep/read the files above in `external/wolverine/src/Wolverine/Persistence/Sagas/` and `Saga.cs`.
-- [ ] **Step 2:** Trace how `SagaChain` calls the provider's `DetermineLoadFrame`/`Insert`/`Update`/`Delete`/`CommitUnitOfWorkFrame` and in what order relative to the handler call.
-- [ ] **Step 3:** Write the notes doc with exact signatures. Commit (`docs: Wolverine saga API discovery`).
+- [x] **Step 1:** Grep/read the files above in `external/wolverine/src/Wolverine/Persistence/Sagas/` and `Saga.cs`.
+- [x] **Step 2:** Trace how `SagaChain` calls the provider's `DetermineLoadFrame`/`Insert`/`Update`/`Delete`/`CommitUnitOfWorkFrame` and in what order relative to the handler call.
+- [x] **Step 3:** Write the notes doc with exact signatures. Commit (`docs: Wolverine saga API discovery`).
 
 ### Task S3: Cosmos & RavenDb saga implementation comparison
 
