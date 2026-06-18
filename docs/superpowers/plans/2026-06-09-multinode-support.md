@@ -59,13 +59,13 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first — balancing facts exercise recovery) | **Fable 5** | ⚠️ Partial (#71) — **blocked**; suite kept **gated**, findings doc landed |
 | ~~6b~~ | *(none — documented only)* | deterministic lowest-live-node leadership election | n/a | n/a | 📋 **Documented option, NOT a planned task** — analyzed & declined for production (see the note after Task 6 + the findings doc) |
 | 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76) — production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
-| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ⛔ Not started (unblocked — Task 7 merged) |
-| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | 🔜 PR open (#79) — all checks green, awaiting merge; also adds `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core) |
+| 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ✅ Merged (#78) |
+| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ✅ Merged (#79) — config-driven durability + multinode runbook; also added `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core); two-instance Balanced smoke passed |
 | 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document the any-node model honestly (leadership compliance gated like Cosmos) |
 | 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
 | 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ⛔ Not started — published `0.1.0-beta.5` still throws on Balanced; this ships a Task-1+ release and re-points the demo at it |
 
-**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). Remaining work: **Task 9** (demo — independent and ready) and **Task 8** (run Task 7's multinode tests as a separate CI step — now unblocked); then **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
+**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). **Task 8** (#78, run Task 7's multinode tests as a separate CI step) and **Task 9** (#79, demo config-driven durability + runbook) are now **merged**. Remaining work: **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
 
 > _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
@@ -997,7 +997,7 @@ The demo stays Solo by default (correct for a single-instance reference app) but
 - Create: `demo/docker-compose.multinode.yml` *(documentation-only convenience: second API instance is run via `dotnet run`, compose stays infra-only)* — **skip creating this file**; the runbook below uses two `dotnet run` invocations instead.
 - Modify: `demo/README.md`, `demo/CLAUDE.md`
 
-- [ ] **Step 1: Make the mode configurable** — in `demo/src/OrderDemo.Api/Program.cs`, replace
+- [x] **Step 1: Make the mode configurable** — in `demo/src/OrderDemo.Api/Program.cs`, replace
 
 ```csharp
 // Single-node durability for this demo (no multi-node agent coordination needed)
@@ -1022,7 +1022,7 @@ if (opts.Durability.Mode == DurabilityMode.Balanced)
 
 Add `using Wolverine.Transports.Tcp;` at the top of `Program.cs`. (`WolverineFx` ships the TCP transport in the core package; if the compiler disagrees, check the demo's package set and add the correct using/namespace from the library's own `leadership_election_compliance.cs`.)
 
-- [ ] **Step 2: Add the default to `demo/src/OrderDemo.Api/appsettings.json`** — add a sibling section to `MongoDB`/`RabbitMQ`:
+- [x] **Step 2: Add the default to `demo/src/OrderDemo.Api/appsettings.json`** — add a sibling section to `MongoDB`/`RabbitMQ`:
 
 ```json
 "Wolverine": {
@@ -1030,7 +1030,7 @@ Add `using Wolverine.Transports.Tcp;` at the top of `Program.cs`. (`WolverineFx`
 }
 ```
 
-- [ ] **Step 3: Add the runbook to `demo/README.md`** — new section:
+- [x] **Step 3: Add the runbook to `demo/README.md`** — new section:
 
 ```markdown
 ## Running multiple instances (multinode)
@@ -1060,16 +1060,16 @@ skew well under its duration) and reachable TCP control endpoints between nodes.
 
 (On Windows PowerShell the env-var prefix syntax differs — note that in the README: `$env:Wolverine__DurabilityMode='Balanced'; dotnet run ...`.)
 
-- [ ] **Step 4: Update `demo/CLAUDE.md`** — change the "Key Wolverine Configuration" bullet from "`opts.Durability.Mode = DurabilityMode.Solo` — single-node" to "Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination with a TCP control endpoint".
+- [x] **Step 4: Update `demo/CLAUDE.md`** — change the "Key Wolverine Configuration" bullet from "`opts.Durability.Mode = DurabilityMode.Solo` — single-node" to "Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination with a TCP control endpoint".
 
-- [ ] **Step 5: Verify the demo still builds and its tests pass** (demo tests run Solo, unchanged)
+- [x] **Step 5: Verify the demo still builds and its tests pass** (demo tests run Solo, unchanged)
 
 Run (from `demo/`): `dotnet build OrderDemo.slnx -c Release && dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release`
 Expected: PASS.
 
-- [ ] **Step 6: Manual smoke (recommended, requires Docker + RabbitMQ up):** follow the runbook with two instances, place one order on each port, confirm both project summaries and `wolverine_nodes` contains two documents. Record the outcome in the PR description.
+- [x] **Step 6: Manual smoke (recommended, requires Docker + RabbitMQ up):** follow the runbook with two instances, place one order on each port, confirm both project summaries and `wolverine_nodes` contains two documents. Record the outcome in the PR description.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 rtk git add demo
