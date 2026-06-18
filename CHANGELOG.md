@@ -8,6 +8,8 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+## [0.1.0-beta.6] - 2026-06-18
+
 ### Added
 - **`DurabilityMode.Balanced` (multinode) support.** Multiple nodes can now run
   against the same MongoDB store. Requires `opts.UseTcpForControlEndpoint()` (or
