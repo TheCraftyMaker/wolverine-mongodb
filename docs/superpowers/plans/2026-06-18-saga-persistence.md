@@ -115,7 +115,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | Can start immediately | Sonnet |
 | **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | Can start immediately | Sonnet |
 | **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | Blocked by: S1, S2, S3 | **Opus / Fable 5** |
-| **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | Can start immediately (refined after S4) | Sonnet |
+| **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | ✅ **Done** — merged #89 | Sonnet |
 | **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | Blocked by: S4 | **Fable 5 / Opus** |
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | Blocked by: S6 | **Fable 5 / Opus** |
 | **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | Blocked by: S6, S7 | **Fable 5 / Opus** |
@@ -248,8 +248,8 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 - **Dependencies:** none to start; **refine after S4** (id type + collection decisions feed the saga state shape).
 - **Blocking status:** **Can start immediately** (finalize the saga state/id shape once S4 lands).
 
-- [ ] **Step 1:** Draft the saga + contracts + handler signatures reusing existing demo events where possible.
-- [ ] **Step 2:** Build the flow→test mapping table (library + demo). Commit (`docs: saga demo flow design + test inventory`).
+- [x] **Step 1:** Draft the saga + contracts + handler signatures reusing existing demo events where possible.
+- [x] **Step 2:** Build the flow→test mapping table (library + demo). Commit (`docs: saga demo flow design + test inventory`).
 
 ---
 
