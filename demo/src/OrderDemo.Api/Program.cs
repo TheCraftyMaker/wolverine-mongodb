@@ -6,6 +6,7 @@ using Scalar.AspNetCore;
 using Wolverine;
 using Wolverine.MongoDB;
 using Wolverine.RabbitMQ;
+using Wolverine.Transports.Tcp;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,8 +30,17 @@ builder.Host.UseWolverine(opts =>
     // dependency tree includes IMongoDatabase in a MongoDB session + transaction.
     opts.UseMongoDbPersistence(databaseName);
 
-    // Single-node durability for this demo (no multi-node agent coordination needed)
-    opts.Durability.Mode = DurabilityMode.Solo;
+    // Single-node durability by default. Set Wolverine:DurabilityMode=Balanced (plus a
+    // control port) to run multiple instances against the same MongoDB + RabbitMQ —
+    // see README "Running multiple instances".
+    var durabilityMode = builder.Configuration["Wolverine:DurabilityMode"] ?? "Solo";
+    opts.Durability.Mode = Enum.Parse<DurabilityMode>(durabilityMode);
+
+    if (opts.Durability.Mode == DurabilityMode.Balanced)
+    {
+        // MongoDB has no native control transport; nodes coordinate over TCP.
+        opts.UseTcpForControlEndpoint();
+    }
 
     // ── RabbitMQ transport ───────────────────────────────────────────────────
     var rabbitHost = builder.Configuration["RabbitMQ:HostName"]!;

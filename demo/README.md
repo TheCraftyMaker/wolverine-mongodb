@@ -106,6 +106,41 @@ db.wolverine_incoming_envelopes.find()   // inbox messages (projector queue)
 db.wolverine_dead_letters.find()         // any failures
 ```
 
+## Running multiple instances (multinode)
+
+The demo runs single-node (`Solo`) by default. To see Wolverine's multi-node
+coordination (leader election, agent balancing, cross-node recovery) against
+MongoDB, run two instances in `Balanced` mode:
+
+```bash
+docker compose up -d   # shared MongoDB replica set + RabbitMQ
+
+# Terminal 1
+ASPNETCORE_URLS=http://localhost:5000 Wolverine__DurabilityMode=Balanced dotnet run --project src/OrderDemo.Api
+
+# Terminal 2
+ASPNETCORE_URLS=http://localhost:5001 Wolverine__DurabilityMode=Balanced dotnet run --project src/OrderDemo.Api
+```
+
+On Windows PowerShell the env-var prefix syntax differs — set the variables in each
+terminal first:
+
+```powershell
+# Terminal 1
+$env:ASPNETCORE_URLS='http://localhost:5000'; $env:Wolverine__DurabilityMode='Balanced'; dotnet run --project src/OrderDemo.Api
+
+# Terminal 2
+$env:ASPNETCORE_URLS='http://localhost:5001'; $env:Wolverine__DurabilityMode='Balanced'; dotnet run --project src/OrderDemo.Api
+```
+
+Both instances register in `wolverine_nodes`; one acquires the leader lock in
+`wolverine_locks`. Place orders against either port — events flow through the
+shared outbox and exactly one instance projects each event. Kill one instance and
+watch the survivor take over its work (node ejection + ownership release).
+
+Requirements: synchronized clocks across instances (the leader lease tolerates
+skew well under its duration) and reachable TCP control endpoints between nodes.
+
 ## How the transaction works
 
 Wolverine's `AutoApplyTransactions()` policy detects that `PlaceOrderHandler` depends on `IOrderRepository → OrderRepository(IMongoDatabase)` and automatically wraps the handler in a `TransactionalFrame`:
