@@ -8,7 +8,7 @@ relational ADO.NET connection and SQL-managed envelope tables. This package
 implements `IMessageStore` directly against the MongoDB .NET driver, giving
 MongoDB-backed applications reliable, durable message delivery without EF Core.
 
-> **Status: pre-release (`0.1.0-beta.5`).** The multinode (`DurabilityMode.Balanced`)
+> **Status: pre-release (`0.1.0-beta.6`).** The multinode (`DurabilityMode.Balanced`)
 > path is functional and integration-tested; see [Known limitations](#known-limitations).
 > The major version tracks Wolverine's major version (`6.x` ↔ `WolverineFx 6.x`).
 
