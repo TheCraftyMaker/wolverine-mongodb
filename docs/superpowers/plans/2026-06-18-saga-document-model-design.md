@@ -6,6 +6,28 @@
 > **Status:** Complete — all seven design decisions recorded; Lead Open Design Decision resolved.  
 > **Gates:** S6, S7, S8, S9, S10, S11 — do not start S6 without reading §3–§8 of this document.
 
+> **Revision (2026-06-18, Opus 4.8 — re-run of the design gate against the `external/wolverine`
+> source).** The first pass (merged as PR #90) was produced on the wrong model. This revision
+> verified the frame contracts directly against the submodule and corrected three defects that
+> would compile and pass *some* compliance facts yet break real sagas:
+> 1. **`DetermineInsertFrame` / `DetermineUpdateFrame` receive only the `saga` variable — not
+>    `sagaId`** (`IPersistenceFrameProvider.cs:27,29`; only `DetermineLoadFrame` and
+>    `DetermineDeleteFrame` get `sagaId`). The previous insert/update snippets filtered on a
+>    `sagaId` variable that is out of scope there. The `_id` value must be read from the saga
+>    document. Cosmos avoids this because `UpsertItemAsync(saga)` derives the id internally
+>    (`CosmosDbPersistenceFrameProvider.cs:140-163`); MongoDB's `ReplaceOneAsync` needs an
+>    explicit filter, so this is a genuine MongoDB-specific divergence.
+> 2. **The id value must not be hard-coded as `saga.Id`.** Wolverine resolves the saga **state's**
+>    identity member by precedence (`SagaChain.DetermineSagaIdMember(sagaType, sagaType)`,
+>    `SagaChain.cs:208-224`), which need not be named `Id`. The frame resolves the member name.
+> 3. **Normative `_id`-mapping constraint added (Decision 1).** The MongoDB driver only auto-maps
+>    a member named `Id`/`id`/`_id` to BSON `_id`. A saga whose identity member is named otherwise
+>    (Wolverine allows `SagaId`, `{Saga}Id`, …) would get an auto-generated `ObjectId` `_id`, and
+>    `Find(Eq("_id", sagaId))` would silently never match. The constraint (identity member named
+>    `Id`, or annotated `[BsonId]`) is what makes "no `[BsonId]` required" true for the compliance
+>    and demo sagas — it must be stated, not assumed. (The S5 demo already satisfies it: state
+>    member `Id`, with `[SagaIdentity]` on the message's `OrderId`.)
+
 ---
 
 ## Lead Open Design Decision: **Option B — Native Id + Optimistic Concurrency**
@@ -43,18 +65,46 @@ those tasks as deferred in `FOLLOWUPS.md`.
 Mirror Cosmos and RavenDb: the collection document IS the `Saga` subclass. No intermediate
 `SagaDocument<T>` wrapper is introduced.
 
-**`Id` member → `_id` mapping:**
-The MongoDB .NET driver's default convention maps `Id` (and `id`, `_id`) properties to `_id`
-by name — no `[BsonId]` attribute required (verified: the demo's `Order.Id : Guid` round-trips
-as `_id` without any attribute). The saga compliance types (`StringBasicWorkflow`,
-`GuidBasicWorkflow`, etc.) all have `public TId Id { get; set; }` — this matches the
-convention directly.
+**Saga-state identity member → BSON `_id` (normative constraint):**
 
-**`[BsonId]` / `[BsonRepresentation]` policy:**  
-Add `[BsonId]` only if a compliance fact proves the default convention is insufficient.
-If added, place it on the **test/demo saga type only** — never inject attributes into
-`Saga.cs` upstream or register a global serializer. This is consistent with the
-per-property `[BsonRepresentation(BsonType.DateTime)]` decision in the existing provider.
+The saga **state's** identity member is the one MongoDB stores as `_id` and that every saga
+frame keys on. Two distinct identity resolutions are in play — do not conflate them:
+
+- **Message-side identity** (where the saga id is *read from* on an incoming message): resolved
+  by `SagaChain.DetermineSagaIdMember(messageType, sagaType)` with precedence `[SagaIdentity]` →
+  `[SagaIdentityFrom]` → `{SagaType.Name}Id` → `{SagaType.Name minus "Saga"}Id` → `SagaId` → `Id`
+  (`SagaChain.cs:208-224`). This governs the `sagaId` variable handed to the load/delete frames.
+- **State-side identity** (the saga document's own id, stored as `_id`): resolved by the same
+  method applied to the saga type itself, `DetermineSagaIdMember(sagaType, sagaType)`. This is the
+  member the MongoDB document's `_id` must equal.
+
+**The MongoDB .NET driver's default `IdMemberConvention` maps only a member named `Id`/`id`/`_id`
+to BSON `_id`.** If a saga's state-side identity member is named anything else (e.g. `SagaId`,
+`OrderFulfillmentId`), the driver does **not** map it to `_id` — it persists that member as an
+ordinary field and **auto-generates an `ObjectId` `_id`**. Then `Find(Eq("_id", sagaId))` in the
+load frame silently never matches, and the saga appears to "not exist" on every continue message.
+This is a silent-corruption failure mode, not a compile error.
+
+**Constraint:** a saga type persisted by `Wolverine.MongoDB` MUST have its state-side identity
+member map to BSON `_id`, by one of:
+1. **Name it `Id`** (recommended) — the driver's default convention maps it to `_id` with no
+   annotation. This is what every compliance type (`public TId Id { get; set; }`) and the S5 demo
+   `OrderFulfillmentSaga` (`public Guid Id`, set from `evt.OrderId` by the `Start` handler) do.
+   Message routing to a differently-named member (e.g. `OrderId`) is handled independently with
+   `[SagaIdentity]` on the message — it does **not** change the state's `_id`.
+2. **Annotate the identity member with `[BsonId]`** if it cannot be named `Id`. Place it on the
+   user/test saga type only.
+
+For the compliance suite and the demo this constraint holds by construction, so **no `[BsonId]`
+and no global serializer registration are required** for any planned saga. Document the
+constraint in S16 (README) so downstream users naming their identity member something other than
+`Id` add `[BsonId]`.
+
+**`[BsonRepresentation]` policy:**  
+Add representation attributes only on the **test/demo saga type** and only if a compliance fact
+proves the default convention insufficient — never inject attributes into `Saga.cs` upstream or
+register a global serializer. Consistent with the per-property
+`[BsonRepresentation(BsonType.DateTime)]` decision in the existing provider.
 
 **`Saga.Version` BSON:**  
 `int Version` serializes as a BSON `int32` by default — no annotation needed.
@@ -202,30 +252,38 @@ await db.GetCollection<TSaga>(coll)
 **S8 OCC update:**
 1. Capture `oldVersion = saga.Version` — the version currently stored in MongoDB.
 2. Set `saga.Version = oldVersion + 1` — the version to write.
-3. `ReplaceOneAsync` with filter `(_id == sagaId && Version == oldVersion)`, `IsUpsert = false`.
+3. `ReplaceOneAsync` with filter `(_id == saga.<IdMember> && Version == oldVersion)`,
+   `IsUpsert = false`.
 4. Throw `SagaConcurrencyException` if `ModifiedCount == 0`.
 
+> **The update frame is handed only the `saga` variable — not `sagaId`** (see §"Resolving the
+> `_id` value" in the Implementation Contracts). The `_id` filter value must therefore be read
+> from the saga document via its resolved identity member (`saga.<IdMember>`), **not** from a
+> `sagaId` variable (which is not in scope in `DetermineUpdateFrame`). `<IdMember>` is the
+> state-side identity member resolved at frame-build time.
+
 ```csharp
-// Generated by UpdateSagaFrame (S8)
+// Generated by UpdateSagaFrame (S8). <IdMember> is resolved at frame-build time
+// (e.g. "Id"); the version field name is resolved from the serialized member.
 var oldVersion = saga.Version;
 saga.Version = oldVersion + 1;
 var result = await db.GetCollection<TSaga>(coll)
     .ReplaceOneAsync(
         mongoSession,
         Builders<TSaga>.Filter.And(
-            Builders<TSaga>.Filter.Eq("_id", sagaId),
+            Builders<TSaga>.Filter.Eq("_id", saga.<IdMember>),
             Builders<TSaga>.Filter.Eq(s => s.Version, oldVersion)),
         saga,
         new ReplaceOptions { IsUpsert = false },
         ct);
 if (result.ModifiedCount == 0)
     throw new SagaConcurrencyException(
-        $"Optimistic concurrency conflict for saga {typeof(TSaga).Name} id '{sagaId}': " +
+        $"Optimistic concurrency conflict for saga {typeof(TSaga).Name} id '{saga.<IdMember>}': " +
         $"expected version {oldVersion}, but the document was modified by a concurrent process.");
 ```
 
 > **`SagaConcurrencyException` constructor:** `SagaConcurrencyException(string message)` —
-> single string argument (verified from `Saga.cs:49`). Build the message string inline.
+> single string argument (verified from `Saga.cs:47-52`). Build the message string inline.
 
 **OCC frame naming:** Because S6 uses a unified `StoreSagaFrame(upsert: true)` for both insert
 and update, S8 must **replace it with separate `InsertSagaFrame` and `UpdateSagaFrame` classes**
@@ -492,6 +550,39 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 }
 ```
 
+### Which id variable each frame receives (read this before the frame contracts)
+
+The `IPersistenceFrameProvider` factory signatures differ in what they hand each frame
+(`IPersistenceFrameProvider.cs:26-30`) — getting this wrong is the easiest way to emit a frame
+that compiles but is wrong:
+
+| Factory | Receives | The `_id` value comes from |
+|---|---|---|
+| `DetermineLoadFrame(container, sagaType, **sagaId**)` | `sagaId` (typed) | the `sagaId` variable directly |
+| `DetermineDeleteFrame(**sagaId**, saga, container)` | `sagaId` **and** `saga` | the `sagaId` variable directly |
+| `DetermineInsertFrame(**saga**, container)` | `saga` only | the saga document's identity member |
+| `DetermineUpdateFrame(**saga**, container)` | `saga` only | the saga document's identity member |
+
+**Consequence:** Load and Delete filter on the `sagaId` variable. **Insert and Update have no
+`sagaId` variable** — they must read the id from the saga document. Cosmos sidesteps this
+entirely because `UpsertItemAsync(saga)` derives the id from the document
+(`CosmosDbPersistenceFrameProvider.cs:140-163`); MongoDB's `ReplaceOneAsync` requires an explicit
+`_id` filter, so the insert/update frames must construct one from `saga.<IdMember>`.
+
+**Resolving `<IdMember>`:** at frame construction the frame knows the saga `Type` (from
+`saga.VariableType`). Resolve the state-side identity member name once:
+
+```csharp
+// In StoreSagaFrame / UpdateSagaFrame constructor:
+var idMember = SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.Name ?? "Id";
+```
+
+then emit the filter value as `{saga.Usage}.{idMember}`. For every compliance type and the demo
+saga `idMember == "Id"`, so the generated code reads `saga.Id` — but the frame must **resolve**
+the name, not hard-code it, so a saga whose identity member is `SagaId`/`OrderFulfillmentId`
+(with `[BsonId]`, per Decision 1) still works. The serialized filter field stays the literal
+`"_id"` because that member maps to `_id` (Decision 1 constraint).
+
 ### `LoadSagaFrame` contract
 
 Resolves `IClientSessionHandle` (`mongoSession` created by `TransactionalFrame`), `IMongoDatabase`
@@ -513,19 +604,23 @@ var saga = await db.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeo
 
 ### `StoreSagaFrame` (S6 upsert — both insert and update paths)
 
+`<IdMember>` is resolved at frame-build time (see "Which id variable each frame receives" above);
+for the compliance/demo sagas it is `Id`, so the emitted filter value is `saga.Id`.
+
 ```csharp
 await db.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)))
     .ReplaceOneAsync(
         mongoSession,
-        Builders<TSaga>.Filter.Eq("_id", saga.Id),
+        Builders<TSaga>.Filter.Eq("_id", saga.<IdMember>),
         saga,
         new ReplaceOptions { IsUpsert = true },
         cancellationToken);
 ```
 
-No version management. `saga.Id` must match the `_id` convention (it does by default driver
-convention). This frame is used for both `DetermineInsertFrame` and `DetermineUpdateFrame` in
-the S6 baseline — S8 replaces it.
+No version management. `saga.<IdMember>` is the value the document serializes as `_id`
+(Decision 1 constraint), so the upsert filter and the inserted document agree on `_id`. This
+frame is used for both `DetermineInsertFrame` and `DetermineUpdateFrame` in the S6 baseline —
+S8 replaces it with the split `InsertSagaFrame` / `UpdateSagaFrame`.
 
 ### `InsertSagaFrame` (S8 — proper insert)
 
@@ -537,6 +632,9 @@ await db.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)))
 
 ### `UpdateSagaFrame` (S8 — OCC update)
 
+The update frame receives only `saga` (no `sagaId`), so the `_id` filter value is read from
+`saga.<IdMember>` (resolved at frame-build time), **not** from a `sagaId` variable.
+
 ```csharp
 var oldVersion = saga.Version;
 saga.Version = oldVersion + 1;
@@ -544,14 +642,14 @@ var result = await db.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typ
     .ReplaceOneAsync(
         mongoSession,
         Builders<TSaga>.Filter.And(
-            Builders<TSaga>.Filter.Eq("_id", sagaId),
+            Builders<TSaga>.Filter.Eq("_id", saga.<IdMember>),
             Builders<TSaga>.Filter.Eq(s => s.Version, oldVersion)),
         saga,
         new ReplaceOptions { IsUpsert = false },
         cancellationToken);
 if (result.ModifiedCount == 0)
     throw new SagaConcurrencyException(
-        $"Optimistic concurrency conflict for {typeof(TSaga).Name} saga with id '{sagaId}': " +
+        $"Optimistic concurrency conflict for {typeof(TSaga).Name} saga with id '{saga.<IdMember>}': " +
         $"expected version {oldVersion}. The document was modified or deleted concurrently.");
 ```
 
@@ -606,6 +704,8 @@ foreach (var name in names.Where(n => n.StartsWith(MongoConstants.SagaCollection
 | **R9 — `CanPersist` over-broad** | Scoped to `entityType.CanBeCastTo<Saga>()` — stated in Flip 2. |
 | **R10 — envelope-only start assigns saga id** | Compliance `BasicWorkflow.Start` assigns `Id = starting.Id` — provider does not set `Id` from the envelope. Document that start handlers must assign the saga id. |
 | **R11 — `SagaConcurrencyException` retry policy** | Required before S14. Wire in S14 test host; recommended: 2 immediate retries, then dead-letter. |
+| **R12 — insert/update frames have no `sagaId` variable** | `DetermineInsertFrame`/`DetermineUpdateFrame` receive only `saga` (`IPersistenceFrameProvider.cs:27,29`). The `_id` filter value must be read from `saga.<IdMember>`, resolved via `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.Name`. Do **not** reference a `sagaId` variable in those frames. S6 codegen check (`codeFor<T>()`) must confirm the upsert/update filter references the saga's id member. |
+| **R13 — state identity member must map to `_id`** | Driver maps only `Id`/`id`/`_id` to BSON `_id`; a differently-named identity member yields an auto `ObjectId` `_id` and load-by-`_id` silently misses. Constraint (Decision 1): name the state identity `Id` or annotate `[BsonId]`. Compliance + demo satisfy it by construction; README (S16) documents it for users. |
 
 ---
 
