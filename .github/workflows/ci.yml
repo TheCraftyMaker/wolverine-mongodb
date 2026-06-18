@@ -28,10 +28,20 @@ jobs:
             9.0.x
             10.0.x
 
-      - name: Run library tests (project-refs the Wolverine submodule)
+      # Split single-node from multinode so a cross-node flake is immediately
+      # distinguishable from a core regression. Both project-ref the Wolverine submodule.
+      - name: Run library tests (single-node)
         run: >
           dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
           -c Release -p:UseWolverineSource=true
+          --filter "Category!=multinode"
+          --logger "GitHubActions"
+
+      - name: Run library tests (multinode)
+        run: >
+          dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
+          -c Release -p:UseWolverineSource=true
+          --filter "Category=multinode"
           --logger "GitHubActions"
 
       - name: Pack (declares the WolverineFx package dependency)
