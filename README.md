@@ -8,7 +8,8 @@ relational ADO.NET connection and SQL-managed envelope tables. This package
 implements `IMessageStore` directly against the MongoDB .NET driver, giving
 MongoDB-backed applications reliable, durable message delivery without EF Core.
 
-> **Status: pre-release (`0.1.0-beta.5`).** Node coordination is still being hardened.
+> **Status: pre-release (`0.1.0-beta.5`).** The multinode (`DurabilityMode.Balanced`)
+> path is functional and integration-tested; see [Known limitations](#known-limitations).
 > The major version tracks Wolverine's major version (`6.x` ↔ `WolverineFx 6.x`).
 
 [![NuGet](https://img.shields.io/nuget/vpre/Wolverine.MongoDB?label=nuget)](https://www.nuget.org/packages/Wolverine.MongoDB)
@@ -50,7 +51,7 @@ builder.Services.AddSingleton<IMongoClient>(
 
 builder.Host.UseWolverine(opts =>
 {
-    // Required: this store only supports single-node durability.
+    // Single-node deployment (default). For multi-node see "Multinode support" below.
     opts.Durability.Mode = DurabilityMode.Solo;
 
     // Register the MongoDB transactional outbox/inbox
@@ -67,11 +68,13 @@ can configure the client however you like (Atlas connection string, custom
 
 ### Durability mode
 
-`Wolverine.MongoDB` currently supports single-node deployments only.
-**`opts.Durability.Mode = DurabilityMode.Solo` is required.** The host will
-throw `InvalidOperationException` at startup if the mode is left at the default
-`DurabilityMode.Balanced`. Multi-node agent balancing is tracked in the
-follow-up plan.
+`Wolverine.MongoDB` supports both single-node (`DurabilityMode.Solo`) and
+multi-node (`DurabilityMode.Balanced`) deployments.
+
+Use `DurabilityMode.Solo` for single-instance deployments — no control endpoint
+is required and node coordination is minimal.
+
+For multi-node clusters see [Multinode support](#multinode-support) below.
 
 ### Domain-write atomicity
 
@@ -143,6 +146,95 @@ When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op — documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
 
+## Multinode support
+
+`DurabilityMode.Balanced` is supported. MongoDB has no native control transport,
+so a TCP control endpoint is required between nodes (mirroring Wolverine's RavenDb
+provider):
+
+```csharp
+using Wolverine.Transports.Tcp;
+
+builder.Host.UseWolverine(opts =>
+{
+    opts.Durability.Mode = DurabilityMode.Balanced;
+
+    // Required: MongoDB has no native inter-node control transport.
+    opts.UseTcpForControlEndpoint();
+
+    opts.UseMongoDbPersistence("my_database");
+});
+```
+
+At startup, when `DurabilityMode.Balanced` is detected, the store logs an
+`Information` message confirming the mode and reminding you that synchronized
+clocks are required (not a throw — the host starts normally).
+
+### Multinode requirements
+
+- **`opts.UseTcpForControlEndpoint()`** (or any configured control endpoint) —
+  nodes use Wolverine's control channel for leader election and agent balancing.
+  Without it, nodes cannot exchange control messages.
+- **Synchronized node clocks** — the leader lock uses a time-based lease
+  (`LockLeaseDuration`, default 1 minute). Node clocks must be synchronized to
+  well within this duration. Standard NTP keeps typical server clocks within a
+  few milliseconds, which is safe for the default lease.
+
+### Multinode semantics
+
+- **Leader election:** a lock document in `wolverine_locks` is claimed via
+  `findAndModify` (compare-and-swap). Any healthy node can become leader; the
+  first to atomically claim an expired or absent lock wins.
+- **Scheduled messages:** claimed exactly-once via `FindOneAndUpdate` CAS —
+  `Status == Scheduled && ExecutionTime <= now` — so two nodes competing for the
+  same due message produce at most one execution.
+- **Dead-node recovery:** on each recovery tick, each node releases envelope
+  ownership held by node numbers with no live node document (crashed nodes), then
+  recovers those orphaned envelopes. Envelopes owned by live nodes are never touched.
+- **CAS-guarded outgoing recovery:** when recovering orphaned outgoing envelopes,
+  only envelopes still globally-owned (`OwnerId == 0`) are claimed, and the claim
+  uses a filter guard so a competing node that claimed an envelope between load and
+  write retains it — no double-sends.
+- **Node records:** the leader trims old node-event records via
+  `DeleteOldNodeRecordsAsync`; the TTL index on `wolverine_node_records` provides
+  a 14-day backstop.
+
+### Tuning failover speed
+
+`LockLeaseDuration` controls how long the leader lock is held before another node
+can take over. Lower values mean faster failover but more lock renewal churn:
+
+```csharp
+opts.UseMongoDbPersistence("my_database",
+    mongo => mongo.LockLeaseDuration = TimeSpan.FromSeconds(30));
+```
+
+The default is **1 minute**. `HasLeadershipLock()` returns `false` once 75% of
+the lease has elapsed, so a node stops acting as leader before another can
+legitimately take over.
+
+### Multinode known limitations
+
+- **Leadership is lease-based, not fenced.** `HasLeadershipLock()` goes `false`
+  at 75% of the lease duration, so the store-layer leadership check is
+  conservative. However, any side effects that do not go through the message store
+  (e.g. an external HTTP call triggered by a leader-only agent) are not fenced by
+  this check. If your leader-specific work only touches MongoDB collections via
+  the store, you are safe; for external side effects, treat leadership as advisory
+  rather than exclusive.
+- **Clock skew near `LockLeaseDuration` breaks takeover ordering.** A node whose
+  clock is significantly skewed relative to others may not correctly observe lease
+  expiry. Keep node clocks synchronized to well within the lease duration (NTP is
+  sufficient for the default 1-minute lease).
+- **The `LeadershipElectionCompliance` suite is compile-gated.** The upstream
+  compliance facts require the lowest-numbered surviving node to win the election
+  race — an emergent property of very fast stores. Our `w:majority` lock cannot
+  guarantee this ordering, so the suite stays gated behind `#if RUN_MULTINODE`,
+  matching how Wolverine's own Cosmos provider gates the same facts `[Flaky]`.
+  Production confidence comes from the cross-node message-guarantee tests
+  (`multinode_end_to_end.cs`): exactly-once scheduled delivery and dead-node
+  rescue, each verified with five consecutive green runs.
+
 ## Demo application
 
 The [`demo/`](demo/) directory contains a full working example — a CQRS
@@ -153,8 +245,11 @@ demonstrate:
 - Durable inbox for an event-driven read-model projector
 - Domain events → application events mapped inside a handler
 - `IClientSessionHandle` threaded through repositories for atomicity
+- Config-driven durability mode (Solo by default; `Wolverine__DurabilityMode=Balanced`
+  for multi-instance runs)
 
-See the [demo README](demo/README.md) for setup instructions and a walkthrough.
+See the [demo README](demo/README.md) for setup instructions, a walkthrough, and
+the multinode runbook.
 
 ## How it works
 
@@ -178,9 +273,16 @@ version — clone with `git clone --recursive` (or run `git submodule update
 a single consistent `Wolverine.dll`. The path is overridable via the
 `WOLVERINE_SOURCE` environment variable or `-p:WolverineSourcePath=...`.
 
-CI initialises the submodule, runs the full compliance suite, then packs the
-library; the demo job downloads the freshly packed nupkg and runs end-to-end
-integration tests against it — no stale NuGet version is exercised.
+CI initialises the submodule, runs the compliance suite in two separate steps
+(single-node and multinode categories), then packs the library; the demo job
+downloads the freshly packed nupkg and runs end-to-end integration tests against
+it — no stale NuGet version is exercised.
+
+To run only the multinode tests locally:
+
+```bash
+dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"
+```
 
 When the submodule is absent, the library can still be built and packed using
 the `WolverineFx` NuGet package:
@@ -202,12 +304,9 @@ required beyond Docker Desktop.
 
 - **Standalone MongoDB is not supported** — a replica set is required for
   transactions.
-- **Single-node coordination only.** `DurabilityMode.Solo` is required; startup
-  throws on `DurabilityMode.Balanced`. Multi-node agent balancing is deferred
-  to a follow-up release.
-- **Node coordination is approximate.** MongoDB has no advisory-lock primitive;
-  leader election and agent assignment use a lock document with TTL-based expiry
-  via `findAndModify`. This is the least mature part of the library pre-`1.0.0`.
+- **Multinode leadership is lease-based, not fenced.** See
+  [Multinode known limitations](#multinode-known-limitations) for the fencing
+  caveat and clock-skew constraint.
 - **Saga storage not yet supported.** Wolverine saga persistence requires
   provider-specific integration that is not yet implemented.
 - **High-throughput contention.** The `findAndModify` lock approach serializes

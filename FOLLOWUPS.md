@@ -1,8 +1,7 @@
 # Follow-ups
 
 Known limitations and deferred work, captured so nothing is silently dropped.
-None of these block the 0.1.0 single-node MVP; promote to GitHub issues before
-the first public release.
+Promote to GitHub issues before the first public release.
 
 ## Deferred from the post-review hardening pass
 
@@ -21,34 +20,39 @@ the first public release.
   its own `IMongoDatabase`, this is a constraint/conflict. Document as a consumer
   constraint or switch to a keyed/dedicated registration.
 
-- **`HasLeadershipLock` external-delete edge (low).** `HasLeadershipLock` trusts
-  the cached lease until its expiry; if the lock document is deleted externally
-  mid-lease, the node still believes it holds leadership until expiry. Low risk
-  (self-corrects at expiry); acceptable for single-node.
+- **`HasLeadershipLock` external-delete edge (residual, low priority).** The 75%
+  lease margin means a node stops reporting leadership well before the lease
+  expires, so a competing node can take over safely. The remaining residual: if
+  the lock document is deleted externally (e.g. manual MongoDB intervention) while
+  a node is inside the 75% window, that node still believes it holds leadership
+  until its cached `ExpiresAt` crosses the margin. Self-corrects within one lease
+  duration; acceptable for the current model.
 
-- **Multi-node agent balancing / cross-node orphan correctness.** True multi-node
-  agent assignment balancing/rebalancing and end-to-end cross-node orphan recovery
-  remain out of scope for 0.1.0. The `leadership_election_compliance` suite is
-  compile-gated behind `#if RUN_MULTINODE`; the single-node leader-lock facts pass,
-  multi-node balancing facts are flaky (deferred), mirroring how Cosmos marks its
-  own as `[Flaky]`. Tracked in `docs/superpowers/plans/2026-06-09-multinode-support.md`.
+- **Multinode leadership compliance is gated (by decision, not pending work).** The
+  upstream `leadership_election_compliance` facts (`leader_switchover_between_nodes`,
+  `singular_agent_is_only_running_on_one`) require the lowest-numbered surviving node
+  to win a leadership-claim race that Wolverine core decides by "whoever's heartbeat
+  grabs the lock first" — fast stores (RavenDb/Postgres) win it emergently via
+  low-latency CAS; our `w:majority+j:true` lock cannot, and no `configureNode` knob
+  fixes it. **Decision (2026-06-16): declined.** "Lowest node wins" is a test
+  tie-breaker, not a production requirement; the provider keeps the
+  production-appropriate any-healthy-node model and the suite stays compile-gated
+  behind `RUN_MULTINODE`, exactly as Wolverine's own Cosmos provider gates the same
+  facts `[Flaky]`. Production confidence for multinode comes from `multinode_end_to_end.cs`
+  (exactly-once scheduling + dead-node rescue, 5× green on net9.0 + net10.0).
+  Full analysis + the declined code:
+  `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
 
-- **Multinode leadership compliance is gated (by decision, not pending work).** The upstream
-  `leadership_election_compliance` facts (`leader_switchover_between_nodes`,
-  `singular_agent_is_only_running_on_one`) require the lowest-numbered surviving node to win a
-  leadership-claim race that Wolverine core decides by "whoever's heartbeat grabs the lock
-  first" — fast stores (RavenDb/Postgres) win it emergently via low-latency CAS; our
-  `w:majority+j:true` lock cannot, and no `configureNode` knob fixes it (lease/heartbeat sweeps
-  all worse; MassTransit has no leader election to borrow from). **Decision (2026-06-16):
-  declined to chase it.** "Lowest node wins" is a test tie-breaker, not a production
-  requirement; the provider keeps the production-appropriate any-healthy-node model and the
-  suite stays compile-gated behind `RUN_MULTINODE`, exactly as Wolverine's own Cosmos provider
-  gates the same facts `[Flaky]`. A deterministic lowest-node election *could* make them pass
-  but would degrade real failover — documented as an **upstream-parity option only** (full
-  analysis + the declined code):
-  `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. Production
-  confidence for multinode comes from the cross-node message-guarantee tests (plan Task 7),
-  which are leader-identity-independent.
+- **Lease fencing token (epoch) as a future hardening option.** The leader lock
+  currently has no fencing token (monotonically increasing epoch). Adding one would
+  allow store writes to carry the epoch and reject writes from a node with a stale
+  epoch — eliminating the "paused node acts on stale leadership for external systems"
+  residual. Not needed for store-only leader work; track as a future hardening item
+  if leader-scoped external side effects become common.
+
+- **`IListenerStore` still `NullListenerStore`.** The `IListenerStore` interface
+  returns the no-op default. Listener persistence (durable local queues surviving
+  restarts) is not yet implemented.
 
 - **Demo app has no `MongoDbUnitOfWork` example.** The demo uses the repository
   pattern with explicit `IClientSessionHandle` threading, which is the fuller
@@ -61,16 +65,9 @@ the first public release.
   beta; no migration planned). Add an explicit index migration step before 1.0 if
   needed.
 
-- **`DeleteOldNodeRecordsAsync` override not implemented.** The TTL index on
-  `wolverine_node_records` (added in the hardening pass) handles automatic expiry
-  at 14 days. The `DeleteOldNodeRecordsAsync(int retainCount)` interface method
-  still uses the no-op default. Implement if count-based pruning is needed.
-
 ## Untested-but-inspected paths (add deterministic coverage later)
 
 - Bulk `StoreIncomingAsync` non-duplicate-error rethrow branch (no clean way to
   force a non-duplicate bulk write error against a real Mongo).
-- Scheduled-claim cross-node double-publish guard and the crash-between-flip-and-
-  enqueue window (need a second concurrent node to exercise deterministically).
 - `MoveToDeadLetterStorageAsync` poison-message serialization-failure path (hard
   to force a serialization failure on a real envelope).

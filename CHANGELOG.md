@@ -8,7 +8,58 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Added
+- **`DurabilityMode.Balanced` (multinode) support.** Multiple nodes can now run
+  against the same MongoDB store. Requires `opts.UseTcpForControlEndpoint()` (or
+  any control endpoint) and synchronized node clocks. Startup emits an `Information`
+  log message confirming the mode instead of throwing.
+- **`MongoDbPersistenceOptions` — MongoDB-specific persistence tuning.** Pass a
+  configure callback to `UseMongoDbPersistence` to set `LockLeaseDuration`
+  (default 1 minute). Example:
+  `opts.UseMongoDbPersistence("db", mongo => mongo.LockLeaseDuration = TimeSpan.FromSeconds(30))`.
+- **`DeleteOldNodeRecordsAsync` implementation.** The leader now trims old
+  node-event records by retain count (`DeleteOldNodeRecordsAsync(int)`). The
+  TTL index on `wolverine_node_records` remains a 14-day backstop.
+- **Dead-node ownership release in `DurabilityMode.Balanced`.** Each recovery
+  tick releases incoming and outgoing envelope ownership held by node numbers
+  that have no live node document (crashed nodes), then re-runs orphan recovery
+  so rescued envelopes are re-claimed in the same tick.
+- **Cross-node message-guarantee tests (`multinode_end_to_end.cs`).** Two in-proc
+  `Balanced`-mode hosts verify: (1) a scheduled message executes exactly once
+  across competing nodes; (2) a survivor releases and recovers envelopes owned by
+  a dead node. Both facts verified with five consecutive green runs on net9.0 and
+  net10.0.
+- **CI runs the multinode test category as a separate step.** The `library` job
+  now runs `Category!=multinode` and `Category=multinode` as distinct steps so a
+  cross-node flake is immediately distinguishable from a core regression.
+- **Demo config-driven durability mode with multinode runbook.** The demo API
+  reads `Wolverine:DurabilityMode` from configuration (default `Solo`); set it to
+  `Balanced` to run multiple instances against the same MongoDB and RabbitMQ.
+  See `demo/README.md` for the two-instance runbook.
+
+### Changed
+
+> **Behavior change:** Leader lock lease default changed from 5 minutes to 1 minute.
+
+The previous 5-minute default made leader failover unacceptably slow and was
+the root cause of leadership compliance suite flakiness. The new default of
+1 minute provides reasonable failover speed for most deployments. Tune via
+`MongoDbPersistenceOptions.LockLeaseDuration` if needed.
+
+> **Behavior change:** `DurabilityMode.Balanced` no longer throws at startup.
+
+Previously, `Initialize`, `StartScheduledJobs`, and `BuildAgent` threw
+`InvalidOperationException` if `DurabilityMode.Balanced` was detected. These
+now log an `Information` message and continue — the host starts normally.
+`DurabilityMode.Solo` still works as before; no changes needed for existing
+single-node deployments.
+
 ### Fixed
+- **CAS-guarded outgoing recovery prevents cross-node double-claims.** When two
+  nodes race to recover the same orphaned outgoing envelopes, the second node's
+  claim `UpdateMany` now carries an `OwnerId == AnyNode` filter guard. After the
+  update, only envelopes this node actually won (confirmed by a re-read) are
+  enqueued — preventing duplicate sends.
 - **`LoadOutgoingAsync` now returns only globally-owned envelopes, batch-limited.**
   Previously the query filtered by destination only, which caused orphan recovery
   to re-claim in-flight envelopes (duplicate sends) and load unbounded result sets.

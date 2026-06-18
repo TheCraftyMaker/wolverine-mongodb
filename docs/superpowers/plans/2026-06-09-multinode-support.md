@@ -61,11 +61,11 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76) — production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
 | 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ✅ Merged (#78) |
 | 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ✅ Merged (#79) — config-driven durability + multinode runbook; also added `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core); two-instance Balanced smoke passed |
-| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ⛔ Not started — document the any-node model honestly (leadership compliance gated like Cosmos) |
+| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | 🔄 In progress — PR #81 open, all checks green |
 | 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
 | 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ⛔ Not started — published `0.1.0-beta.5` still throws on Balanced; this ships a Task-1+ release and re-points the demo at it |
 
-**Recommended merge order (updated 2026-06-16):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). **Task 8** (#78, run Task 7's multinode tests as a separate CI step) and **Task 9** (#79, demo config-driven durability + runbook) are now **merged**. Remaining work: **Task 10** (docs — honest about the any-node model + gated leadership compliance), **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
+**Recommended merge order (updated 2026-06-18):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). **Task 8** (#78, run Task 7's multinode tests as a separate CI step) and **Task 9** (#79, demo config-driven durability + runbook) are now **merged**. **Task 10** (docs sweep) — PR open on `docs/multinode-sweep`. Remaining work: **Task 11** on `main` after Task 10 merges. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
 
 > _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
@@ -1083,27 +1083,27 @@ rtk git commit -m "demo: config-driven durability mode with a multinode runbook"
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`, `FOLLOWUPS.md`, `CHANGELOG.md`
 
-- [ ] **Step 1: `README.md`** — replace the "Solo only / fails fast on Balanced" section (from the Solo plan) with a **Multinode** section:
+- [x] **Step 1: `README.md`** — replace the "Solo only / fails fast on Balanced" section (from the Solo plan) with a **Multinode** section:
   - Requirements: MongoDB replica set; `opts.UseTcpForControlEndpoint()` (or any control endpoint); synchronized node clocks (well within `LockLeaseDuration`); `UseMongoDbPersistence(db, mongo => mongo.LockLeaseDuration = ...)` for failover-speed tuning (default 1 minute).
   - Semantics: leader election via lease-based lock document; scheduled messages claimed exactly-once via CAS; dead-node envelopes released by survivors' recovery loops; node-event records trimmed (TTL 14 days + leader trim).
   - Known limits (be honest): leadership is lease-based, not fenced — a node paused longer than the lease margin could briefly act on stale leadership for non-store side effects; clock skew approaching the lease duration breaks takeover ordering.
 
-- [ ] **Step 2: `CLAUDE.md`** — update: remove "does not support Multinode" / "Least mature subsystem" wording on `MongoDbMessageStore.Locking.cs`; document `MongoDbPersistenceOptions`; note the multinode test category and how to run it (`dotnet test --filter "Category=multinode"`); update the CI description (separate multinode step).
+- [x] **Step 2: `CLAUDE.md`** — update: remove "does not support Multinode" / "Least mature subsystem" wording on `MongoDbMessageStore.Locking.cs`; document `MongoDbPersistenceOptions`; note the multinode test category and how to run it (`dotnet test --filter "Category=multinode"`); update the CI description (separate multinode step).
 
-- [ ] **Step 3: `FOLLOWUPS.md`** — remove the now-done items: "Multi-node agent balancing / cross-node orphan correctness", "`HasLeadershipLock` external-delete edge" (the renewal margin shrinks it — keep a residual note if desired), "node-records `DeleteOldNodeRecordsAsync`". Keep/add: node-number reuse, lease fencing token (epoch) as a future hardening item, `IListenerStore` still `NullListenerStore`.
+- [x] **Step 3: `FOLLOWUPS.md`** — remove the now-done items: "Multi-node agent balancing / cross-node orphan correctness", "`HasLeadershipLock` external-delete edge" (the renewal margin shrinks it — keep a residual note if desired), "node-records `DeleteOldNodeRecordsAsync`". Keep/add: node-number reuse, lease fencing token (epoch) as a future hardening item, `IListenerStore` still `NullListenerStore`.
 
-- [ ] **Step 4: `CHANGELOG.md`** — `## [Unreleased]` (or the next minor version): `### Added` multinode/Balanced support, `MongoDbPersistenceOptions.LockLeaseDuration`, `DeleteOldNodeRecordsAsync`; `### Changed` leader lease default 5 min → 1 min, Balanced startup no longer throws; `### Fixed` cross-node outgoing double-claim.
+- [x] **Step 4: `CHANGELOG.md`** — `## [Unreleased]` (or the next minor version): `### Added` multinode/Balanced support, `MongoDbPersistenceOptions.LockLeaseDuration`, `DeleteOldNodeRecordsAsync`; `### Changed` leader lease default 5 min → 1 min, Balanced startup no longer throws; `### Fixed` cross-node outgoing double-claim.
 
-- [ ] **Step 5: Truth-check** — re-read every edited doc against the code on this branch; every claim must hold.
+- [x] **Step 5: Truth-check** — re-read every edited doc against the code on this branch; every claim must hold.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 rtk git add README.md CLAUDE.md FOLLOWUPS.md CHANGELOG.md
 rtk git commit -m "docs: multinode support — requirements, semantics, tuning, and known limits"
 ```
 
-- [ ] **Step 7: Check Task 10 off in the plan** — in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
+- [x] **Step 7: Check Task 10 off in the plan** — in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
 
 ---
 
