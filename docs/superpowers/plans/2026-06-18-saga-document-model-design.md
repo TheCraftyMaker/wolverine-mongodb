@@ -28,6 +28,25 @@
 >    and demo sagas — it must be stated, not assumed. (The S5 demo already satisfies it: state
 >    member `Id`, with `[SagaIdentity]` on the message's `OrderId`.)
 
+> **Independent review (2026-06-18, second smart-model pass, read-only against source).** An
+> independent reviewer re-verified all of the above against `external/wolverine` and the local
+> tree — every frame-contract, signature, and line citation **VERIFIED**, no blocking issues. It
+> folded in four precision corrections (search "codex" / "🔎 codex"):
+> 1. **Double-emit failure mode** (Decision 5) — the duplicate commit does **not** throw; it is a
+>    no-op (commit is guarded by `if (IsInTransaction)`, `TransactionalFrame.cs:136-139`) but
+>    `FlushOutgoingMessagesAsync` runs **twice** (`:141-145`, outside the guard). The guard is
+>    still required; the bug is a double flush, not an exception.
+> 2. **Guid `_id` is not "ceremony-free"** (Decisions 1 & 6) — the demo's Guid `_id` round-trip
+>    relies on a **process-global** `GuidSerializer` (`InfrastructureBootstrap.cs:46`) plus
+>    per-property `[BsonGuidRepresentation]` (`OrderSummary.cs`). MongoDB.Driver 3.x has no default
+>    Guid representation. Since Decision 6 forbids the **library** registering a global serializer,
+>    Guid-keyed sagas (S7/S10) need an explicit representation strategy — see Decision 6 and R14.
+> 3. **`ModifiedCount == 0` OCC caveat** (Decision 4) — safe **only because `Version` always
+>    changes**; noted to prevent a future spurious-conflict regression.
+> 4. **`SagaCollectionName` is authoritative here** (Decision 2) — S5's snake_case example
+>    (`wolverine_saga_order_fulfillment_saga`) is illustrative; this gate's `ToLowerInvariant()`
+>    form wins.
+
 ---
 
 ## Lead Open Design Decision: **Option B — Native Id + Optimistic Concurrency**
@@ -96,9 +115,18 @@ member map to BSON `_id`, by one of:
    user/test saga type only.
 
 For the compliance suite and the demo this constraint holds by construction, so **no `[BsonId]`
-and no global serializer registration are required** for any planned saga. Document the
-constraint in S16 (README) so downstream users naming their identity member something other than
-`Id` add `[BsonId]`.
+is required** for `_id` *mapping* on any planned saga. Document the constraint in S16 (README) so
+downstream users naming their identity member something other than `Id` add `[BsonId]`.
+
+> **🔎 codex — `_id` *mapping* vs Guid *representation* are separate concerns.** "No `[BsonId]`
+> required" addresses only which member becomes `_id`. It does **not** mean a Guid-keyed saga
+> serializes with no configuration: MongoDB.Driver 3.x has **no default Guid representation**, so a
+> `Guid` `_id` needs an explicit representation (e.g. `GuidRepresentation.Standard`). The demo
+> achieves this with a process-global `GuidSerializer` (`InfrastructureBootstrap.cs:46`) plus
+> per-property `[BsonGuidRepresentation]` (`OrderSummary.cs`) — i.e. the Guid round-trip is **not**
+> ceremony-free. Because Decision 6 forbids the **library** registering a global serializer, the
+> Guid-id strategy for S7/S10 must come from the **saga type or the test/demo host**, not the
+> provider — see Decision 6 and **R14**.
 
 **`[BsonRepresentation]` policy:**  
 Add representation attributes only on the **test/demo saga type** and only if a compliance fact
@@ -135,6 +163,15 @@ public static string SagaCollectionName(Type sagaType)
 types (`stringbasicworkflow`, `guidbasicworkflow`, `intbasicworkflow`, `longbasicworkflow`) and
 demo types (`orderfulfillmentsaga`). Generic saga types (uncommon) would produce names like
 `myworkflow\`1` — if this causes issues in S6, sanitize backtick and backtick-digit suffixes:
+
+> **🔎 codex — this naming helper is authoritative.** The S5 demo/test-inventory doc
+> (`2026-06-18-saga-demo-and-test-inventory.md`) shows a snake_case example
+> (`wolverine_saga_order_fulfillment_saga`) and hedges "pending the S4 naming helper." That example
+> is **illustrative only**; the form S6 implements is this gate's `ToLowerInvariant()` (no word
+> separators → `wolverine_saga_orderfulfillmentsaga`). Test/demo `LoadState<T>` reads via
+> `MongoConstants.SagaCollectionName(typeof(T))`, so the host and provider stay consistent
+> automatically — but any hard-coded collection-name string in an S5-derived assertion must use
+> the `ToLowerInvariant()` form.
 
 ```csharp
 private static string SanitizeSagaTypeName(string name)
@@ -193,8 +230,12 @@ public Type DetermineSagaIdType(Type sagaType, IServiceContainer container)
        ?? typeof(string);
 ```
 
-Mirrors `LightweightSagaPersistenceFrameProvider.cs:80-82`. Enables `GuidIdentifiedSagaComplianceSpecs`,
-`IntIdentifiedSagaComplianceSpecs`, and `LongIdentifiedSagaComplianceSpecs`.
+Mirrors the resolution in `LightweightSagaPersistenceFrameProvider.cs:80-83`. Enables
+`GuidIdentifiedSagaComplianceSpecs`, `IntIdentifiedSagaComplianceSpecs`, and
+`LongIdentifiedSagaComplianceSpecs`. **🔎 codex:** one deliberate deviation — lightweight
+*throws* `ArgumentException` when no identity member resolves; this provider falls back to
+`typeof(string)` instead (graceful, and only reached on the envelope-header-only path). This is a
+choice, not an oversight.
 
 ### Scope of `DetermineSagaIdType` (S2 confirmed)
 
@@ -255,6 +296,17 @@ await db.GetCollection<TSaga>(coll)
 3. `ReplaceOneAsync` with filter `(_id == saga.<IdMember> && Version == oldVersion)`,
    `IsUpsert = false`.
 4. Throw `SagaConcurrencyException` if `ModifiedCount == 0`.
+
+> **🔎 codex — `ModifiedCount == 0` is the conflict signal, and it is safe *only because*
+> `Version` always changes.** Step 2 always increments `Version` (`oldVersion → oldVersion + 1`),
+> so a *matched* document is always *modified* — `ModifiedCount == 0` therefore means "filter
+> matched nothing" (the version moved or the doc was deleted) = a genuine conflict. This mirrors
+> the demo's `OrderRepository.UpdateAsync` and the lightweight SQL provider (affected-row count).
+> Caveat for future maintainers: if a saga update ever writes a byte-identical replacement (no
+> field, including `Version`, actually changes), `ReplaceOneAsync` reports `ModifiedCount == 0` on
+> a successful match and would throw a **spurious** `SagaConcurrencyException`. The always-changing
+> `Version` makes that impossible here; do not remove the version increment. `MatchedCount == 0`
+> is the more intent-revealing alternative if a future change ever breaks that invariant.
 
 > **The update frame is handed only the `saga` variable — not `sagaId`** (see §"Resolving the
 > `_id` value" in the Implementation Contracts). The `_id` filter value must therefore be read
@@ -356,8 +408,16 @@ if (!chain.Middleware.OfType<TransactionalFrame>().Any())
 
 Without this guard, `CommitMongoTransactionFrame` fires **twice** for saga chains: once from
 `CommitUnitOfWorkFrame` (inlined by `SagaChain.DetermineFrames`) and once from the postprocessor.
-The second commit throws because the transaction is already committed (or there is no active
-transaction). Both Cosmos and RavenDb use the identical guard (verified S2 §8, S3 §4 Rule 2).
+
+> **🔎 codex — what the double-emit actually does (verified against the local frame).** The
+> duplicate commit does **not** throw. `CommitMongoTransactionFrame` guards the commit with
+> `if (mongoSession.IsInTransaction)` (`TransactionalFrame.cs:136-139`), so the second invocation
+> finds the transaction already committed and **skips** it (no-op). However,
+> `FlushOutgoingMessagesAsync()` sits **outside** that guard (`TransactionalFrame.cs:141-145`), so
+> it runs **twice** — a double flush of outgoing messages. The guard (Flip 3) is still required;
+> the precise defect it prevents is a redundant frame + double flush, not a commit exception.
+
+Both Cosmos and RavenDb use the identical guard (verified S2 §8, S3 §4 Rule 2).
 
 ### `CommitUnitOfWorkFrame`
 
@@ -426,8 +486,13 @@ break atomicity. This is a hard requirement — not optional.
 Consistent with the existing `[BsonRepresentation(BsonType.DateTime)]` per-property decision
 (documented in `CLAUDE.md`):
 
-- The `Id` → `_id` mapping is handled by the driver's default `IdMemberConvention` —
-  verified by the demo's `Order.Id : Guid` round-tripping correctly as `_id`.
+- The `Id` → `_id` *mapping* (which member is the id) is handled by the driver's default
+  `IdMemberConvention`. The demo's `Order.Id : Guid` does map to `_id` with no `[BsonId]`.
+  **🔎 codex caveat:** that demo's Guid *value* round-trip is **not** ceremony-free — the demo
+  registers a process-global `GuidSerializer(GuidRepresentation.Standard)`
+  (`InfrastructureBootstrap.cs:46`) and uses per-property `[BsonGuidRepresentation]`
+  (`OrderSummary.cs`). MongoDB.Driver 3.x has no default Guid representation. So `Id`→`_id`
+  mapping is convention-free, but Guid *representation* is a separate, required choice (see R14).
 - `int Version` serializes as BSON `int32` by default — no annotation.
 - `bool IsCompleted()` is a method, not a property — the driver does not serialize it.
   `_isCompleted` is a private field and will also not be serialized by default
@@ -442,6 +507,19 @@ Consistent with the existing `[BsonRepresentation(BsonType.DateTime)]` per-prope
 `BsonSerializer.RegisterSerializer` calls in the provider code.** Such calls mutate the
 process-global MongoDB BSON registry and break application code that depends on its own
 serialization setup.
+
+**🔎 codex — Guid-id representation strategy for S7/S10 (consequence of this decision).** Because
+the library must not register a global Guid serializer, a Guid-keyed saga needs its representation
+supplied elsewhere. Order of preference, decided here so S7/S10 don't improvise:
+1. **Per-property `[BsonGuidRepresentation(GuidRepresentation.Standard)]` on the saga's `Guid Id`**
+   (test/demo saga types only) — local, no global mutation, matches the demo's `OrderSummary`
+   precedent. **Preferred** for the compliance/demo Guid sagas.
+2. **The test/demo *host* registers the serializer** (app/test code, not the library) if a
+   per-property attribute proves insufficient across the compliance types.
+3. The library itself does **not** register one (would violate this decision).
+If S7's first Guid compliance run fails on Guid *representation* (not `_id` *mapping*), apply
+option 1 to the `GuidBasicWorkflow`-side test saga; do not reach for a global registration in the
+provider. Record the chosen mechanism in the S7 PR.
 
 ---
 
@@ -700,12 +778,13 @@ foreach (var name in names.Where(n => n.StartsWith(MongoConstants.SagaCollection
 | Risk | Mitigation |
 |------|-----------|
 | **R2 — double-commit** | Flip 3 (`if chain is not SagaChain`) prevents it. Verify in generated code. |
-| **R3 — Guid `_id` round-trip** | Demo already stores Guid `_id` without annotations; add `[BsonId]` only if a compliance fact fails. |
+| **R3 — Guid `_id` *mapping*** | Demo maps `Guid Id`→`_id` with no `[BsonId]`; add `[BsonId]` only if a fact fails on *mapping*. (Guid *representation* is separate — see R14.) |
 | **R9 — `CanPersist` over-broad** | Scoped to `entityType.CanBeCastTo<Saga>()` — stated in Flip 2. |
 | **R10 — envelope-only start assigns saga id** | Compliance `BasicWorkflow.Start` assigns `Id = starting.Id` — provider does not set `Id` from the envelope. Document that start handlers must assign the saga id. |
 | **R11 — `SagaConcurrencyException` retry policy** | Required before S14. Wire in S14 test host; recommended: 2 immediate retries, then dead-letter. |
 | **R12 — insert/update frames have no `sagaId` variable** | `DetermineInsertFrame`/`DetermineUpdateFrame` receive only `saga` (`IPersistenceFrameProvider.cs:27,29`). The `_id` filter value must be read from `saga.<IdMember>`, resolved via `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.Name`. Do **not** reference a `sagaId` variable in those frames. S6 codegen check (`codeFor<T>()`) must confirm the upsert/update filter references the saga's id member. |
 | **R13 — state identity member must map to `_id`** | Driver maps only `Id`/`id`/`_id` to BSON `_id`; a differently-named identity member yields an auto `ObjectId` `_id` and load-by-`_id` silently misses. Constraint (Decision 1): name the state identity `Id` or annotate `[BsonId]`. Compliance + demo satisfy it by construction; README (S16) documents it for users. |
+| **R14 — Guid id needs an explicit representation** | MongoDB.Driver 3.x has no default Guid representation; the demo relies on a process-global `GuidSerializer` (`InfrastructureBootstrap.cs:46`) + `[BsonGuidRepresentation]` (`OrderSummary.cs`). Decision 6 forbids the **library** registering one, so S7/S10 supply it per-property on the test/demo Guid saga (`[BsonGuidRepresentation(GuidRepresentation.Standard)]`) or in the test host — never in the provider. Distinguish a Guid *representation* failure from an `_id` *mapping* failure (R3/R13) when diagnosing the first S7 Guid run. |
 
 ---
 
