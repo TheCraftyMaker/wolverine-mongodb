@@ -61,7 +61,7 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76) — production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
 | 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ✅ Merged (#78) |
 | 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ✅ Merged (#79) — config-driven durability + multinode runbook; also added `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core); two-instance Balanced smoke passed |
-| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | 🔄 In progress — PR open |
+| 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | 🔄 In progress — PR #81 open, all checks green |
 | 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ⛔ Not started |
 | 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ⛔ Not started — published `0.1.0-beta.5` still throws on Balanced; this ships a Task-1+ release and re-points the demo at it |
 
