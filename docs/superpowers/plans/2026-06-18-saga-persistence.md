@@ -113,7 +113,7 @@ rtk git worktree remove .worktrees/<branch-name>
 |---|---|---|---|---|---|
 | **S1** | `docs/saga-repo-analysis` | docs: saga — repository & convention analysis | Prereqs merged | Can start immediately | Sonnet |
 | **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | Can start immediately | Sonnet |
-| **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | Can start immediately | Sonnet |
+| **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | ✅ Done (PR #87 merged) | Sonnet |
 | **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | Blocked by: S1, S2, S3 | **Opus / Fable 5** |
 | **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | Can start immediately (refined after S4) | Sonnet |
 | **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | Blocked by: S4 | **Fable 5 / Opus** |
@@ -207,9 +207,9 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Read `CosmosDbPersistenceFrameProvider.cs`, `LoadDocumentFrame.cs`, `TransactionalFrame.cs`, `WolverineCosmosDbExtensions.cs`, `CosmosDbTests/saga_storage_compliance.cs`.
-- [ ] **Step 2:** Read the RavenDb equivalents incl. `RavenDbSagaStoreDiagnostics.cs` and the `UseOptimisticConcurrency` line.
-- [ ] **Step 3:** Write the comparison doc + recommendation. Commit (`docs: Cosmos/RavenDb saga comparison`).
+- [x] **Step 1:** Read `CosmosDbPersistenceFrameProvider.cs`, `LoadDocumentFrame.cs`, `TransactionalFrame.cs`, `WolverineCosmosDbExtensions.cs`, `CosmosDbTests/saga_storage_compliance.cs`.
+- [x] **Step 2:** Read the RavenDb equivalents incl. `RavenDbSagaStoreDiagnostics.cs` and the `UseOptimisticConcurrency` line.
+- [x] **Step 3:** Write the comparison doc + recommendation. Commit (`docs: Cosmos/RavenDb saga comparison`).
 
 ### Task S4: MongoDB saga document model + identity + concurrency design (DESIGN GATE)
 
