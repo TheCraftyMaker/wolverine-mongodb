@@ -261,3 +261,19 @@ Execute Task 11 ("Final verification") of docs/superpowers/plans/2026-06-09-mult
 
 This runs on main itself: rtk git checkout main && rtk git pull; run the full suite; run the multinode category five consecutive times (all must pass); pack the library package-ref build; run the demo integration tests; confirm CI on main is green including the multinode step; review the merged history (one PR per task 1–10). Report a verification summary. If anything is red or missing, report it — do not fix anything in this session.
 ```
+
+### B8. Task 12 — publish the multinode release and point the demo at it *(model: Sonnet; **only after Task 11 verification is clean**)*
+
+```
+Execute Task 12 ("Publish the multinode release to NuGet and point the demo at it") of docs/superpowers/plans/2026-06-09-multinode-support.md using the superpowers:executing-plans skill.
+
+Precondition: verify with rtk git log origin/main --oneline -15 that Task 11's verification is done and all Tasks 1–10 PRs are merged. Then proceed in two parts:
+
+Part 1 — cut and publish the release:
+Invoke the `release` agent (as described in CLAUDE.md "Versioning & Release"). The release agent handles its own gate-1 (version proposal → approval) and gate-2 (CHANGELOG + version-bump PR → review + merge → tag). After gate-2 the agent tags main, publish.yml packs and pushes to NuGet, and the agent verifies the GitHub Release and the NuGet listing before reporting. The published package must be a version that includes the multinode/Balanced support from Tasks 1–11 (the guard is now a startup warning, not a throw — verify this in the release notes). Wait for the release agent to confirm the NuGet package is live before continuing.
+
+Part 2 — re-point the demo:
+Branch demo/use-multinode-release from origin/main. In demo/Directory.Packages.props, bump the <PackageVersion Include="Wolverine.MongoDB" .../> entry to the version published in Part 1. Then from demo/: dotnet build OrderDemo.slnx -c Release && dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release → must pass. Recommended (Docker + RabbitMQ available): re-run the two-instance Balanced smoke from the demo README — the published package now allows Balanced, no local pack needed — and record the outcome in the PR description. Commit, push, open the PR titled "demo: consume the multinode release of Wolverine.MongoDB". Watch checks until green.
+
+Stay strictly within Task 12's scope. If the release agent proposes an unexpected version, stop at gate 1 and report rather than accepting. If the demo's integration tests fail after the version bump, investigate whether the published package regressed before merging the PR.
+```
