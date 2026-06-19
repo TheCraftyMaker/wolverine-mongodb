@@ -18,4 +18,12 @@ public static class MongoConstants
 
     // owner id meaning "any node" — matches Wolverine's TransportConstants.AnyNode (0)
     public const int AnyNode = 0;
+
+    // Saga persistence: one MongoDB collection per saga type. The per-type collection is
+    // idiomatic Mongo (no cross-type _id collision, independently indexable/enumerable) and
+    // lets ClearAllAsync drop every saga collection by prefix between compliance facts.
+    public const string SagaCollectionPrefix = "wolverine_saga_";
+
+    public static string SagaCollectionName(Type sagaType)
+        => $"{SagaCollectionPrefix}{sagaType.Name.ToLowerInvariant()}";
 }

@@ -116,7 +116,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | ✅ Done (PR #87 merged) | Sonnet |
 | **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | ✅ Done | **Opus / Fable 5** |
 | **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | ✅ **Done** — merged #89 | Sonnet |
-| **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | Blocked by: S4 | **Fable 5 / Opus** |
+| **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | ✅ Done | **Fable 5 / Opus** |
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | Blocked by: S6 | **Fable 5 / Opus** |
 | **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | Blocked by: S6, S7 | **Fable 5 / Opus** |
 | **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | Partially blocked by: S6 | Sonnet |
@@ -321,10 +321,10 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 // `coll` = MongoConstants.SagaCollectionName(typeof(TSaga)); FindVariables() resolves IClientSessionHandle + IMongoDatabase + CancellationToken.
 ```
 
-- [ ] **Step 1:** Implement `SagaFrames.cs` and the provider flips above.
-- [ ] **Step 2:** Add a temporary scratch saga + handler in the **test** project (or reuse the compliance `StringBasicWorkflow`) and dump generated code via `codeFor<T>()`; confirm order: open session → load → handler → upsert/delete → commit → flush, all in the try-block.
-- [ ] **Step 3:** Stand up the `MongoDbSagaHost` + `string_saga_storage_compliance` from S9 **in this branch** as the oracle (or land S9's host file here and the spec in S9) and make them green.
-- [ ] **Step 4:** Run the full suite. Commit (`feat: MongoDB saga persistence (string-id baseline)`).
+- [x] **Step 1:** Implement `SagaFrames.cs` and the provider flips above.
+- [x] **Step 2:** Add a temporary scratch saga + handler in the **test** project (or reuse the compliance `StringBasicWorkflow`) and dump generated code via `codeFor<T>()`; confirm order: open session → load → handler → upsert/delete → commit → flush, all in the try-block.
+- [x] **Step 3:** Stand up the `MongoDbSagaHost` + `string_saga_storage_compliance` from S9 **in this branch** as the oracle (or land S9's host file here and the spec in S9) and make them green.
+- [x] **Step 4:** Run the full suite. Commit (`feat: MongoDB saga persistence (string-id baseline)`).
 
 > **Coordination note:** S6 and S9 are tightly coupled (impl needs the oracle). Recommended: author `MongoDbSagaHost.cs` + `string_saga_storage_compliance.cs` **in the S6 branch** so S6 ships green, and let S9 be a thin "host hardening + int/long stubs" follow-up — OR run them as one combined session. The table keeps them separate for the dependency graph; collapse if a single agent owns both.
 

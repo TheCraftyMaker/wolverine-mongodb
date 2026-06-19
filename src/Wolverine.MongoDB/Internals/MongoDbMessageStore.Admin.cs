@@ -75,6 +75,16 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
         await _database.GetCollection<BsonDocument>(MongoConstants.AgentRestrictionCollection).DeleteManyAsync(new BsonDocument());
         await _database.GetCollection<BsonDocument>(MongoConstants.CounterCollection).DeleteManyAsync(new BsonDocument());
         await _database.GetCollection<BsonDocument>(MongoConstants.LockCollection).DeleteManyAsync(new BsonDocument());
+
+        // Drop every per-saga-type collection (wolverine_saga_*). The named system collections
+        // above are fixed, but saga collections are created on demand per saga type, so they must
+        // be enumerated. Dropping (rather than DeleteMany) also clears their indexes. Without this,
+        // saga documents leak between compliance facts on the shared fixture database.
+        var sagaCollections = await (await _database.ListCollectionNamesAsync()).ToListAsync();
+        foreach (var name in sagaCollections.Where(n => n.StartsWith(MongoConstants.SagaCollectionPrefix)))
+        {
+            await _database.DropCollectionAsync(name);
+        }
     }
 
     public Task DeleteAllHandledAsync()

@@ -13,6 +13,9 @@ local-nuget/
 [Oo]bj/
 artifacts/
 
+# Wolverine runtime code-generation output (GeneratedCodeOutputPath in the saga compliance host)
+**/Internal/Generated/
+
 # Per-task git worktrees (one isolated working tree per task/agent — see the
 # Git & PR Workflow section of the implementation plans)
 .worktrees/
