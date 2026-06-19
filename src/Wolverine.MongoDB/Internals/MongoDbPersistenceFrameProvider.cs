@@ -82,11 +82,18 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
         return entityType.CanBeCastTo<Saga>();
     }
 
-    // String-id baseline (S6). S7 generalizes to the saga's native identity-member type.
-    // Only consulted on the envelope-header-only identity path; message-member identity uses
-    // the member's own runtime type via PullSagaIdFromMessageFrame.
+    // Resolve the saga's native identity-member type (Guid/int/long/string) via Wolverine's own
+    // resolver — the same call the built-in lightweight provider uses
+    // (LightweightSagaPersistenceFrameProvider.cs:80-82). No hand-rolled reflection.
+    //
+    // Scope: core only consults this on the envelope-header-only identity path
+    // (SagaChain.cs:290-292, the SagaIdMember == null branch). Messages that carry a saga-id
+    // member resolve the type from that member directly via PullSagaIdFromMessageFrame, so the
+    // load/delete frames key _id off whatever typed sagaId variable they are handed regardless.
     public Type DetermineSagaIdType(Type sagaType, IServiceContainer container)
-        => typeof(string);
+        => SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType()
+           ?? throw new ArgumentException(
+               $"Unable to determine the identity member for {sagaType.FullNameInCode()}", nameof(sagaType));
 
     public Frame DetermineLoadFrame(IServiceContainer container, Type sagaType, Variable sagaId)
         => new LoadSagaFrame(sagaType, sagaId);
