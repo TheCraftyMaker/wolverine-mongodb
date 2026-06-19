@@ -120,7 +120,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | ✅ Done | **Fable 5 / Opus** |
 | **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | ✅ Done | **Fable 5 / Opus** |
 | **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | ✅ Done (no-op — S6 shipped host + string spec; S7 added all LoadState overloads; verified 10/10 string facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
-| **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | Blocked by: S7, S9 | Sonnet |
+| **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | ✅ Done (no-op — S7 shipped all three compliance subclasses + all four `LoadState` overloads on `MongoDbSagaHost`; verified 27/27 Guid+int+long facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
 | **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | Partially blocked by: S6, S8 | **Fable 5 / Opus** |
 | **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | Partially blocked by: S6, S7 | Sonnet |
 | **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | Blocked by: S12 | Sonnet |
@@ -415,8 +415,8 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S7, S9.**
 - **Blocking status:** **Blocked by: S7, S9.**
 
-- [ ] **Step 1:** Implement the typed `LoadState` overloads.
-- [ ] **Step 2:** Add the Guid (and int/long) compliance subclasses; run them green + full suite. Commit.
+- [x] **Step 1:** Implement the typed `LoadState` overloads. _(Delivered in S7 — all four overloads are on `MongoDbSagaHost`: `LoadState<T>(Guid)`, `LoadState<T>(int)`, `LoadState<T>(long)`, `LoadState<T>(string)` — each calling the strongly-typed `LoadById<T,TId>` helper.)_
+- [x] **Step 2:** Add the Guid (and int/long) compliance subclasses; run them green + full suite. Commit. _(S7 shipped `guid_saga_storage_compliance`, `int_saga_storage_compliance`, `long_saga_storage_compliance`; 27/27 Guid+int+long facts + 145/145 full suite green on net9.0 + net10.0.)_
 
 ### Task S11: Saga atomicity, concurrency, completion & idempotency tests
 
