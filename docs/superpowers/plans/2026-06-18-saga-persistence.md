@@ -119,7 +119,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | ✅ Done | **Fable 5 / Opus** |
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | ✅ Done | **Fable 5 / Opus** |
 | **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | ✅ Done | **Fable 5 / Opus** |
-| **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | Partially blocked by: S6 | Sonnet |
+| **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | ✅ Done (no-op — S6 shipped host + string spec; S7 added all LoadState overloads; verified 10/10 string facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
 | **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | Blocked by: S7, S9 | Sonnet |
 | **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | Partially blocked by: S6, S8 | **Fable 5 / Opus** |
 | **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | Partially blocked by: S6, S7 | Sonnet |
@@ -403,8 +403,8 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** host skeleton needs only S2/S3 facts; **green requires S6**.
 - **Blocking status:** **Partially blocked by: S6** (skeleton authorable earlier; see the S6 coordination note).
 
-- [ ] **Step 1:** Write `MongoDbSagaHost` (clear the fixture DB before build; `LoadState` via `Client.GetDatabase(DatabaseName).GetCollection<T>(coll).Find(Eq("_id", id)).FirstOrDefaultAsync()`).
-- [ ] **Step 2:** Add the compliance subclass; run `--filter "FullyQualifiedName~string_saga_storage_compliance"` → green. Full suite green. Commit.
+- [x] **Step 1:** Write `MongoDbSagaHost` (clear the fixture DB before build; `LoadState` via `Client.GetDatabase(DatabaseName).GetCollection<T>(coll).Find(Eq("_id", id)).FirstOrDefaultAsync()`). _(Shipped in S6 PR #93; all four LoadState overloads fully implemented by S7 PR #94 — no NotSupportedException stubs needed.)_
+- [x] **Step 2:** Add the compliance subclass; run `--filter "FullyQualifiedName~string_saga_storage_compliance"` → green. Full suite green. Commit. _(Verified: 10/10 string facts on net9.0 + net10.0; 145/145 full suite on both TFMs. No code changes needed — S6+S7+S8 delivered all S9 scope.)_
 
 ### Task S10: Guid/int/long-identified compliance
 
