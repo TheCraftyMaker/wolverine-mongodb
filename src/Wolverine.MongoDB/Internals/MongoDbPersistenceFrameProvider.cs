@@ -98,18 +98,27 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
     public Frame DetermineLoadFrame(IServiceContainer container, Type sagaType, Variable sagaId)
         => new LoadSagaFrame(sagaType, sagaId);
 
+    // Insert and update DIVERGE (S8 optimistic concurrency): insert is unguarded and stamps the
+    // initial Saga.Version; update is version-guarded and throws SagaConcurrencyException on a
+    // stale write. SagaChain emits insert only on the saga-does-not-exist branch and update only
+    // on the saga-exists branch, so the two never collide. The completion DELETE is deliberately
+    // left UNGUARDED by version (matches the lightweight SQL provider's DatabaseSagaSchema.cs) —
+    // completion is terminal and a version throw there would only obstruct cleanup.
     public Frame DetermineInsertFrame(Variable saga, IServiceContainer container)
-        => new StoreSagaFrame(saga);
+        => new InsertSagaFrame(saga);
 
     public Frame CommitUnitOfWorkFrame(Variable saga, IServiceContainer container)
         => new CommitMongoTransactionFrame();
 
     public Frame DetermineUpdateFrame(Variable saga, IServiceContainer container)
-        => new StoreSagaFrame(saga);
+        => new UpdateSagaFrame(saga);
 
     public Frame DetermineDeleteFrame(Variable sagaId, Variable saga, IServiceContainer container)
         => new DeleteSagaFrame(sagaId, saga);
 
+    // SagaChain never calls DetermineStoreFrame for sagas (it emits explicit Insert/Update/Delete,
+    // SagaChain.cs:395,423-424); this exists only to satisfy the interface. Route it to the
+    // version-guarded update for consistency.
     public Frame DetermineStoreFrame(Variable saga, IServiceContainer container)
         => DetermineUpdateFrame(saga, container);
 

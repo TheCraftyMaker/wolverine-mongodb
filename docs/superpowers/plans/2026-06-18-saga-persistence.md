@@ -118,7 +118,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | ✅ **Done** — merged #89 | Sonnet |
 | **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | ✅ Done | **Fable 5 / Opus** |
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | ✅ Done | **Fable 5 / Opus** |
-| **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | Blocked by: S6, S7 | **Fable 5 / Opus** |
+| **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | ✅ Done | **Fable 5 / Opus** |
 | **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | Partially blocked by: S6 | Sonnet |
 | **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | Blocked by: S7, S9 | Sonnet |
 | **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | Partially blocked by: S6, S8 | **Fable 5 / Opus** |
@@ -350,11 +350,45 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Expected output:** A custom concurrency test (in S11) proves a stale-version update throws `SagaConcurrencyException`; all compliance specs still green (they don't exercise concurrency, so must not regress).
 - **Files/areas likely to change:** `SagaFrames.cs`, `MongoDbPersistenceFrameProvider.cs` (insert vs update frame distinction).
 - **Dependencies:** **S6, S7.** 🔎 review: S8 and S7 both edit `MongoDbPersistenceFrameProvider.cs` **and** `SagaFrames.cs`, and the version guard must work for every id type — so S8 depends on S7 (not just S6). If you must run S8 before S7, scope OCC to string ids and add an explicit follow-up merge task.
-- **Blocking status:** **Blocked by: S6, S7.**
+- **Blocking status:** ✅ **Done.**
 
-- [ ] **Step 1:** Split insert (unguarded; set initial `Version`) from update (capture `oldVersion`, set `Version = oldVersion + 1`, guarded `ReplaceOneAsync` filter `(_id, oldVersion)`, throw `SagaConcurrencyException` on `ModifiedCount == 0`). Decide+document the completion-delete guard (recommended: unguarded).
-- [ ] **Step 2:** Verify generated code; ensure the throw aborts the transaction (rolls back saga + outbox together).
-- [ ] **Step 3:** Land the OCC test from S11 as the oracle; re-run all compliance + full suite. Commit (`feat: saga optimistic concurrency via Saga.Version`).
+- [x] **Step 1:** Split insert (unguarded; set initial `Version`) from update (capture `oldVersion`, set `Version = oldVersion + 1`, guarded `ReplaceOneAsync` filter `(_id, oldVersion)`, throw `SagaConcurrencyException` on `ModifiedCount == 0`). Decide+document the completion-delete guard (recommended: unguarded).
+- [x] **Step 2:** Verify generated code; ensure the throw aborts the transaction (rolls back saga + outbox together).
+- [x] **Step 3:** Land the OCC test from S11 as the oracle; re-run all compliance + full suite. Commit (`feat: saga optimistic concurrency via Saga.Version`).
+
+> **Implementation notes (S8):** `MongoSagaOperations.StoreSagaAsync` (the S6/S7 upsert used for both
+> insert and update) was split into two divergent operations, mirroring Wolverine's own lightweight
+> SQL provider (`DatabaseSagaSchema.cs`) rather than the string-only, last-write-wins Cosmos/Raven:
+> - **Insert** (`InsertSagaAsync<TSaga>` + `InsertSagaFrame`): unguarded `InsertOneAsync`, stamps the
+>   initial `Version = 1`. Plain insert (not upsert) so a concurrent double-start of the same id fails
+>   the second insert on the unique `_id` index → that transaction aborts to retry (loading the
+>   now-existing saga onto the update path) rather than silently clobbering the first start.
+> - **Update** (`UpdateSagaAsync<TSaga,TId>` + `UpdateSagaFrame`): captures `oldVersion = saga.Version`,
+>   sets `saga.Version = oldVersion + 1`, then `ReplaceOneAsync` with filter
+>   `(_id == sagaId && Version == oldVersion)`, `IsUpsert = false`; throws `SagaConcurrencyException`
+>   when `ModifiedCount == 0`. The new version is written into the POCO **before** the replace because
+>   Mongo stores the saga document directly (unlike the RDBMS providers, which keep `version` in a
+>   separate column and bump it in SQL). `ModifiedCount` (not `MatchedCount`) is correct precisely
+>   because the version bump always changes the document — there is no matched-but-unchanged case.
+> - **Completion delete:** left **UNGUARDED** by version (matches `DatabaseSagaSchema.DeleteAsync`) —
+>   completion is terminal, so a version throw there would only obstruct cleanup.
+>
+> **Atomicity verified in generated code** (`codeFor` dump of the `GuidBasicWorkflow` chains): the
+> guarded update runs inside the `TransactionalFrame` try-block, *before* the single
+> `IsInTransaction`-guarded commit. A `SagaConcurrencyException` skips the commit, hits
+> `catch (Exception) → RollbackAsync() → throw`, and the `using` session disposes — so the saga write
+> and the outbox roll back together. The exception then propagates to Wolverine's error handling (the
+> `SagaConcurrencyException` retry policy under multinode contention is R11 / S14's concern).
+>
+> **`DetermineStoreFrame`** is dead code for saga chains (`SagaChain` emits explicit Insert/Update/
+> Delete, never Store) and is routed to the guarded update for consistency.
+>
+> **Oracle (`saga_optimistic_concurrency.cs`):** the compliance specs do not exercise concurrency, so
+> the OCC contract is proven here — (1) version is stamped to 1 on insert and increments to 2 through
+> the *real generated update frame* on a normal update (no spurious throw); (2) a stale-version update
+> throws `SagaConcurrencyException` and does not clobber the winning write. Deterministic (no timing
+> race); full cross-node contention coverage is S14. **145 non-multinode + 2 multinode tests green on
+> net9.0 + net10.0.**
 
 ---
 
