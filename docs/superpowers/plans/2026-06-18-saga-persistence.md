@@ -122,7 +122,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | ✅ Done (no-op — S6 shipped host + string spec; S7 added all LoadState overloads; verified 10/10 string facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
 | **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | ✅ Done (no-op — S7 shipped all three compliance subclasses + all four `LoadState` overloads on `MongoDbSagaHost`; verified 27/27 Guid+int+long facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
 | **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | ✅ Done (new `saga_atomicity.cs`: 5 tests on a purpose-built in-test saga — atomicity success+failure, completion delete, OCC no-clobber, same-envelope idempotency; each verified red-for-the-right-reason before green; 150/150 non-multinode + 2/2 multinode on net9.0 + net10.0) | **Fable 5 / Opus** |
-| **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | Partially blocked by: S6, S7 | Sonnet |
+| **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | ✅ Done | Sonnet |
 | **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | Blocked by: S12 | Sonnet |
 | **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | Blocked by: S12, S13 | **Opus 4.8** |
 | **S15** | *(no branch — runs on a verification branch)* | test: full cross-feature regression (inbox+outbox+solo+multinode+saga) | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
@@ -477,8 +477,8 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** contracts/saga/handler **skeletons** need only S5; **building/running requires S6 (+S7 for Guid id) merged and packed** (the demo consumes the package, per CI's `0.0.0-ci` nupkg; for local dev, pack the library first).
 - **Blocking status:** **Partially blocked by: S6, S7** (author skeletons against S5 early; compile/run once a saga-enabled package exists).
 
-- [ ] **Step 1:** Add contracts + `OrderFulfillmentSaga` + handlers; wire discovery/routing in `Program.cs`.
-- [ ] **Step 2:** Build the demo against a saga-enabled package (local pack or CI nupkg); manual smoke: place → ship → confirm delivery → saga doc gone. Commit.
+- [x] **Step 1:** Add contracts + `OrderFulfillmentSaga` + handlers; wire discovery/routing in `Program.cs`.
+- [x] **Step 2:** Build the demo against a saga-enabled package (local pack or CI nupkg); manual smoke: place → ship → confirm delivery → saga doc gone. Commit.
 
 ### Task S13: Demo saga safety-net integration tests (Solo)
 

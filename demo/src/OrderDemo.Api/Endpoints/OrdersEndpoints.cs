@@ -50,6 +50,14 @@ public static class OrdersEndpoints
         })
         .WithSummary("Apply a percentage discount (0–50%) to a pending order");
 
+        // POST /orders/{id}/confirm-delivery — confirm delivery, completing the fulfillment saga
+        orders.MapPost("/{id:guid}/confirm-delivery", async (Guid id, ConfirmBody body, IMessageBus bus) =>
+        {
+            await bus.InvokeAsync(new ConfirmDeliveryCommand(id, body.DeliveredAt));
+            return Results.Accepted();
+        })
+        .WithSummary("Confirm delivery of a shipped order (completes the OrderFulfillmentSaga)");
+
         // GET /orders — list all orders (read model)
         orders.MapGet("/", async (OrderSummaryRepository summaries, CancellationToken ct) =>
         {
@@ -64,4 +72,5 @@ public static class OrdersEndpoints
 
     public sealed record CancelBody(string? Reason);
     public sealed record DiscountBody(decimal DiscountPercent);
+    public sealed record ConfirmBody(DateTimeOffset DeliveredAt);
 }
