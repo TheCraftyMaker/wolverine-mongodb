@@ -4,7 +4,7 @@
 
 Native MongoDB persistence provider for Wolverine's transactional inbox/outbox. Implements `IMessageStore` directly against the MongoDB .NET driver. No EF Core dependency.
 
-**Package:** `Wolverine.MongoDB` (NuGet, currently `0.1.0-beta.6`)  
+**Package:** `Wolverine.MongoDB` (NuGet, currently `0.1.0-beta.7`)  
 **Targets:** .NET 9, .NET 10  
 **Dependencies:** `WolverineFx 6.x`, `MongoDB.Driver 3.x`  
 **Constraint:** MongoDB must run as a replica set (transactions require it).
