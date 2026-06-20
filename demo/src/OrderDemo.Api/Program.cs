@@ -20,6 +20,14 @@ builder.Services.AddOrderDemoInfrastructure(mongoConnectionString);
 // ─── Wolverine ───────────────────────────────────────────────────────────────
 builder.Host.UseWolverine(opts =>
 {
+    // OrderPlacedApplicationEvent and OrderShippedApplicationEvent are handled by BOTH the
+    // OrderFulfillmentSaga (start/continue) and the OrderSummaryProjector (read model). Wolverine's
+    // default behavior collapses all handlers for a message type into one chain, and a saga chain
+    // clears co-registered non-saga handlers — which would silently drop the projector. Separated
+    // mode runs each handler independently (its own chain/queue), so the saga and the projector
+    // both fire for those events. Without this, adding the saga breaks the read-model projection.
+    opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
+
     // Scan handler assemblies beyond the entry (API) assembly
     opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly);       // OrderDemo.Application
     opts.Discovery.IncludeAssembly(typeof(InfrastructureBootstrap).Assembly); // OrderDemo.Infrastructure (projectors)

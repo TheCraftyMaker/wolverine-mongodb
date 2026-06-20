@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MongoDB.Driver;
 using OrderDemo.Application.Orders;
-using OrderDemo.Application.Sagas;
 using OrderDemo.Infrastructure;
 using Testcontainers.MongoDb;
 using Wolverine;
@@ -91,17 +90,15 @@ public sealed class OrdersFixture : IAsyncLifetime
             {
                 opts.Durability.Mode = DurabilityMode.Solo;
 
-                opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly);       // Application
-                opts.Discovery.IncludeAssembly(typeof(InfrastructureBootstrap).Assembly); // Infrastructure (projectors)
+                // Mirror Program.cs. OrderPlacedApplicationEvent / OrderShippedApplicationEvent are
+                // handled by BOTH the OrderFulfillmentSaga and the OrderSummaryProjector. Separated
+                // mode runs each handler independently so they coexist; without it, the saga chain
+                // would clear the projector and the read model would silently stop updating. (This
+                // replaces the earlier hack of excluding the saga from discovery.)
+                opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
 
-                // Wolverine's SagaChain.DetermineFrames() calls Handlers.Clear(), silently dropping
-                // any non-saga handler (e.g. projectors) registered for the same message type.
-                // Exclude the saga here so OrderPlacedApplicationEvent and OrderShippedApplicationEvent
-                // resolve to plain HandlerChains and the projector runs correctly.
-                opts.Discovery.CustomizeHandlerDiscovery(query =>
-                    query.Excludes.WithCondition(
-                        "Exclude OrderFulfillmentSaga — SagaChain drops co-registered non-saga handlers",
-                        t => t == typeof(OrderFulfillmentSaga)));
+                opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly);       // Application (saga + handlers)
+                opts.Discovery.IncludeAssembly(typeof(InfrastructureBootstrap).Assembly); // Infrastructure (projectors)
 
                 opts.Services.AddSingleton(MongoClient);
                 opts.Services.AddScoped<Infrastructure.Persistence.IOrderRepository,
