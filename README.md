@@ -25,7 +25,7 @@ MongoDB-backed applications reliable, durable message delivery without EF Core.
   are not available on standalone MongoDB. Atlas and any production deployment
   already satisfy this; for local development use a Docker Compose replica set.
   Standalone MongoDB is explicitly unsupported.
-- **Wolverine 6.x** (`WolverineFx 6.2.x`). The major version of this package
+- **Wolverine 6.x** (`WolverineFx 6.9.x`). The major version of this package
   must match the major version of `WolverineFx`.
 - **.NET 9 or .NET 10.**
 - **MongoDB.Driver** 3.x (2.x also supported).
@@ -146,6 +146,109 @@ When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op — documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
 
+## Saga persistence
+
+`Wolverine.MongoDB` supports [Wolverine sagas](https://wolverinefx.net/guide/durability/sagas.html)
+— stateful, message-correlated workflows represented by a `Saga` subclass. No additional
+registration is required; `UseMongoDbPersistence` automatically enables saga storage
+alongside the inbox/outbox.
+
+### Defining a saga
+
+```csharp
+using Wolverine;
+
+public class OrderFulfillmentSaga : Saga
+{
+    // "Id" is the default Wolverine identity member convention; maps to MongoDB _id.
+    public Guid Id { get; set; }
+
+    public bool OrderPlaced { get; set; }
+    public bool OrderShipped { get; set; }
+
+    // "Start" / "Starts" is recognized as the saga-start method.
+    // Assign Id here so the document is inserted on first message.
+    public void Start(OrderPlacedEvent evt)
+    {
+        Id = evt.OrderId;
+        OrderPlaced = true;
+    }
+
+    public void Handle(OrderShippedEvent evt)
+    {
+        OrderShipped = true;
+    }
+
+    public void Handle(DeliveryConfirmedEvent cmd)
+    {
+        // MarkCompleted() signals Wolverine to delete the saga document from MongoDB.
+        MarkCompleted();
+    }
+}
+```
+
+### Supported id types
+
+The saga identity member may be `Guid`, `string`, `int`, or `long`. MongoDB stores each
+natively as its corresponding BSON type — no conversion overhead, no cross-type collision.
+
+By convention, Wolverine uses the member named `Id`, `SagaId`, or `{SagaTypeName}Id`
+as the identity. The `[SagaIdentity]` attribute may be used on a message member to
+tell Wolverine which field carries the saga id.
+
+### Optimistic concurrency
+
+The provider uses `Saga.Version` for optimistic concurrency on updates:
+
+- **Insert** (new saga): stamps `Version = 1`. Unguarded — concurrent double-starts fail on
+  the unique `_id` index (duplicate key), so the second start retries onto the update path.
+- **Update** (existing saga): captures `oldVersion`, increments `Version`, then
+  `ReplaceOneAsync` with filter `(_id, oldVersion)`. Throws `SagaConcurrencyException`
+  when `ModifiedCount == 0` — the saga write and the outbox roll back together.
+- **Delete** (completed saga): unguarded by version — completion is terminal.
+
+Under multi-node deployments, wire a retry policy so a losing node reloads and re-applies
+its step rather than failing the message:
+
+```csharp
+opts.Policies
+    .OnException<SagaConcurrencyException>()
+    .Or<MongoException>(e => e.HasErrorLabel("TransientTransactionError"))
+    .RetryWithCooldown(50.Milliseconds(), 100.Milliseconds(), 250.Milliseconds());
+```
+
+`TransientTransactionError` covers the more common concurrent-transaction abort at the
+MongoDB server layer; `SagaConcurrencyException` covers the rarer case where one writer
+committed just before the other's guarded `ReplaceOneAsync` ran.
+
+### Collections
+
+Each saga type gets its own MongoDB collection:
+
+```
+wolverine_saga_<lowercased-type-name>
+```
+
+For example, `OrderFulfillmentSaga` → `wolverine_saga_orderfulfillmentsaga`. Collections
+are created automatically on startup.
+
+### Atomicity with the outbox
+
+The saga state write and any outbox entries produced in the handler commit inside the same
+MongoDB multi-document transaction — the same guarantee as domain writes via
+`MongoDbUnitOfWork`. No session handling is needed in the saga methods; the generated
+transactional frame manages the session lifecycle.
+
+### Multiple handlers for the same message type
+
+When a saga and a non-saga handler both consume the same message type, set
+`MultipleHandlerBehavior.Separated` so each handler runs independently. Without it,
+Wolverine's `SagaChain` silently drops the non-saga handler:
+
+```csharp
+opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
+```
+
 ## Multinode support
 
 `DurabilityMode.Balanced` is supported. MongoDB has no native control transport,
@@ -247,6 +350,8 @@ demonstrate:
 - `IClientSessionHandle` threaded through repositories for atomicity
 - Config-driven durability mode (Solo by default; `Wolverine__DurabilityMode=Balanced`
   for multi-instance runs)
+- `OrderFulfillmentSaga` — a saga that tracks an order through placement, shipping, and
+  delivery confirmation, exercising start / continue / complete flows and outbox atomicity
 
 See the [demo README](demo/README.md) for setup instructions, a walkthrough, and
 the multinode runbook.
@@ -307,8 +412,6 @@ required beyond Docker Desktop.
 - **Multinode leadership is lease-based, not fenced.** See
   [Multinode known limitations](#multinode-known-limitations) for the fencing
   caveat and clock-skew constraint.
-- **Saga storage not yet supported.** Wolverine saga persistence requires
-  provider-specific integration that is not yet implemented.
 - **High-throughput contention.** The `findAndModify` lock approach serializes
   access per document; under very high concurrency this can bottleneck. Tune
   write concern and indexes accordingly.
