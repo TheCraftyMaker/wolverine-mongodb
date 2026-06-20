@@ -1,5 +1,6 @@
 using OrderDemo.Api.Endpoints;
 using OrderDemo.Application.Orders;
+using OrderDemo.Contracts.Commands;
 using OrderDemo.Contracts.Events;
 using OrderDemo.Infrastructure;
 using Scalar.AspNetCore;
@@ -65,6 +66,14 @@ builder.Host.UseWolverine(opts =>
     opts.PublishMessage<OrderShippedApplicationEvent>().ToRabbitExchange(appEventsExchange);
     opts.PublishMessage<OrderCancelledApplicationEvent>().ToRabbitExchange(appEventsExchange);
     opts.PublishMessage<DiscountAppliedApplicationEvent>().ToRabbitExchange(appEventsExchange);
+
+    // ── Saga cascade events ──────────────────────────────────────────────────
+    //
+    // FulfillmentShippedEvent and FulfillmentCompletedEvent are cascaded from
+    // OrderFulfillmentSaga handler methods and travel through the Wolverine outbox,
+    // committing atomically with the saga state update/delete.
+    opts.PublishMessage<FulfillmentShippedEvent>().ToRabbitExchange(appEventsExchange);
+    opts.PublishMessage<FulfillmentCompletedEvent>().ToRabbitExchange(appEventsExchange);
 
     // The read-side projector listens on this queue, bound to the exchange.
     // UseDurableInbox() persists each message before processing so that crashes

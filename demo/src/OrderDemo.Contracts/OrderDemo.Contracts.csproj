@@ -2,4 +2,8 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- [SagaIdentity] attribute used by ConfirmDeliveryCommand and OrderShippedApplicationEvent -->
+    <PackageReference Include="WolverineFx" />
+  </ItemGroup>
 </Project>
