@@ -4,7 +4,7 @@
 
 Native MongoDB persistence provider for Wolverine's transactional inbox/outbox. Implements `IMessageStore` directly against the MongoDB .NET driver. No EF Core dependency.
 
-**Package:** `Wolverine.MongoDB` (NuGet, currently `0.1.0-beta.5`)  
+**Package:** `Wolverine.MongoDB` (NuGet, currently `0.1.0-beta.6`)  
 **Targets:** .NET 9, .NET 10  
 **Dependencies:** `WolverineFx 6.x`, `MongoDB.Driver 3.x`  
 **Constraint:** MongoDB must run as a replica set (transactions require it).
@@ -19,8 +19,18 @@ src/Wolverine.MongoDB/              ← Library (NuGet package)
   MongoDbPersistenceOptions.cs      ← Public API: MongoDB-specific tuning (LockLeaseDuration)
   MongoDbUnitOfWork.cs              ← Public API: session-bound write helper
   Internals/                        ← All implementation (internal)
+    SagaFrames.cs                   ← Saga codegen frames + MongoSagaOperations helpers
 src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine source clone)
+  MongoDbSagaHost.cs                ← ISagaHost implementation for compliance suites
+  string_saga_storage_compliance.cs ← StringIdentifiedSagaComplianceSpecs<MongoDbSagaHost>
+  guid_saga_storage_compliance.cs   ← GuidIdentifiedSagaComplianceSpecs (+ int, long)
+  saga_atomicity.cs                 ← Custom atomicity, OCC, completion, and idempotency tests
+  saga_multinode.cs                 ← [Category=multinode] cross-node exactly-once saga test
 demo/                               ← Separate solution, references package from CI nupkg
+  src/OrderDemo.Application/Sagas/
+    OrderFulfillmentSaga.cs         ← Demo saga: Guid id, start/continue/complete lifecycle
+  tests/OrderDemo.IntegrationTests/
+    SagaFlowTests.cs                ← 7 saga integration tests (start, ship, complete, etc.)
 .github/workflows/
   ci.yml                            ← Library tests (single-node + multinode steps) + pack; demo tests against fresh nupkg
   publish.yml                       ← NuGet push on v* tag
@@ -62,8 +72,14 @@ Three public entry points:
 | File | Role |
 |------|------|
 | `MongoDbEnvelopeTransaction.cs` | `IEnvelopeTransaction` — opens session, commits outbox atomically |
-| `MongoDbPersistenceFrameProvider.cs` | Code-gen: detects MongoDB types, injects transactional frame |
+| `MongoDbPersistenceFrameProvider.cs` | Code-gen: detects MongoDB types, injects transactional frame; saga members |
 | `TransactionalFrame.cs` | Generated code frame: `StartSession → StartTransaction → handler → Commit` |
+
+### Saga Implementation
+
+| File | Role |
+|------|------|
+| `SagaFrames.cs` | `LoadSagaFrame`, `InsertSagaFrame`, `UpdateSagaFrame`, `DeleteSagaFrame` emitted by the provider; `MongoSagaOperations` static helpers (load/insert/update/delete on the session) |
 
 ### MongoDB Collections
 
@@ -74,6 +90,7 @@ Three public entry points:
 | `wolverine_dead_letters` | Failed messages + exception info |
 | `wolverine_nodes` | Node registry (heartbeat, capabilities) |
 | `wolverine_node_assignments` | Agent-to-node mapping |
+| `wolverine_saga_<lowercased-type>` | One collection per saga type (e.g. `wolverine_saga_orderfulfillmentsaga`) |
 
 ### Key Design Decisions
 
@@ -93,6 +110,13 @@ Three public entry points:
 - **Transaction frame triggers broadly:** `CanApply` returns `true` for handlers whose dependency tree (or method parameters) includes `IMongoDatabase`, `IMongoClient`, `IMongoCollection<T>`, `IClientSessionHandle`, or `MongoDbUnitOfWork`.
 - **DateTimeOffset stored as UTC BSON Date:** every `DateTimeOffset`/`DateTimeOffset?` property on document types is annotated with `[BsonRepresentation(BsonType.DateTime)]`. No process-global serializer is registered — the library does not mutate the host app's BSON registry.
 - **Dead-letter replay is idempotent:** if a previous replay pass crashed after re-inserting the envelope but before deleting the DLQ document, the next pass catches `DuplicateIncomingEnvelopeException` and continues. Body-less poison letters are unflagged (not retried every tick) and left queryable.
+- **Saga persistence is codegen-only:** there is no separate saga storage service. `MongoDbPersistenceFrameProvider` implements all `IPersistenceFrameProvider` saga members (Load/Insert/Update/Delete/CommitUnitOfWork). The frames run on the `TransactionalFrame` session so saga state and the outbox commit atomically. `CanApply` returns `true` for `SagaChain` — required or the provider is skipped for saga chains entirely.
+- **Direct document storage:** the saga POCO is stored as a MongoDB document. The identity member maps to `_id` via the driver's default Id-member convention. No envelope wrapper.
+- **Native id type:** `DetermineSagaIdType` resolves the saga's identity-member type (`Guid`/`string`/`int`/`long`) via `SagaChain.DetermineSagaIdMember`. Cosmos/RavenDb are string-only; this provider stores every type natively.
+- **`Saga.Version` optimistic concurrency (insert/update diverge):** insert (`InsertSagaFrame`) is unguarded and stamps `Version = 1` via `InsertOneAsync`. Update (`UpdateSagaFrame`) captures `oldVersion`, sets `Version = oldVersion + 1`, then `ReplaceOneAsync` with filter `(_id, oldVersion)`, `IsUpsert = false`; throws `SagaConcurrencyException` when `ModifiedCount == 0`. The new version is written into the POCO before the replace because MongoDB stores the saga directly (unlike RDBMS providers). Completion delete is unguarded (matches Wolverine's lightweight SQL provider `DatabaseSagaSchema`). Cosmos/RavenDb are last-write-wins; this provider's OCC matches the Marten/EF/lightweight-SQL approach.
+- **One collection per saga type:** `wolverine_saga_<lowercased-type-name>` (e.g. `wolverine_saga_orderfulfillmentsaga`). Idiomatic MongoDB — no cross-type `_id` collision. `ClearAllAsync`/`RebuildAsync` drop every collection matching the `wolverine_saga_` prefix.
+- **`CommitUnitOfWorkFrame` for saga chains / no double-commit:** `ApplyTransactionSupport` adds the commit postprocessor only when `chain is not SagaChain`. For saga chains the single commit+flush flows through `CommitUnitOfWorkFrame` (inlined by `SagaChain` after the saga write). Mirrors Cosmos/RavenDb.
+- **`MultipleHandlerBehavior.Separated` for saga + non-saga co-handlers:** a `SagaChain` calls `Handlers.Clear()`, silently dropping co-registered non-saga handlers. When a saga and a projector consume the same message, set `opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated` so each runs independently. Required in the demo.
 
 ---
 

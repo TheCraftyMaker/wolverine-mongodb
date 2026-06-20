@@ -126,7 +126,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | ✅ Done (7 flows green; surfaced + fixed two real defects — see notes) | Sonnet |
 | **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | ✅ Done | **Opus 4.8** |
 | **S15** | *(no branch — runs on a verification branch)* | test: full cross-feature regression (inbox+outbox+solo+multinode+saga) | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
-| **S16** | `docs/saga-sweep` | docs: saga support documentation + upstream-contribution notes | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
+| **S16** | `docs/saga-sweep` | docs: saga support documentation + upstream-contribution notes | **S6–S14 merged** | ✅ Done (PR #103) | Sonnet |
 | **S17** | *(no branch/PR)* | final verification on `main` (+ optional release) | **S15, S16 merged** | Blocked by: S15, S16 | Sonnet |
 
 > **Recommended execution order.** S1/S2/S3/S5 run **fully in parallel** (4 sessions) the moment the plan PR merges. S4 (design gate) follows once S1–S3 land. S6 is the **single most important task** and the head of the critical path. Once S6 merges, S7, S8, S9 (green), S11, and S12 (skeleton→build) fan out in parallel; S10 follows S7; the demo track S12→S13→S14 runs parallel to the library-test track S9/S10/S11. S15/S16 close out once everything is merged; S17 is the final on-`main` gate.
@@ -600,7 +600,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S6–S14 merged.**
 - **Blocking status:** **Blocked by: S6–S14.**
 
-- [ ] **Step 1:** Edit each doc; truth-check against code. Commit (`docs: saga support + upstream contribution notes`).
+- [x] **Step 1:** Edit each doc; truth-check against code. Commit (`docs: saga support + upstream contribution notes`).
 
 ### Task S17: Final verification on `main` (+ optional release)
 

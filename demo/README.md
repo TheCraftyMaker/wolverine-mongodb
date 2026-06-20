@@ -160,6 +160,66 @@ catch { await session.AbortTransactionAsync(); throw; }
 
 The `IClientSessionHandle` is available as a parameter in handler methods — repositories thread it through all write operations so they participate in the transaction.
 
+## OrderFulfillmentSaga
+
+The demo includes an `OrderFulfillmentSaga` that tracks an order through its lifecycle.
+It starts automatically when `OrderPlacedApplicationEvent` is published by `PlaceOrderHandler`,
+continues when the order ships, and completes when delivery is confirmed.
+
+```
+PlaceOrderHandler → OrderPlacedApplicationEvent ──► OrderFulfillmentSaga.Start(...)
+                                                 └─► OrderSummaryProjector (read model)
+
+ShipOrderHandler  → OrderShippedApplicationEvent ──► OrderFulfillmentSaga.Handle(...)
+                                                  └─► OrderSummaryProjector (read model)
+
+POST /confirm-delivery → ConfirmDeliveryCommand ──► OrderFulfillmentSaga.Handle(...)
+                                                     └─► MarkCompleted() → saga doc deleted
+```
+
+The saga document is stored in `wolverine_saga_orderfulfillmentsaga`. Each step is
+automatically wrapped in the Wolverine-managed MongoDB transaction so saga state and
+outbox entries commit atomically. No manual session handling is needed in the saga
+methods.
+
+### Trying the saga flows
+
+**Place an order** (starts the saga — same as before):
+```bash
+curl -X POST http://localhost:5000/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"cust-1","items":[{"productId":"prod-1","quantity":2,"unitPrice":9.99}]}'
+```
+
+**Ship the order** (continues the saga):
+```bash
+curl -X POST http://localhost:5000/orders/{orderId}/ship
+```
+
+**Confirm delivery** (completes the saga — document is deleted):
+```bash
+curl -X POST http://localhost:5000/orders/{orderId}/confirm-delivery
+```
+
+**Observe the saga collection:**
+```javascript
+use orderDemo
+db.wolverine_saga_orderfulfillmentsaga.find()   // shows in-progress sagas
+// (empty after confirm-delivery — MarkCompleted() deletes the document)
+```
+
+### Saga + projector coexistence
+
+`OrderFulfillmentSaga` and `OrderSummaryProjector` both handle `OrderPlacedApplicationEvent`
+and `OrderShippedApplicationEvent`. `Program.cs` sets:
+
+```csharp
+opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
+```
+
+This tells Wolverine to run each handler independently. Without it, `SagaChain` would
+silently drop the projector and the read model would stop updating.
+
 ## Key patterns demonstrated
 
 | Pattern | Where to look |
@@ -170,6 +230,8 @@ The `IClientSessionHandle` is available as a parameter in handler methods — re
 | Durable inbox for projector | `Program.cs` — `.UseDurableInbox()` |
 | Read model upsert (idempotent) | `OrderSummaryRepository.cs` |
 | Handler in non-entry assembly | `Program.cs` — `opts.Discovery.IncludeAssembly(...)` |
+| Saga start / continue / complete | `OrderFulfillmentSaga.cs` |
+| Saga + projector co-handlers | `Program.cs` — `MultipleHandlerBehavior.Separated` |
 
 ## Session-bound writes
 

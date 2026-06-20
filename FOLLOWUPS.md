@@ -83,6 +83,18 @@ Promote to GitHub issues before the first public release.
   beta; no migration planned). Add an explicit index migration step before 1.0 if
   needed.
 
+## Deferred from saga persistence (S6–S14)
+
+- **`ISagaStoreDiagnostics` not implemented.** RavenDb implements this interface (Cosmos
+  does not). It exposes saga-explorer tooling for the Wolverine dashboard. Deferred —
+  the saga storage itself is complete; implement `ISagaStoreDiagnostics` separately once
+  the dashboard API stabilizes.
+
+- **Saga-specific indexes.** The saga collections have only the implicit `_id` unique
+  index. If query patterns (filtering sagas by status fields, range scans) are added
+  later, per-collection indexes may be worthwhile. The `RebuildAsync` path that creates
+  envelope indexes would be the right place to add them.
+
 ## Untested-but-inspected paths (add deterministic coverage later)
 
 - Bulk `StoreIncomingAsync` non-duplicate-error rethrow branch (no clean way to

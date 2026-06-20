@@ -19,11 +19,13 @@ demo/
   src/
     OrderDemo.Api/              ← Entry point: Wolverine + Mongo + Rabbit wiring, endpoints
     OrderDemo.Application/      ← Command handlers (PlaceOrder, ShipOrder, CancelOrder, ApplyDiscount)
-    OrderDemo.Contracts/        ← Commands + application events (shared message types)
+                                   Sagas/OrderFulfillmentSaga.cs ← saga: Guid id, start/continue/complete
+    OrderDemo.Contracts/        ← Commands + application events + saga trigger/continue/complete messages
     OrderDemo.Domain/           ← Aggregate root (Order), domain events, value objects
     OrderDemo.Infrastructure/   ← Repositories, read-model projector, DI bootstrap
   tests/
     OrderDemo.IntegrationTests/ ← Testcontainers-based end-to-end tests
+                                   SagaFlowTests.cs ← 7 saga integration flows
   docker-compose.yml            ← MongoDB replica set + RabbitMQ
   Directory.Packages.props      ← Central package versions (independent from root)
   nuget.config                  ← Points to nuget.org (local-ci source added by CI)
@@ -107,6 +109,8 @@ Test classes:
 - `OrderBusinessRuleTests` — domain rules
 - `OrderProjectorTests` — read-model projection
 - `OutboxAtomicityTests` — proves transactional guarantee
+- `SagaFlowTests` — 7 saga integration flows (start, continue, complete, missing-state,
+  duplicate-message idempotency, across-restart state survival, saga/projector coexistence)
 
 ---
 

@@ -8,6 +8,32 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Added
+- **MongoDB saga persistence.** Stateful Wolverine sagas (`Saga` subclasses) are now
+  persisted in MongoDB via the provider's code-generation contracts (`IPersistenceFrameProvider`).
+  Each saga type gets its own collection named `wolverine_saga_<lowercased-type-name>`
+  (e.g. `wolverine_saga_orderfulfillmentsaga`). Collections are created automatically on
+  startup.
+  - **Supported id types:** `Guid`, `string`, `int`, and `long` — stored natively as the
+    corresponding BSON type (not coerced to string as in Cosmos/RavenDb).
+  - **Optimistic concurrency via `Saga.Version`:** insert stamps `Version = 1`; update
+    uses a guarded `ReplaceOneAsync` on `(_id, oldVersion)` and throws
+    `SagaConcurrencyException` when `ModifiedCount == 0`. Delete on completion is
+    unguarded, matching Wolverine's lightweight SQL provider.
+  - **Atomic with the outbox:** saga state writes and outbox entries commit in the same
+    MongoDB multi-document transaction as the handler's domain writes.
+  - **Coverage:** Wolverine's upstream compliance suites (`StringIdentifiedSagaComplianceSpecs`,
+    `GuidIdentifiedSagaComplianceSpecs`, `IntIdentifiedSagaComplianceSpecs`,
+    `LongIdentifiedSagaComplianceSpecs`) pass — 27 compliance facts across 4 id types on
+    net9.0 + net10.0. Custom tests cover atomicity (rollback saga + outbox on failure),
+    completion delete, OCC conflict, and inbox idempotency. Cross-node saga correctness
+    verified with five consecutive green runs of `saga_multinode.cs` on both TFMs.
+- **`OrderFulfillmentSaga` in the demo.** The demo now includes a saga that tracks an
+  order through placement, shipping, and delivery confirmation. Seven integration tests
+  cover: start, continue, complete (doc deleted), missing-state (`UnknownSagaException`),
+  duplicate-message idempotency, across-restart state survival, and saga/projector
+  coexistence via `MultipleHandlerBehavior.Separated`.
+
 ### Changed
 - **Upgraded the WolverineFx baseline from 6.2.2 to 6.9.0.** Bumped `WolverineFx`
   and `WolverineFx.ComplianceTests` in `Directory.Packages.props` and moved the
