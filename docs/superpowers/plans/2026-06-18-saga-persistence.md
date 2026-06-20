@@ -124,7 +124,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | ✅ Done (new `saga_atomicity.cs`: 5 tests on a purpose-built in-test saga — atomicity success+failure, completion delete, OCC no-clobber, same-envelope idempotency; each verified red-for-the-right-reason before green; 150/150 non-multinode + 2/2 multinode on net9.0 + net10.0) | **Fable 5 / Opus** |
 | **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | ✅ Done | Sonnet |
 | **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | ✅ Done (7 flows green; surfaced + fixed two real defects — see notes) | Sonnet |
-| **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | Blocked by: S12, S13 | **Opus 4.8** |
+| **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | ✅ Done | **Opus 4.8** |
 | **S15** | *(no branch — runs on a verification branch)* | test: full cross-feature regression (inbox+outbox+solo+multinode+saga) | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
 | **S16** | `docs/saga-sweep` | docs: saga support documentation + upstream-contribution notes | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
 | **S17** | *(no branch/PR)* | final verification on `main` (+ optional release) | **S15, S16 merged** | Blocked by: S15, S16 | Sonnet |
@@ -531,8 +531,49 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S12, S13** conceptually (shares the saga + flow understanding) and the merged multinode infra; the test itself only needs S6/S7 + the multinode harness, so it **may run in parallel with S13** if the saga design is settled.
 - **Blocking status:** **Blocked by: S12, S13** (relaxable to S6/S7 + multinode infra if an agent owns the saga design directly).
 
-- [ ] **Step 1:** Write the two-Balanced-node saga test (short `LockLeaseDuration`, durable inbox, shared static counter to observe process-wide application count).
-- [ ] **Step 2:** Stabilize to five-in-a-row per TFM; full suite green. Commit.
+- [x] **Step 1:** Write the two-Balanced-node saga test (short `LockLeaseDuration`, durable inbox, shared static counter to observe process-wide application count).
+- [x] **Step 2:** Stabilize to five-in-a-row per TFM; full suite green. Commit.
+
+> **Implementation notes (S14):** `src/Wolverine.MongoDB.Tests/saga_multinode.cs` — one
+> `[Category=multinode]` test driving a purpose-built saga (`S14FulfillmentSaga`, Guid id `Id`,
+> `int Applied`, `List<int> AppliedSteps`) across two in-proc Balanced hosts (TCP control endpoint,
+> 5 s `LockLeaseDuration`, `TypeLoadMode.Dynamic`, durable local queues), mirroring
+> `multinode_end_to_end.cs`. The saga is started on one node, advanced by six continue messages, and
+> completed; the test asserts exactly-once application and that completion deletes the document.
+>
+> **Deterministic cross-node distribution (not scheduled-claim luck).** A durable local-queue send is
+> stamped `OwnerId = AssignedNodeNumber` and enqueued on the *sending* node's own receiver
+> (`DurableLocalQueue.storeAndEnqueueAsync`); a live node's owned envelopes are never stolen by
+> recovery. So alternating the bus per advance and firing them concurrently provably makes *both*
+> nodes update the same saga document at the same instant — genuine contention, and both nodes always
+> participate (asserted via a shared static observer). Scheduled-message distribution was rejected: one
+> node can claim the whole due batch in a single poll tick, so it does not reliably exercise two nodes.
+> Advances are processed `.Sequential()` per node to keep contention pairwise and OCC retries bounded.
+>
+> **R11 retry policy (the agreed decision, wired here).** Two nodes mutating the same saga document in
+> concurrent MongoDB transactions cannot both win. The `TransactionalFrame` uses an explicit
+> start/commit (not Mongo's auto-retrying `WithTransaction`), so the conflict surfaces unhandled in one
+> of two ways: usually a server `WriteConflict` carrying the `"TransientTransactionError"` label (the
+> transaction aborts before commit), or — when the winner commits before the loser's guarded
+> `ReplaceOneAsync` runs — a `SagaConcurrencyException` from the version guard. The policy
+> `OnException<SagaConcurrencyException>().Or<MongoException>(e => e.HasErrorLabel("TransientTransactionError")).RetryWithCooldown(...)`
+> retries **both**. Each is a guaranteed *no-commit* abort, so the loser safely reloads the
+> now-advanced saga and re-applies its own step — correct production behaviour, not an
+> assertion-weakening bandaid. `UnknownTransactionCommitResult` is deliberately *not* retried (it could
+> double-apply; it does not occur on a stable local replica set).
+>
+> **Exactly-once oracle = committed document, not a static counter.** A handler-body counter
+> over-counts because a retried message runs the handler on every attempt but commits once. The saga
+> records each applied `Step` in its persisted `AppliedSteps`; the committed list sorted must equal
+> {1..6} — every step present (no drop) exactly once (no double-advance). The static observer is used
+> only to prove both nodes did work.
+>
+> **Verified load-bearing (red for the right reason).** With the retry policy disabled, the test fails
+> with a *dropped* step (`[2,3,4,5,6]` vs `[1..6]`) — proving the contention is real and the retry is
+> necessary, not decorative — then restored. **Five consecutive green runs on net9.0 + net10.0; full
+> library suite 153/153 green on both TFMs.** No skips, no retries-as-a-bandaid, no
+> assertion-weakening. (The optional dead-node saga-rescue variant was left out — generic dead-node
+> envelope rescue is already covered by `multinode_end_to_end.cs`.)
 
 ---
 
