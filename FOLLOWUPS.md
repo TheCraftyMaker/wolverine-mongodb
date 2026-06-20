@@ -43,6 +43,15 @@ Promote to GitHub issues before the first public release.
   Full analysis + the declined code:
   `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
 
+  - **Update (WolverineFx 6.9.0): worth re-evaluating.** V6.9.0 reworked these compliance facts —
+    `leader_switchover_between_nodes` now uses a slow heartbeat plus an explicit `CheckAgentHealth`
+    trigger (removing the lock-arrival-order race), and a new `take_over_leader_ship_if_leader_
+    becomes_stale_with_racing_nodes` fact is built around the "any node may win" model this provider
+    already implements. A one-off `RUN_MULTINODE` run against 6.9.0 passed **13/13 on net9.0**,
+    including both formerly-flaky facts and the new racing-nodes fact. This is a single run, not the
+    standing bar. Before un-gating: confirm **5× consecutive green on net9.0 + net10.0**, then remove
+    the `#if RUN_MULTINODE` guard and add the suite to the CI multinode step.
+
 - **Lease fencing token (epoch) as a future hardening option.** The leader lock
   currently has no fencing token (monotonically increasing epoch). Adding one would
   allow store writes to carry the epoch and reject writes from a node with a stale
@@ -58,6 +67,15 @@ Promote to GitHub issues before the first public release.
   pattern with explicit `IClientSessionHandle` threading, which is the fuller
   production example. Add a second handler (or a variant endpoint) that accepts
   `MongoDbUnitOfWork` directly so consumers can compare both patterns side by side.
+
+- **Demo saga cascade events have no consumer.** `OrderFulfillmentSaga` returns
+  `FulfillmentShippedEvent` / `FulfillmentCompletedEvent` to illustrate that a saga handler may
+  cascade messages, but the demo wires no consumer, so they are intentionally left unrouted (a
+  no-op) rather than delivered to the read-model queue (which has no handler for them). Optionally
+  add a fulfillment read-model projector (`Handle(FulfillmentShippedEvent)` /
+  `Handle(FulfillmentCompletedEvent)`) — e.g. recording a delivery timestamp/status the
+  `OrderSummary` does not otherwise track — plus a matching local-queue route in `OrdersFixture`
+  and an assertion in `SagaFlowTests`, to exercise the full saga → outbox → consumer path end to end.
 
 - **Old single-field indexes not dropped on existing deployments.** The hardening
   pass replaced single-field `executionTime` and outgoing `ownerId` indexes with

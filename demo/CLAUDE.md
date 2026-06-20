@@ -56,6 +56,11 @@ HTTP POST /orders
 - `opts.Policies.AutoApplyTransactions()` — auto-wraps handlers using `IMongoDatabase` in a transaction
 - `.UseDurableInbox()` on the projection queue — inbox persistence for at-least-once delivery
 - `opts.PublishMessage<T>().ToRabbitExchange(...)` — outbox-backed publish routing
+- `opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated` — **required** once the
+  `OrderFulfillmentSaga` shares `OrderPlacedApplicationEvent`/`OrderShippedApplicationEvent` with the
+  `OrderSummaryProjector`. Wolverine builds one chain per message type and a saga chain clears
+  co-registered non-saga handlers, so without `Separated` mode the saga would silently drop the
+  projector and the read model would stop updating. Separated mode runs each handler independently.
 
 ## Transaction Atomicity Pattern
 

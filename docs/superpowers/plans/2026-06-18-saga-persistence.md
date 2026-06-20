@@ -123,7 +123,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | ✅ Done (no-op — S7 shipped all three compliance subclasses + all four `LoadState` overloads on `MongoDbSagaHost`; verified 27/27 Guid+int+long facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
 | **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | ✅ Done (new `saga_atomicity.cs`: 5 tests on a purpose-built in-test saga — atomicity success+failure, completion delete, OCC no-clobber, same-envelope idempotency; each verified red-for-the-right-reason before green; 150/150 non-multinode + 2/2 multinode on net9.0 + net10.0) | **Fable 5 / Opus** |
 | **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | ✅ Done | Sonnet |
-| **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | Blocked by: S12 | Sonnet |
+| **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | ✅ Done (7 flows green; surfaced + fixed two real defects — see notes) | Sonnet |
 | **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | Blocked by: S12, S13 | **Opus 4.8** |
 | **S15** | *(no branch — runs on a verification branch)* | test: full cross-feature regression (inbox+outbox+solo+multinode+saga) | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
 | **S16** | `docs/saga-sweep` | docs: saga support documentation + upstream-contribution notes | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
@@ -489,8 +489,38 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S12.**
 - **Blocking status:** **Blocked by: S12.**
 
-- [ ] **Step 1:** Implement the per-flow tests (the across-restart test reuses the same `CreateDatabaseName()` across two `CreateHostAsync` calls).
-- [ ] **Step 2:** Run the demo suite green. Commit.
+- [x] **Step 1:** Implement the per-flow tests (the across-restart test reuses the same `CreateDatabaseName()` across two `CreateHostAsync` calls).
+- [x] **Step 2:** Run the demo suite green. Commit.
+
+> **Implementation notes (S13):** `demo/tests/OrderDemo.IntegrationTests/SagaFlowTests.cs` covers the
+> seven flows on the shared `OrdersFixture` (Solo, per-test `CreateDatabaseName()`,
+> `TrackActivity().Timeout(...).InvokeMessageAndWaitAsync`, FluentAssertions), reading the saga
+> document straight from MongoDB (`wolverine_saga_orderfulfillmentsaga`) to verify persistence
+> independently of Wolverine: **start** (saga inserted + read model projected), **continue**
+> (`OrderShipped` advanced), **complete** (`MarkCompleted()` deletes the saga doc, read model
+> untouched), **missing-state** (`ConfirmDeliveryCommand` for an unknown id throws
+> `UnknownSagaException`), **duplicate/repeated** (re-storing the start envelope through the durable
+> inbox throws `DuplicateIncomingEnvelopeException` — deterministic, no second saga), **across-restart**
+> (dispose the host, rebuild on the SAME DB, continue → state survives), and **inbox/outbox interaction**
+> (a single shipped event drives both the saga and the `OrderSummaryProjector` consistently). 34/34
+> demo tests green (7 new + 27 existing).
+>
+> **Two real defects surfaced and fixed (the tests were not allowed to paper over them):**
+> 1. **Demo saga/projector coexistence (S12 defect).** `OrderFulfillmentSaga` and `OrderSummaryProjector`
+>    both handle `OrderPlacedApplicationEvent`/`OrderShippedApplicationEvent`. Wolverine builds one chain
+>    per message type and a `SagaChain` clears co-registered non-saga handlers, so the saga silently
+>    dropped the projector — the read model would stop updating in the real app. `OrdersFixture`'s
+>    earlier "exclude the saga from discovery" hack hid this. Fixed by setting
+>    `opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated` in `Program.cs` and
+>    `OrdersFixture` (each handler runs independently) and **removing the exclusion**, so the demo now
+>    tests the real production wiring. Proven by `SagaAndProjector_StayConsistent_ThroughInboxOutbox` +
+>    the read-model assertions in the start/ship flows.
+> 2. **WolverineFx version drift (cross-cutting; separate PR).** The library was packed against
+>    WolverineFx 6.2.2 but the demo runs 6.9.0, and saga persistence-provider selection no-ops across
+>    that binary gap (the saga ran without persisting; the inbox/outbox path was unaffected, so it went
+>    unnoticed until a saga ran against the newer runtime). Resolved by aligning the library to
+>    WolverineFx 6.9.0 (`Directory.Packages.props` + `external/wolverine` submodule → `V6.9.0`) in a
+>    dedicated alignment PR that S13 builds on.
 
 ### Task S14: Cross-node exactly-once saga progression (Balanced)
 

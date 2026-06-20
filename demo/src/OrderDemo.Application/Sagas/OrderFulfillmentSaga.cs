@@ -57,7 +57,8 @@ public sealed class OrderFulfillmentSaga : Saga
     // ── Continue: order shipped ───────────────────────────────────────────────
     // Wolverine resolves the saga Id from OrderShippedApplicationEvent.OrderId
     // via [SagaIdentity]; loads the document; calls this method; updates MongoDB.
-    // Returns FulfillmentShippedEvent to demonstrate outbox-in-saga atomicity.
+    // Returns FulfillmentShippedEvent to illustrate that a saga handler may cascade a
+    // message — this demo wires no consumer for it (see Program.cs "Saga cascade events").
     // If the saga document is not found: Wolverine throws UnknownSagaException.
     public FulfillmentShippedEvent Handle(OrderShippedApplicationEvent evt)
     {
@@ -68,8 +69,9 @@ public sealed class OrderFulfillmentSaga : Saga
 
     // ── Complete: delivery confirmed ──────────────────────────────────────────
     // Wolverine resolves Id from ConfirmDeliveryCommand.OrderId ([SagaIdentity]).
-    // MarkCompleted() signals Wolverine to delete the saga document from MongoDB.
-    // The delete and FulfillmentCompletedEvent outbox entry commit atomically.
+    // MarkCompleted() signals Wolverine to delete the saga document from MongoDB (within the
+    // same transaction). FulfillmentCompletedEvent is an illustrative cascade — not consumed
+    // in this demo (see Program.cs "Saga cascade events").
     public FulfillmentCompletedEvent Handle(ConfirmDeliveryCommand cmd)
     {
         DeliveryConfirmed = true;

@@ -20,6 +20,14 @@ builder.Services.AddOrderDemoInfrastructure(mongoConnectionString);
 // ─── Wolverine ───────────────────────────────────────────────────────────────
 builder.Host.UseWolverine(opts =>
 {
+    // OrderPlacedApplicationEvent and OrderShippedApplicationEvent are handled by BOTH the
+    // OrderFulfillmentSaga (start/continue) and the OrderSummaryProjector (read model). Wolverine's
+    // default behavior collapses all handlers for a message type into one chain, and a saga chain
+    // clears co-registered non-saga handlers — which would silently drop the projector. Separated
+    // mode runs each handler independently (its own chain/queue), so the saga and the projector
+    // both fire for those events. Without this, adding the saga breaks the read-model projection.
+    opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
+
     // Scan handler assemblies beyond the entry (API) assembly
     opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly);       // OrderDemo.Application
     opts.Discovery.IncludeAssembly(typeof(InfrastructureBootstrap).Assembly); // OrderDemo.Infrastructure (projectors)
@@ -69,11 +77,13 @@ builder.Host.UseWolverine(opts =>
 
     // ── Saga cascade events ──────────────────────────────────────────────────
     //
-    // FulfillmentShippedEvent and FulfillmentCompletedEvent are cascaded from
-    // OrderFulfillmentSaga handler methods and travel through the Wolverine outbox,
-    // committing atomically with the saga state update/delete.
-    opts.PublishMessage<FulfillmentShippedEvent>().ToRabbitExchange(appEventsExchange);
-    opts.PublishMessage<FulfillmentCompletedEvent>().ToRabbitExchange(appEventsExchange);
+    // OrderFulfillmentSaga returns FulfillmentShippedEvent / FulfillmentCompletedEvent from its
+    // handler methods to illustrate that a saga handler may cascade messages. This demo wires no
+    // consumer for them, so they are intentionally left UNROUTED (a no-op) rather than published to
+    // the exchange — the order-projections queue below binds the whole exchange but has no handler
+    // for these types, so routing them there would just be a no-handler discard. The library's own
+    // saga_atomicity tests cover saga-state + outbox commit/rollback atomicity rigorously.
+    // (FOLLOWUPS.md notes the option of adding a fulfillment read-model consumer here.)
 
     // The read-side projector listens on this queue, bound to the exchange.
     // UseDurableInbox() persists each message before processing so that crashes
