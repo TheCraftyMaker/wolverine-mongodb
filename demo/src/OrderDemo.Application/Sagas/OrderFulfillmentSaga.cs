@@ -1,3 +1,5 @@
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
 using OrderDemo.Contracts.Commands;
 using OrderDemo.Contracts.Events;
 using Wolverine;
@@ -32,8 +34,11 @@ public sealed class OrderFulfillmentSaga : Saga
     public bool OrderShipped { get; set; }
     public bool DeliveryConfirmed { get; set; }
 
+    [BsonRepresentation(BsonType.DateTime)]
     public DateTimeOffset PlacedAt { get; set; }
+    [BsonRepresentation(BsonType.DateTime)]
     public DateTimeOffset? ShippedAt { get; set; }
+    [BsonRepresentation(BsonType.DateTime)]
     public DateTimeOffset? DeliveredAt { get; set; }
 
     // ── Start ─────────────────────────────────────────────────────────────────
