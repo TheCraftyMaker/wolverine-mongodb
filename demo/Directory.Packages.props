@@ -3,12 +3,12 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <!-- 6.8.0 includes the EnvelopeHistory thread-safety fix (JasperFx/wolverine c139fd9a4,
-         "Make TrackedSession bookkeeping thread-safe"): _records access is now locked, so
-         TrackActivity over external transports (RabbitMQ) no longer races and intermittently
-         NREs in IsComplete(). 6.5.1 predated that fix. -->
+    <!-- Pinned to match the WolverineFx core baseline (6.9.0). >= 6.8.0 is required for the
+         EnvelopeHistory thread-safety fix (JasperFx/wolverine c139fd9a4, "Make TrackedSession
+         bookkeeping thread-safe"): _records access is now locked, so TrackActivity over external
+         transports (RabbitMQ) no longer races and intermittently NREs in IsComplete(). -->
     <PackageVersion Include="WolverineFx" Version="6.9.0" />
-    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.8.0" />
+    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.9.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.17" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.16.3" />
@@ -19,7 +19,6 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="FluentAssertions" Version="8.10.0" />
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.9.0" />
-    <PackageVersion Include="FluentAssertions" Version="8.10.0" />
     <PackageVersion Include="Wolverine.MongoDB" Version="0.1.0-beta.6" />
   </ItemGroup>
 </Project>

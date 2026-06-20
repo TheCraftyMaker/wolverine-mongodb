@@ -77,11 +77,13 @@ builder.Host.UseWolverine(opts =>
 
     // ── Saga cascade events ──────────────────────────────────────────────────
     //
-    // FulfillmentShippedEvent and FulfillmentCompletedEvent are cascaded from
-    // OrderFulfillmentSaga handler methods and travel through the Wolverine outbox,
-    // committing atomically with the saga state update/delete.
-    opts.PublishMessage<FulfillmentShippedEvent>().ToRabbitExchange(appEventsExchange);
-    opts.PublishMessage<FulfillmentCompletedEvent>().ToRabbitExchange(appEventsExchange);
+    // OrderFulfillmentSaga returns FulfillmentShippedEvent / FulfillmentCompletedEvent from its
+    // handler methods to illustrate that a saga handler may cascade messages. This demo wires no
+    // consumer for them, so they are intentionally left UNROUTED (a no-op) rather than published to
+    // the exchange — the order-projections queue below binds the whole exchange but has no handler
+    // for these types, so routing them there would just be a no-handler discard. The library's own
+    // saga_atomicity tests cover saga-state + outbox commit/rollback atomicity rigorously.
+    // (FOLLOWUPS.md notes the option of adding a fulfillment read-model consumer here.)
 
     // The read-side projector listens on this queue, bound to the exchange.
     // UseDurableInbox() persists each message before processing so that crashes

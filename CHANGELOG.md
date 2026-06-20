@@ -17,8 +17,12 @@ The major version tracks Wolverine's major version.
   library compiled against 6.2.2 was not selected as the saga persistence provider
   at runtime under 6.9.0 — the saga handler ran but its state was never persisted
   (the inbox/outbox path was unaffected, which is why the regression went
-  unnoticed until a saga ran against a newer runtime). The full compliance and
-  multinode suites pass against 6.9.0 on net9.0 and net10.0.
+  unnoticed until a saga ran against a newer runtime). Verified against 6.9.0 on
+  net9.0 and net10.0: the full single-node compliance suite (150 tests) and the
+  multinode end-to-end message-guarantee tests (`multinode_end_to_end`) pass. The
+  multinode leadership-election compliance facts remain compile-gated behind
+  `RUN_MULTINODE` by deliberate decision (see `FOLLOWUPS.md`) and are not part of
+  the automated run.
 
 ## [0.1.0-beta.6] - 2026-06-18
 
