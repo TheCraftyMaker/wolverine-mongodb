@@ -8,6 +8,18 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Changed
+- **Upgraded the WolverineFx baseline from 6.2.2 to 6.9.0.** Bumped `WolverineFx`
+  and `WolverineFx.ComplianceTests` in `Directory.Packages.props` and moved the
+  pinned `external/wolverine` compliance submodule to `V6.9.0`, so the library is
+  now built, tested, and packaged against the same WolverineFx version consumers
+  run. This fixes **saga persistence under WolverineFx newer than 6.2.2**: a
+  library compiled against 6.2.2 was not selected as the saga persistence provider
+  at runtime under 6.9.0 — the saga handler ran but its state was never persisted
+  (the inbox/outbox path was unaffected, which is why the regression went
+  unnoticed until a saga ran against a newer runtime). The full compliance and
+  multinode suites pass against 6.9.0 on net9.0 and net10.0.
+
 ## [0.1.0-beta.6] - 2026-06-18
 
 ### Added
