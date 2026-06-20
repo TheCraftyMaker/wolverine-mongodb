@@ -121,7 +121,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | ✅ Done | **Fable 5 / Opus** |
 | **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | ✅ Done (no-op — S6 shipped host + string spec; S7 added all LoadState overloads; verified 10/10 string facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
 | **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | ✅ Done (no-op — S7 shipped all three compliance subclasses + all four `LoadState` overloads on `MongoDbSagaHost`; verified 27/27 Guid+int+long facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
-| **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | Partially blocked by: S6, S8 | **Fable 5 / Opus** |
+| **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | ✅ Done (new `saga_atomicity.cs`: 5 tests on a purpose-built in-test saga — atomicity success+failure, completion delete, OCC no-clobber, same-envelope idempotency; each verified red-for-the-right-reason before green; 150/150 non-multinode + 2/2 multinode on net9.0 + net10.0) | **Fable 5 / Opus** |
 | **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | Partially blocked by: S6, S7 | Sonnet |
 | **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | Blocked by: S12 | Sonnet |
 | **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | Blocked by: S12, S13 | **Opus 4.8** |
@@ -431,8 +431,38 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S6** (atomicity/completion/idempotency), **S8** (OCC).
 - **Blocking status:** **Partially blocked by: S6, S8** (skeleton + non-OCC tests can land after S6; the OCC test after S8).
 
-- [ ] **Step 1:** Skeleton + atomicity/completion/idempotency tests (post-S6).
-- [ ] **Step 2:** Add the OCC conflict test (post-S8). Run green + full suite. Commit.
+- [x] **Step 1:** Skeleton + atomicity/completion/idempotency tests (post-S6).
+- [x] **Step 2:** Add the OCC conflict test (post-S8). Run green + full suite. Commit.
+
+> **Implementation notes (S11):** `src/Wolverine.MongoDB.Tests/saga_atomicity.cs` builds a
+> purpose-built in-test saga (`S11AtomicitySaga`, saga-id `Id`) with one plain start (`Start`),
+> one cascading start (`Starts`, injects `IMessageContext`, publishes a `ReserveStock` cascade then
+> optionally throws), a continue (`Handle(ContinueWork)`) and a completion (`Handle(CompleteWork) →
+> MarkCompleted()`). The upstream compliance sagas cannot throw/cascade on demand, so a local saga
+> was required. Five tests across the four concerns:
+> - **Atomicity** (success + failure): modelled on the demo's `OutboxAtomicityTests`. Proven by the
+>   observable downstream *effect* of the cascade rather than racing the outbox relay — a message
+>   published to a durable **local** queue persists to the *incoming* store atomically with the saga
+>   write (Wolverine's `DurableLocalQueue.storeAndEnqueueAsync`), so "the cascade was handled" is an
+>   exact proxy for "the outgoing message committed". On the forced post-cascade throw, neither the
+>   saga doc nor the cascade survives; the failure path also asserts directly that no `ReserveStock`
+>   envelope leaked into either durable store.
+> - **Completion:** `MarkCompleted()` → the doc is gone (`LoadState` null).
+> - **OCC:** complements `saga_optimistic_concurrency.cs` (S8's frame-level proof) — here the
+>   *winning* update runs through the **real generated update frame** (a `ContinueWork` message) and
+>   only the losing writer is simulated via `MongoSagaOperations.UpdateSagaAsync`; the stale-version
+>   write throws `SagaConcurrencyException` without clobbering.
+> - **Idempotency:** the durable inbox keys dedup on `envelope.Id` (`InboxIdentity`, IdOnly) and keeps
+>   a handled marker for `KeepAfterMessageHandling` (5 min). A redelivery's first action in the durable
+>   receiver is `StoreIncomingAsync`, so the test proves dedup **synchronously** by re-storing the very
+>   same envelope and asserting `DuplicateIncomingEnvelopeException` — deterministic, with none of the
+>   async-receiver timing that initially let a redelivery race the marker (a flaky `EnqueueDirectlyAsync`
+>   first cut was discarded for exactly this reason).
+>
+> Per the S11 mandate, **each test was verified to fail for the right reason before it passed**
+> (drop the cascade → success RED; drop the throw → failure RED; drop `MarkCompleted()` → completion
+> RED; non-stale loser → OCC RED; fresh envelope id → idempotency RED), then restored. **150/150
+> non-multinode + 2/2 multinode green on net9.0 + net10.0.**
 
 ---
 
