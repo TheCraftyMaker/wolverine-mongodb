@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MongoDB.Driver;
 using OrderDemo.Application.Orders;
+using OrderDemo.Application.Sagas;
 using OrderDemo.Infrastructure;
 using Testcontainers.MongoDb;
 using Wolverine;
@@ -92,6 +93,15 @@ public sealed class OrdersFixture : IAsyncLifetime
 
                 opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly);       // Application
                 opts.Discovery.IncludeAssembly(typeof(InfrastructureBootstrap).Assembly); // Infrastructure (projectors)
+
+                // Wolverine's SagaChain.DetermineFrames() calls Handlers.Clear(), silently dropping
+                // any non-saga handler (e.g. projectors) registered for the same message type.
+                // Exclude the saga here so OrderPlacedApplicationEvent and OrderShippedApplicationEvent
+                // resolve to plain HandlerChains and the projector runs correctly.
+                opts.Discovery.CustomizeHandlerDiscovery(query =>
+                    query.Excludes.WithCondition(
+                        "Exclude OrderFulfillmentSaga — SagaChain drops co-registered non-saga handlers",
+                        t => t == typeof(OrderFulfillmentSaga)));
 
                 opts.Services.AddSingleton(MongoClient);
                 opts.Services.AddScoped<Infrastructure.Persistence.IOrderRepository,
