@@ -25,7 +25,10 @@ public class end_to_end
                 opts.LocalQueue("things").UseDurableInbox();
             }).StartAsync();
 
-        var session = await host.TrackActivity().SendMessageAndWaitAsync(new RecordThing(1));
+        // Explicit timeout: the default TrackActivity window is short, and when both TFMs run
+        // concurrently (two MongoDB containers contending) the durable-inbox round-trip can exceed it.
+        var session = await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
+            .SendMessageAndWaitAsync(new RecordThing(1));
         session.Executed.SingleMessage<RecordThing>().Number.ShouldBe(1);
     }
 }
