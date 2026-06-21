@@ -163,7 +163,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **D4** ✅ | `docs/tier4-followups-audit` | docs: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping | Prereqs merged | **Done — PR #108 merged** | Sonnet |
 | **D5** ✅ | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | **Done** — PR #109 | Sonnet |
 | **D6** ✅ | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | **Done** — unblocks T1.1 | **Opus / Fable 5** |
-| **T1.1** | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | Blocked by: D6 | **Opus / Fable 5** |
+| **T1.1** ✅ | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | **Done** — unblocks T1.2/T1.3/T4.3 | **Opus / Fable 5** |
 | **T1.2** | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | Partially blocked by: T1.1 | **Opus / Fable 5** |
 | **T1.3** | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | Partially blocked by: T1.1 | Sonnet |
 | **T2.1** | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | Blocked by: D2 | **Opus / Fable 5** |
@@ -435,11 +435,11 @@ public class storage_action_compliance : StorageActionCompliance
 }
 ```
 
-- [ ] **Step 1:** Add `MongoConstants.EntityCollectionName`; write `EntityFrames.cs` (`MongoEntityOperations` + the three frame classes, mirroring `SagaFrames.cs`).
-- [ ] **Step 2:** Apply the provider flips (broaden `CanPersist`; branch the four factories; implement `DetermineDeleteFrame(Variable,…)` + `DetermineStorageActionFrame`).
-- [ ] **Step 3:** Dump generated code for a handler returning `Insert<Todo>` and one taking `[Entity] Todo` (`codeFor<T>()` / `GeneratedCodeOutputPath`); confirm the entity load/upsert/delete runs **inside the try-block on the session, before the single commit+flush**, and that a saga handler's generated code is **unchanged**.
-- [ ] **Step 4:** Author `storage_action_compliance.cs` (single self-contained `: StorageActionCompliance` subclass); run `--filter "FullyQualifiedName~storage_action_compliance"` → all green.
-- [ ] **Step 5:** Run the full suite (both TFMs) — saga + inbox + outbox + entity all green. Commit (`feat: generic entity + IStorageAction persistence`).
+- [x] **Step 1:** Add `MongoConstants.EntityCollectionName`; write `EntityFrames.cs` (`MongoEntityOperations` + the three frame classes, mirroring `SagaFrames.cs`).
+- [x] **Step 2:** Apply the provider flips (broaden `CanPersist`; branch the four factories; implement `DetermineDeleteFrame(Variable,…)` + `DetermineStorageActionFrame`).
+- [x] **Step 3:** Dumped generated code for `Insert<Todo>`, `[Entity] Todo` (update/delete/store-action), `UnitOfWork<Todo>`, and saga handlers via `codeFor<T>()`. Confirmed the entity load/upsert/delete/apply-storage-action runs **inside the try-block on the session, before the single commit+flush**, and saga handlers still emit the unchanged `MongoSagaOperations.*` frames. One refinement: `LoadEntityFrame` resolves the session non-forcingly (`TryFindVariable(IClientSessionHandle, NotServices)`) so a **read-only `[Entity]`** handler with no outbox transaction reads off `IMongoDatabase` directly (mirrors RavenDb/Cosmos reading off their DI-registered session/container).
+- [x] **Step 4:** Authored `storage_action_compliance.cs` (single self-contained `: StorageActionCompliance` subclass); all 17 facts green on net9.0 + net10.0.
+- [x] **Step 5:** Full single-node suite green (167 tests) on **net9.0 and net10.0** — all four saga compliance suites + `saga_atomicity` + `saga_optimistic_concurrency` + inbox/outbox + the new entity compliance. Commit (`feat: generic entity + IStorageAction persistence`).
 
 > **Coordination note (mirrors saga S6/S9):** ship the compliance host + subclass **in this branch** so T1.1 lands already-green; T1.2 then adds the custom atomicity/coexistence tests rather than the compliance oracle.
 
