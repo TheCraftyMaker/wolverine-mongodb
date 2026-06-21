@@ -161,7 +161,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **D2** ✅ | `docs/saga-diagnostics-discovery` | docs: Tier 2 — ISagaStoreDiagnostics API + Raven reference | Prereqs merged | **Done — PR #110 merged** | Sonnet |
 | **D3** ✅ | `docs/parity-decisions-discovery` | docs: Tier 3 — parity capabilities + implement-vs-defer recommendation | Prereqs merged | **Completed** | Sonnet |
 | **D4** | `docs/tier4-followups-audit` | docs: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping | Prereqs merged | Can start immediately | Sonnet |
-| **D5** | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | Can start immediately | Sonnet |
+| **D5** ✅ | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | **Done** — PR #109 | Sonnet |
 | **D6** | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | Blocked by: D1, D5 | **Opus / Fable 5** |
 | **T1.1** | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | Blocked by: D6 | **Opus / Fable 5** |
 | **T1.2** | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | Partially blocked by: T1.1 | **Opus / Fable 5** |
@@ -284,8 +284,8 @@ The risk is **code-generation correctness + frame ordering** (Tier 1, Tier 2) an
 - **Dependencies:** none to start; **refine the entity shape after D6** (collection naming / id type).
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Draft the Tier-1 entity + Tier-4 UoW/projector contracts + handler signatures, reusing existing demo events where possible.
-- [ ] **Step 2:** Build the cross-tier flow→test table. Commit (`docs: demo flow design + cross-tier test inventory`).
+- [x] **Step 1:** Draft the Tier-1 entity + Tier-4 UoW/projector contracts + handler signatures, reusing existing demo events where possible.
+- [x] **Step 2:** Build the cross-tier flow→test table. Commit (`docs: demo flow design + cross-tier test inventory`).
 
 ### Task D6: Tier 1 — entity document model + frame-branching design (DESIGN GATE)
 
