@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using JasperFx;
 using JasperFx.CodeGeneration.Frames;
 using JasperFx.CodeGeneration.Model;
@@ -11,11 +12,6 @@ namespace Wolverine.MongoDB.Internals;
 
 public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
 {
-    // Saga persistence IS supported (see the saga members below). Generic, non-saga document
-    // persistence (the IStorageAction<T> / return-value [Entity] surface) is not.
-    private const string GenericPersistenceNotSupported =
-        "Generic document persistence is not supported by Wolverine.MongoDB; only saga storage and the outbox transaction are.";
-
     public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
     {
         if (!chain.Middleware.OfType<TransactionalFrame>().Any())
@@ -75,11 +71,12 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
     {
         persistenceService = typeof(IMongoDatabase);
 
-        // Saga creation support. Scoped to Saga subclasses — NOT unconditional. Cosmos returns
-        // true for everything because it also implements DetermineStorageActionFrame; Mongo's
-        // DetermineStorageActionFrame still throws, so advertising generic [Entity]/Insert<T>/
-        // Update<T>/IStorageAction<T> persistence would blow up at codegen. Sagas only.
-        return entityType.CanBeCastTo<Saga>();
+        // Tier 1: DetermineStorageActionFrame + DetermineDeleteFrame(Variable,…) are now implemented,
+        // so we advertise generic persistence like Cosmos (CosmosDbPersistenceFrameProvider:51-55) and
+        // RavenDb (RavenDbPersistenceFrameProvider:56-60). The saga-vs-entity distinction is handled in
+        // the frame factories below (branch on CanBeCastTo<Saga>()), NOT here. Unconditional true is
+        // required for [Entity] loads, which select the provider via CanPersist(parameterType).
+        return true;
     }
 
     // Resolve the saga's native identity-member type (Guid/int/long/string) via Wolverine's own
@@ -95,8 +92,12 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
            ?? throw new ArgumentException(
                $"Unable to determine the identity member for {sagaType.FullNameInCode()}", nameof(sagaType));
 
+    // Used for sagas AND [Entity] parameter loads (EntityAttribute.cs:165). Branch saga-vs-entity:
+    // Saga subclasses keep the version-aware saga load; plain entities get the simple entity load.
     public Frame DetermineLoadFrame(IServiceContainer container, Type sagaType, Variable sagaId)
-        => new LoadSagaFrame(sagaType, sagaId);
+        => sagaType.CanBeCastTo<Saga>()
+            ? new LoadSagaFrame(sagaType, sagaId)
+            : new LoadEntityFrame(sagaType, sagaId);
 
     // Insert and update DIVERGE (S8 optimistic concurrency): insert is unguarded and stamps the
     // initial Saga.Version; update is version-guarded and throws SagaConcurrencyException on a
@@ -105,31 +106,53 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
     // left UNGUARDED by version (matches the lightweight SQL provider's DatabaseSagaSchema.cs) —
     // completion is terminal and a version throw there would only obstruct cleanup.
     public Frame DetermineInsertFrame(Variable saga, IServiceContainer container)
-        => new InsertSagaFrame(saga);
+        => saga.VariableType.CanBeCastTo<Saga>()
+            ? new InsertSagaFrame(saga)
+            : new MongoUpsertEntityFrame(saga);
 
     public Frame CommitUnitOfWorkFrame(Variable saga, IServiceContainer container)
         => new CommitMongoTransactionFrame();
 
     public Frame DetermineUpdateFrame(Variable saga, IServiceContainer container)
-        => new UpdateSagaFrame(saga);
+        => saga.VariableType.CanBeCastTo<Saga>()
+            ? new UpdateSagaFrame(saga)
+            : new MongoUpsertEntityFrame(saga);
 
     public Frame DetermineDeleteFrame(Variable sagaId, Variable saga, IServiceContainer container)
         => new DeleteSagaFrame(sagaId, saga);
 
-    // SagaChain never calls DetermineStoreFrame for sagas (it emits explicit Insert/Update/Delete,
-    // SagaChain.cs:395,423-424); this exists only to satisfy the interface. Route it to the
-    // version-guarded update for consistency.
+    // For sagas this is inert: SagaChain never calls DetermineStoreFrame (it emits explicit
+    // Insert/Update/Delete, SagaChain.cs:395,423-424); the saga branch is retained only to satisfy the
+    // interface and route consistently to the version-guarded update. The live Store<T> path is the
+    // entity branch → MongoUpsertEntityFrame.
     public Frame DetermineStoreFrame(Variable saga, IServiceContainer container)
-        => DetermineUpdateFrame(saga, container);
+        => saga.VariableType.CanBeCastTo<Saga>()
+            ? DetermineUpdateFrame(saga, container)
+            : new MongoUpsertEntityFrame(saga);
 
+    // Generic single-variable delete (Delete<T> return value, Delete.cs:26). Entity-only — sagas reach
+    // delete through the two-variable overload above via SagaChain. The handed variable IS the entity
+    // (core's EntityVariable); the _id is class-map-extracted inside MongoEntityOperations.DeleteAsync.
     public Frame DetermineDeleteFrame(Variable variable, IServiceContainer container)
-    {
-        throw new NotSupportedException(GenericPersistenceNotSupported);
-    }
+        => new MongoDeleteEntityByVariableFrame(variable);
 
+    // Generic IStorageAction<T>/UnitOfWork<T> return value (IStorageAction.cs:27,:96). Entity-only.
+    // Mirrors RavenDb/Cosmos's MethodCall-to-a-static-applier pattern: codegen auto-resolves
+    // IMongoDatabase (0), IClientSessionHandle (1) and CancellationToken (3) from the chain's
+    // variables; we set only Arguments[2] = action. The applier runs on the TransactionalFrame session
+    // (ApplyTransactionSupport is invoked before this frame), so the entity write commits atomically
+    // with the outbox.
+    [UnconditionalSuppressMessage("AOT", "IL3050",
+        Justification = "MakeGenericMethod over the runtime entity type during Dynamic codegen; matches RavenDb/Cosmos providers. AOT consumers run pre-generated frames in TypeLoadMode.Static.")]
     public Frame DetermineStorageActionFrame(Type entityType, Variable action, IServiceContainer container)
     {
-        throw new NotSupportedException(GenericPersistenceNotSupported);
+        var method = typeof(MongoEntityOperations)
+            .GetMethod(nameof(MongoEntityOperations.ApplyStorageActionAsync))!
+            .MakeGenericMethod(entityType);
+
+        var call = new MethodCall(typeof(MongoEntityOperations), method);
+        call.Arguments[2] = action; // (IMongoDatabase, IClientSessionHandle, IStorageAction<T> action, CancellationToken)
+        return call;
     }
 
     public Frame[] DetermineFrameToNullOutMaybeSoftDeleted(Variable entity)

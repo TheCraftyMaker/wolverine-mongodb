@@ -26,4 +26,14 @@ public static class MongoConstants
 
     public static string SagaCollectionName(Type sagaType)
         => $"{SagaCollectionPrefix}{sagaType.Name.ToLowerInvariant()}";
+
+    // Generic entity persistence (the [Entity]/IStorageAction<T> surface): one collection per
+    // entity type, named by the lowercased type name and DELIBERATELY un-prefixed. Entity
+    // collections are application-owned state, not Wolverine system collections, so prefixing
+    // (wolverine_entity_todo) would be misleading and non-idiomatic. The frame helpers
+    // (MongoEntityOperations) and any test/demo direct readers MUST resolve the name through this
+    // method — never a hard-coded literal — so the write and read sides stay coupled. Because the
+    // name is un-prefixed, ClearAllAsync's "wolverine_saga_" sweep never touches entity collections.
+    public static string EntityCollectionName(Type entityType)
+        => entityType.Name.ToLowerInvariant();
 }
