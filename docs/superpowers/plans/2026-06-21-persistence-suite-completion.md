@@ -159,7 +159,7 @@ rtk git worktree remove .worktrees/<branch-name>
 |---|---|---|---|---|---|
 | **D1** | `docs/entity-persistence-discovery` | docs: Tier 1 — entity/storage-action API + Cosmos/Raven reference | Prereqs merged | Can start immediately | Sonnet |
 | **D2** ✅ | `docs/saga-diagnostics-discovery` | docs: Tier 2 — ISagaStoreDiagnostics API + Raven reference | Prereqs merged | **Done — PR #110 merged** | Sonnet |
-| **D3** | `docs/parity-decisions-discovery` | docs: Tier 3 — parity capabilities + implement-vs-defer recommendation | Prereqs merged | Can start immediately | Sonnet |
+| **D3** ✅ | `docs/parity-decisions-discovery` | docs: Tier 3 — parity capabilities + implement-vs-defer recommendation | Prereqs merged | **Completed** | Sonnet |
 | **D4** | `docs/tier4-followups-audit` | docs: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping | Prereqs merged | Can start immediately | Sonnet |
 | **D5** | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | Can start immediately | Sonnet |
 | **D6** | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | Blocked by: D1, D5 | **Opus / Fable 5** |
@@ -257,8 +257,8 @@ The risk is **code-generation correctness + frame ordering** (Tier 1, Tier 2) an
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Confirm each interface + which providers implement vs default; read the current `MongoDbMessageStore` `TenantIds`/`Listeners` members.
-- [ ] **Step 2:** Write the per-capability table + recommendation. Commit (`docs: Tier 3 parity decisions discovery`).
+- [x] **Step 1:** Confirm each interface + which providers implement vs default; read the current `MongoDbMessageStore` `TenantIds`/`Listeners` members.
+- [x] **Step 2:** Write the per-capability table + recommendation. Commit (`docs: Tier 3 parity decisions discovery`).
 
 ### Task D4: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping
 
