@@ -162,7 +162,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **D3** ✅ | `docs/parity-decisions-discovery` | docs: Tier 3 — parity capabilities + implement-vs-defer recommendation | Prereqs merged | **Completed** | Sonnet |
 | **D4** ✅ | `docs/tier4-followups-audit` | docs: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping | Prereqs merged | **Done — PR #108 merged** | Sonnet |
 | **D5** ✅ | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | **Done** — PR #109 | Sonnet |
-| **D6** | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | Blocked by: D1, D5 | **Opus / Fable 5** |
+| **D6** ✅ | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | **Done** — unblocks T1.1 | **Opus / Fable 5** |
 | **T1.1** | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | Blocked by: D6 | **Opus / Fable 5** |
 | **T1.2** | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | Partially blocked by: T1.1 | **Opus / Fable 5** |
 | **T1.3** | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | Partially blocked by: T1.1 | Sonnet |
@@ -303,8 +303,8 @@ The risk is **code-generation correctness + frame ordering** (Tier 1, Tier 2) an
 - **Dependencies:** **D1, D5.**
 - **Blocking status:** **Blocked by: D1, D5.**
 
-- [ ] **Step 1:** Synthesize D1 + D5; resolve decisions 1–7.
-- [ ] **Step 2:** Write the design doc; state the chosen options unambiguously. Commit (`docs: Tier 1 entity document model + frame-branching design`).
+- [x] **Step 1:** Synthesize D1 + D5; resolve decisions 1–7.
+- [x] **Step 2:** Write the design doc; state the chosen options unambiguously. Commit (`docs: Tier 1 entity document model + frame-branching design`).
 
 ---
 
