@@ -160,7 +160,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **D1** | `docs/entity-persistence-discovery` | docs: Tier 1 — entity/storage-action API + Cosmos/Raven reference | Prereqs merged | Can start immediately | Sonnet |
 | **D2** ✅ | `docs/saga-diagnostics-discovery` | docs: Tier 2 — ISagaStoreDiagnostics API + Raven reference | Prereqs merged | **Done — PR #110 merged** | Sonnet |
 | **D3** ✅ | `docs/parity-decisions-discovery` | docs: Tier 3 — parity capabilities + implement-vs-defer recommendation | Prereqs merged | **Completed** | Sonnet |
-| **D4** | `docs/tier4-followups-audit` | docs: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping | Prereqs merged | Can start immediately | Sonnet |
+| **D4** ✅ | `docs/tier4-followups-audit` | docs: Tier 4 — FOLLOWUPS audit + multinode un-gate scoping | Prereqs merged | **Done — PR #108 merged** | Sonnet |
 | **D5** ✅ | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | **Done** — PR #109 | Sonnet |
 | **D6** | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | Blocked by: D1, D5 | **Opus / Fable 5** |
 | **T1.1** | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | Blocked by: D6 | **Opus / Fable 5** |
@@ -269,8 +269,8 @@ The risk is **code-generation correctness + frame ordering** (Tier 1, Tier 2) an
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Walk `FOLLOWUPS.md`; confirm each item's current state in code.
-- [ ] **Step 2:** Write the audit table + multinode un-gate runbook. Commit (`docs: Tier 4 FOLLOWUPS audit`).
+- [x] **Step 1:** Walk `FOLLOWUPS.md`; confirm each item's current state in code.
+- [x] **Step 2:** Write the audit table + multinode un-gate runbook. Commit (`docs: Tier 4 FOLLOWUPS audit`).
 
 ### Task D5: Demo flow design + cross-tier test inventory
 
