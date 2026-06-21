@@ -164,7 +164,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **D5** ✅ | `docs/demo-and-test-inventory` | docs: demo flow design + cross-tier test inventory | Prereqs merged | **Done** — PR #109 | Sonnet |
 | **D6** ✅ | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | **Done** — unblocks T1.1 | **Opus / Fable 5** |
 | **T1.1** ✅ | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | **Done** — unblocks T1.2/T1.3/T4.3 | **Opus / Fable 5** |
-| **T1.2** | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | Partially blocked by: T1.1 | **Opus / Fable 5** |
+| **T1.2** ✅ | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | **Done** — 4 facts green net9/net10; full single-node suite 171 | **Opus / Fable 5** |
 | **T1.3** | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | Partially blocked by: T1.1 | Sonnet |
 | **T2.1** | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | Blocked by: D2 | **Opus / Fable 5** |
 | **T2.2** | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | Blocked by: T2.1 | Sonnet |
@@ -455,8 +455,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **T1.1.**
 - **Blocking status:** **Partially blocked by: T1.1** (skeleton authorable against D6; green requires T1.1).
 
-- [ ] **Step 1:** Skeleton + entity-atomicity success/failure tests; verify each fails for the right reason before it passes (drop the cascade → success RED; drop the throw → failure RED).
-- [ ] **Step 2:** Add the coexistence regression + `[Entity]`-not-found tests. Run green + full suite (both TFMs). Commit (`test: entity atomicity + saga/entity coexistence`).
+- [x] **Step 1:** Skeleton + entity-atomicity success/failure tests; verified each fails for the right reason before it passes (dropped the cascade → success RED on the `NoteCascadeHandler.Reserved` assertion; dropped the throw → failure RED on `Should.ThrowAsync<InvalidOperationException>`). Also mutated the coexistence handler (entity written under a different id) → RED on the entity assertion while the `Version.ShouldBe(2)` assertion still passed, proving the saga-update and entity branches are exercised independently.
+- [x] **Step 2:** Added the coexistence regression (single saga handler mutates saga state + returns `Store<CoexistEntity>`; asserts Version stamp/increment 1→2, deterministic stale-version `SagaConcurrencyException`, and entity persistence) + the `[Entity]`-not-found test (required `[Entity]` for a missing id skips the handler end-to-end through the Mongo load frame, with a positive control). All 4 facts green; full single-node suite (171) green on net9.0 + net10.0; entity_atomicity stable across 3 consecutive runs. Commit (`test: entity atomicity + saga/entity coexistence regression`).
 
 ### Task T1.3: Demo `[Entity]`/`IStorageAction` handler + safety-net tests
 
