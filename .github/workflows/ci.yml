@@ -18,7 +18,7 @@ jobs:
     steps:
       # The Wolverine compliance harness lives at external/wolverine as a submodule
       # pinned to the WolverineFx version (keep the pin in sync with Directory.Packages.props).
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: library
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
