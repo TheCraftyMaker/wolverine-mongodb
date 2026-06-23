@@ -11,7 +11,7 @@
     <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.13.1" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.17" />
-    <PackageVersion Include="Scalar.AspNetCore" Version="2.16.3" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.16.4" />
     <!-- Test -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageVersion Include="Testcontainers.MongoDb" Version="4.12.0" />
