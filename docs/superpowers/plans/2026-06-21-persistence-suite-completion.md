@@ -165,7 +165,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **D6** ✅ | `docs/entity-document-model-design` | docs: Tier 1 — entity document model + frame-branching design (GATE) | **D1, D5** | **Done** — unblocks T1.1 | **Opus / Fable 5** |
 | **T1.1** ✅ | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | **Done** — unblocks T1.2/T1.3/T4.3 | **Opus / Fable 5** |
 | **T1.2** ✅ | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | **Done** — 4 facts green net9/net10; full single-node suite 171 | **Opus / Fable 5** |
-| **T1.3** | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | Partially blocked by: T1.1 | Sonnet |
+| **T1.3** ✅ | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | **Done** — 39/39 demo tests green | Sonnet |
 | **T2.1** | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | Blocked by: D2 | **Opus / Fable 5** |
 | **T2.2** | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | Blocked by: T2.1 | Sonnet |
 | **T3.1** | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | Blocked by: D3 | Sonnet |
@@ -467,8 +467,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** contracts/handlers/test **skeletons** need only D5; **build/run requires T1.1 merged and packed**.
 - **Blocking status:** **Partially blocked by: T1.1** (author skeletons early; compile/run once a Tier-1 package exists).
 
-- [ ] **Step 1:** Add the entity + contracts + handlers; wire discovery/routing in `Program.cs`. Build against a Tier-1 package (local pack or CI nupkg).
-- [ ] **Step 2:** Add `OrderNoteFlowTests.cs`; run the demo suite green. Commit (`demo: [Entity]/IStorageAction handler + tests`).
+- [x] **Step 1:** Add the entity + contracts + handlers; wire discovery/routing in `Program.cs`. Build against a Tier-1 package (local pack or CI nupkg).
+- [x] **Step 2:** Add `OrderNoteFlowTests.cs`; run the demo suite green. Commit (`demo: [Entity]/IStorageAction handler + tests`).
 
 ---
 
