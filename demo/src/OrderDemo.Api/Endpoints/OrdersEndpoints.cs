@@ -1,4 +1,5 @@
 using OrderDemo.Contracts.Commands;
+using OrderDemo.Contracts.Commands.Notes;
 using OrderDemo.Infrastructure.Persistence;
 using Wolverine;
 
@@ -58,6 +59,35 @@ public static class OrdersEndpoints
         })
         .WithSummary("Confirm delivery of a shipped order (completes the OrderFulfillmentSaga)");
 
+        // POST /orders/{id}/notes — add a note to an order (Tier-1 [Entity]/IStorageAction<T> showcase)
+        orders.MapPost("/{id:guid}/notes", async (Guid id, NoteBody body, IMessageBus bus) =>
+        {
+            await bus.InvokeAsync(new AddOrderNoteCommand(id, body.Text, body.Author));
+            return Results.Accepted();
+        })
+        .WithSummary("Add a note to an order")
+        .WithDescription(
+            "Demonstrates Insert<OrderNote> as a return-value side effect — no repository, no manual " +
+            "session. The generated frame persists the note inside the same MongoDB transaction as the outbox.");
+
+        // POST /orders/notes/{noteId} — edit an existing note
+        orders.MapPost("/notes/{noteId}", async (string noteId, EditNoteBody body, IMessageBus bus) =>
+        {
+            await bus.InvokeAsync(new EditOrderNoteCommand(noteId, body.NewText));
+            return Results.Accepted();
+        })
+        .WithSummary("Edit an order note")
+        .WithDescription("Demonstrates [Entity(\"NoteId\")] loading + Update<OrderNote> as a return-value side effect.");
+
+        // DELETE /orders/notes/{noteId} — delete an existing note
+        orders.MapDelete("/notes/{noteId}", async (string noteId, IMessageBus bus) =>
+        {
+            await bus.InvokeAsync(new DeleteOrderNoteCommand(noteId));
+            return Results.Accepted();
+        })
+        .WithSummary("Delete an order note")
+        .WithDescription("Demonstrates [Entity(\"NoteId\")] loading + Delete<OrderNote> as a return-value side effect.");
+
         // GET /orders — list all orders (read model)
         orders.MapGet("/", async (OrderSummaryRepository summaries, CancellationToken ct) =>
         {
@@ -73,4 +103,6 @@ public static class OrdersEndpoints
     public sealed record CancelBody(string? Reason);
     public sealed record DiscountBody(decimal DiscountPercent);
     public sealed record ConfirmBody(DateTimeOffset DeliveredAt);
+    public sealed record NoteBody(string Text, string Author);
+    public sealed record EditNoteBody(string NewText);
 }
