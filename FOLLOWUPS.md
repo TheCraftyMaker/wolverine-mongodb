@@ -42,29 +42,29 @@ Promote to GitHub issues before the first public release.
   until its cached `ExpiresAt` crosses the margin. Self-corrects within one lease
   duration; acceptable for the current model.
 
-- **Multinode leadership compliance is gated (by decision, not pending work).** The
-  upstream `leadership_election_compliance` facts (`leader_switchover_between_nodes`,
-  `singular_agent_is_only_running_on_one`) require the lowest-numbered surviving node
-  to win a leadership-claim race that Wolverine core decides by "whoever's heartbeat
-  grabs the lock first" — fast stores (RavenDb/Postgres) win it emergently via
-  low-latency CAS; our `w:majority+j:true` lock cannot, and no `configureNode` knob
-  fixes it. **Decision (2026-06-16): declined.** "Lowest node wins" is a test
-  tie-breaker, not a production requirement; the provider keeps the
-  production-appropriate any-healthy-node model and the suite stays compile-gated
-  behind `RUN_MULTINODE`, exactly as Wolverine's own Cosmos provider gates the same
-  facts `[Flaky]`. Production confidence for multinode comes from `multinode_end_to_end.cs`
-  (exactly-once scheduling + dead-node rescue, 5× green on net9.0 + net10.0).
-  Full analysis + the declined code:
+- **Multinode leadership compliance — UN-GATED (2026-07-05, T4.5).** The upstream
+  `leadership_election_compliance` facts were historically compile-gated behind `#if RUN_MULTINODE`:
+  against WolverineFx 6.2.2, `leader_switchover_between_nodes` and the dependent
+  `singular_agent_is_only_running_on_one` required the lowest-numbered surviving node to win a
+  leadership-claim race that core decided by lock-arrival order, which our `w:majority+j:true` lock
+  lost ~half the time; no `configureNode` knob fixed it (decision 2026-06-16: **declined** the
+  "lowest live node wins" change — a test tie-breaker, not a production requirement, and it would
+  degrade real failover). Full analysis + the declined code:
   `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`.
 
-  - **Update (WolverineFx 6.9.0): worth re-evaluating.** V6.9.0 reworked these compliance facts —
-    `leader_switchover_between_nodes` now uses a slow heartbeat plus an explicit `CheckAgentHealth`
-    trigger (removing the lock-arrival-order race), and a new `take_over_leader_ship_if_leader_
-    becomes_stale_with_racing_nodes` fact is built around the "any node may win" model this provider
-    already implements. A one-off `RUN_MULTINODE` run against 6.9.0 passed **13/13 on net9.0**,
-    including both formerly-flaky facts and the new racing-nodes fact. This is a single run, not the
-    standing bar. Before un-gating: confirm **5× consecutive green on net9.0 + net10.0**, then remove
-    the `#if RUN_MULTINODE` guard and add the suite to the CI multinode step.
+  - **Resolution (WolverineFx 6.9.0).** V6.9.0 reworked these facts — `leader_switchover_between_nodes`
+    now uses a slow heartbeat plus an explicit `CheckAgentHealth` trigger (removing the
+    lock-arrival-order race), and the new `take_over_leader_ship_if_leader_becomes_stale_with_racing_nodes`
+    fact is built around the "any healthy node leads" model this provider already implements — so
+    un-gating did **not** require the declined lowest-node election. Verified **5× consecutive green
+    on BOTH net9.0 and net10.0** (10/10 runs of the full `Category=multinode` suite, 17/17 each
+    including all 13 leadership facts) on 2026-07-05. The `#if RUN_MULTINODE` guard was removed; the
+    suite's `[Trait("Category","multinode")]` routes it into CI's existing multinode step (no `ci.yml`
+    change — that step already runs `dotnet test --filter "Category=multinode"`). Production confidence
+    also continues to come from `multinode_end_to_end.cs` (exactly-once scheduling + dead-node rescue).
+    One net9.0 run showed a single `fan_out_message_to_all_nodes` duration outlier (~16 min vs ~10 s,
+    still green, error-free log) attributed to a local Docker/host scheduling stall — net10.0 ran the
+    identical suite 5× at max 8 s/test, corroborating an environment transient, not a coordination defect.
 
 - **Lease fencing token (epoch) as a future hardening option.** The leader lock
   currently has no fencing token (monotonically increasing epoch). Adding one would
