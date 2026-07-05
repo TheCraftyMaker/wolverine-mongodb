@@ -167,7 +167,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T1.2** ✅ | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | **Done** — 4 facts green net9/net10; full single-node suite 171 | **Opus / Fable 5** |
 | **T1.3** ✅ | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | **Done** — 39/39 demo tests green | Sonnet |
 | **T2.1** ✅ | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | **Done** — unblocks T2.2 | **Opus / Fable 5** |
-| **T2.2** | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | Blocked by: T2.1 | Sonnet |
+| **T2.2** ✅ | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | **Done** — 6/6 facts green net9/net10; full single-node suite 177 | Sonnet |
 | **T3.1** | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | Blocked by: D3 | Sonnet |
 | **T4.1** | `demo/unit-of-work-example` | demo: MongoDbUnitOfWork example handler + test | **D5** | Blocked by: D5 | Sonnet |
 | **T4.2** | `demo/saga-cascade-consumer` | demo: fulfillment read-model projector for saga cascades | **D5** | Blocked by: D5 | Sonnet |
@@ -495,8 +495,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **T2.1.**
 - **Blocking status:** **Blocked by: T2.1.**
 
-- [ ] **Step 1:** Write the integration test mirroring the RavenDb test's assertions.
-- [ ] **Step 2:** Run green + full suite. Commit (`test: MongoDb saga store diagnostics`).
+- [x] **Step 1:** Added `src/Wolverine.MongoDB.Tests/saga_store_diagnostics.cs` (`[Collection("mongodb")]`, on `AppFixture`), mirroring `raven_saga_store_diagnostics_tests`: a small in-test `DiagSaga`/`StartDiagSaga`, `Dynamic` codegen, `DisableConventionalDiscovery().IncludeType(typeof(DiagSaga))`. Six facts: registered-saga-types tagged `"MongoDb"`; `ReadSagaAsync` by both `FullName` and short `Name` routing; `ReadSagaAsync` null for a missing instance; `ListSagaInstancesAsync` returns recent instances; unknown saga-type name returns null/empty.
+- [x] **Step 2:** All 6 new facts green on net9.0 + net10.0. Full single-node suite green — **177 tests** on both TFMs. Commit (`test: MongoDb saga store diagnostics`).
 
 ---
 
