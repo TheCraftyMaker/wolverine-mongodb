@@ -168,7 +168,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T1.3** ✅ | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | **Done** — 39/39 demo tests green | Sonnet |
 | **T2.1** ✅ | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | **Done** — unblocks T2.2 | **Opus / Fable 5** |
 | **T2.2** ✅ | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | **Done** — 6/6 facts green net9/net10; full single-node suite 177 | Sonnet |
-| **T3.1** | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | Blocked by: D3 | Sonnet |
+| **T3.1** ✅ | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | **Done** | Sonnet |
 | **T4.1** | `demo/unit-of-work-example` | demo: MongoDbUnitOfWork example handler + test | **D5** | Blocked by: D5 | Sonnet |
 | **T4.2** | `demo/saga-cascade-consumer` | demo: fulfillment read-model projector for saga cascades | **D5** | Blocked by: D5 | Sonnet |
 | **T4.3** | `feat/mongo-database-registration` | feat/docs: resolve unkeyed IMongoDatabase registration | **D6, T1.1** | Partially blocked by: D6, T1.1 | **Opus / Fable 5** |
@@ -516,8 +516,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **D3.**
 - **Blocking status:** **Blocked by: D3** (independent of Tiers 1/2/4).
 
-- [ ] **Step 1:** Confirm each capability is at its documented default in code (no behavioral change).
-- [ ] **Step 2:** Write the non-goal doc + `CLAUDE.md`/`FOLLOWUPS.md` entries. Commit (`docs: parity capabilities non-goals + rationale`).
+- [x] **Step 1:** Confirm each capability is at its documented default in code (no behavioral change).
+- [x] **Step 2:** Write the non-goal doc + `CLAUDE.md`/`FOLLOWUPS.md` entries. Commit (`docs: parity capabilities non-goals + rationale`).
 
 ---
 

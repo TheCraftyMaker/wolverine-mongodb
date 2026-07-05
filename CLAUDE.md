@@ -118,6 +118,15 @@ Three public entry points:
 - **`CommitUnitOfWorkFrame` for saga chains / no double-commit:** `ApplyTransactionSupport` adds the commit postprocessor only when `chain is not SagaChain`. For saga chains the single commit+flush flows through `CommitUnitOfWorkFrame` (inlined by `SagaChain` after the saga write). Mirrors Cosmos/RavenDb.
 - **`MultipleHandlerBehavior.Separated` for saga + non-saga co-handlers:** a `SagaChain` calls `Handlers.Clear()`, silently dropping co-registered non-saga handlers. When a saga and a projector consume the same message, set `opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated` so each runs independently. Required in the demo.
 
+### Parity Capabilities — Non-Goals
+
+Four RDBMS/Marten-only Wolverine capabilities are deliberately **not implemented**, matching the two closest document-store analogues, Cosmos and RavenDb, which also defer all four. Each is already at its correctly-deferred default; no code exists to remove. See `docs/superpowers/plans/2026-06-21-parity-non-goals.md` for the full contract-by-contract writeup.
+
+- **Multi-tenancy (non-goal).** `MongoDbMessageStore.TenantIds` stays `new()` (always empty) and the provider does not implement `ITenantedMessageSource`. Real Wolverine multi-tenancy is connection-string-based (one `IMessageStore` per tenant database) — a significant architectural investment that Cosmos and RavenDb also skip. **App-level workaround:** route on a tenant-ID field in the message payload, or register a separate Wolverine host (with its own `IMongoDatabase`) per tenant.
+- **Durable listeners (non-goal for now).** `MongoDbMessageStore.Listeners` stays `NullListenerStore.Instance`, matching Cosmos/RavenDb's "follow-up" state. Durable listener persistence only matters when `DurabilitySettings.EnableDynamicListeners` is opted into (not the default), and no consumer has asked for it. **Optional follow-up shape**, if demand appears: a `wolverine_listeners` collection with a `{ uri: string }` document and a unique index on `uri`, upserted via `ReplaceOneAsync(IsUpsert=true)`; gate construction on `EnableDynamicListeners && Role==Main` exactly like `RdbmsListenerStore`, otherwise keep returning `NullListenerStore.Instance`.
+- **Query-spec frames (non-goal).** `TryBuildFetchSpecificationFrame` is not overridden, so it uses `IPersistenceFrameProvider`'s default (`false`). This is a Marten/EF Core-specific concept for compile-time query objects (`ICompiledQuery<,>`, EF's `IQueryPlan<,>`) with no MongoDB analogue. Cosmos, RavenDb, and Polecat all leave it at the default too.
+- **Soft-delete (non-goal).** `DetermineFrameToNullOutMaybeSoftDeleted` returns `[]`. Only Marten implements this (a `SetVariableToNullIfSoftDeletedFrame` reading Marten-specific document metadata); EF Core, Polecat, Cosmos, and RavenDb all return `[]` too. Implementing it would mean prescribing an `IsDeleted`-style field convention across every entity type. **App-level workaround:** `[Entity(MaybeSoftDeleted = false)]` plus a manual check in the handler, or an explicit `is_deleted` filter on the load query.
+
 ---
 
 ## Build & Test

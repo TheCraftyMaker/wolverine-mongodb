@@ -59,9 +59,26 @@ Promote to GitHub issues before the first public release.
   residual. Not needed for store-only leader work; track as a future hardening item
   if leader-scoped external side effects become common.
 
-- **`IListenerStore` still `NullListenerStore`.** The `IListenerStore` interface
-  returns the no-op default. Listener persistence (durable local queues surviving
-  restarts) is not yet implemented.
+- **`IListenerStore` still `NullListenerStore` — non-goal for now, cheap optional follow-up shape recorded.**
+  `MongoDbMessageStore.Listeners` returns `NullListenerStore.Instance`, matching Cosmos/RavenDb's
+  own "follow-up" state (T3.1, `docs/superpowers/plans/2026-06-21-parity-non-goals.md`). No
+  consumer has asked for durable listener persistence. **If demand appears:** a `wolverine_listeners`
+  collection with `{ uri: string }` documents, a unique index on `uri`, idempotent registration via
+  `ReplaceOneAsync(IsUpsert=true)`, gated on `EnableDynamicListeners && Role==Main` (mirroring
+  `RdbmsListenerStore`) — otherwise keep `NullListenerStore.Instance`.
+
+- **Multi-tenancy — non-goal (documented).** `TenantIds` stays empty and `ITenantedMessageSource`
+  is not implemented, matching Cosmos/RavenDb. See
+  `docs/superpowers/plans/2026-06-21-parity-non-goals.md` for the rationale and the app-level
+  tenant-field-routing workaround.
+
+- **Query-spec frames (`TryBuildFetchSpecificationFrame`) — non-goal (documented).** Left at the
+  `IPersistenceFrameProvider` default (`false`); Marten/EF Core-only concept with no MongoDB
+  analogue. See `docs/superpowers/plans/2026-06-21-parity-non-goals.md`.
+
+- **Soft-delete (`DetermineFrameToNullOutMaybeSoftDeleted`) — non-goal (documented).** Returns `[]`,
+  matching every provider except Marten. See `docs/superpowers/plans/2026-06-21-parity-non-goals.md`
+  for the app-level `is_deleted` workaround.
 
 - **Demo app has no `MongoDbUnitOfWork` example.** The demo uses the repository
   pattern with explicit `IClientSessionHandle` threading, which is the fuller
