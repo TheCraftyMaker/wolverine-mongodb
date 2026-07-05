@@ -56,6 +56,11 @@ public class SagaFlowTests(OrdersFixture fixture)
             .Find(Builders<OrderSummary>.Filter.Eq(s => s.OrderId, orderId))
             .FirstOrDefaultAsync()!;
 
+    private static Task<FulfillmentDeliveryStatus?> FindDeliveryStatusAsync(IMongoDatabase mongo, Guid orderId)
+        => mongo.GetCollection<FulfillmentDeliveryStatus>("fulfillment_delivery_statuses")
+            .Find(Builders<FulfillmentDeliveryStatus>.Filter.Eq(s => s.OrderId, orderId))
+            .FirstOrDefaultAsync()!;
+
     private static async Task<Guid> FindOrderIdAsync(IMongoDatabase mongo, Guid customerId)
     {
         var order = await mongo.GetCollection<Order>("orders")
@@ -294,5 +299,47 @@ public class SagaFlowTests(OrdersFixture fixture)
         // stores ShippedAt as a BSON Date (millisecond precision, per the library's DateTimeOffset
         // convention) while the read model keeps full .NET precision.
         summary.ShippedAt!.Value.Should().BeCloseTo(saga.ShippedAt!.Value, TimeSpan.FromSeconds(1));
+    }
+
+    // ── F8: saga cascade events are projected (T4.2) ─────────────────────────────────
+
+    /// <summary>
+    /// Proves the full saga → outbox → consumer path for the saga's cascaded events:
+    /// <c>OrderFulfillmentSaga</c> returns <c>FulfillmentShippedEvent</c>/<c>FulfillmentCompletedEvent</c>,
+    /// which <see cref="Infrastructure.Projectors.FulfillmentStatusProjector"/> consumes via a durable
+    /// local queue to maintain the <c>fulfillment_delivery_statuses</c> read model — data
+    /// <see cref="OrderSummary"/> does not track.
+    /// </summary>
+    [Fact]
+    public async Task ShipAndConfirmOrder_ProjectsFulfillmentDeliveryStatus()
+    {
+        var db = OrdersFixture.CreateDatabaseName();
+        using var host = await fixture.CreateHostAsync(db);
+        var mongo = host.Services.GetRequiredService<IMongoDatabase>();
+
+        var orderId = await PlaceOrderAsync(host, mongo, Guid.NewGuid());
+
+        await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
+            .InvokeMessageAndWaitAsync(new ShipOrderCommand(orderId));
+
+        var afterShip = await FindDeliveryStatusAsync(mongo, orderId);
+        afterShip.Should().NotBeNull("FulfillmentShippedEvent must be projected by FulfillmentStatusProjector");
+        afterShip!.OrderId.Should().Be(orderId);
+        afterShip.Status.Should().Be("Shipped");
+        afterShip.DeliveredAt.Should().BeNull();
+
+        var deliveredAt = DateTimeOffset.UtcNow;
+        await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
+            .InvokeMessageAndWaitAsync(new ConfirmDeliveryCommand(orderId, deliveredAt));
+
+        var afterDelivery = await FindDeliveryStatusAsync(mongo, orderId);
+        afterDelivery.Should().NotBeNull();
+        afterDelivery!.Status.Should().Be("Delivered", "FulfillmentCompletedEvent must update the delivery status");
+        afterDelivery.DeliveredAt.Should().NotBeNull();
+        afterDelivery.ShippedAt.Should().Be(afterShip.ShippedAt, "the shipped timestamp must not be disturbed by delivery");
+
+        // The saga document is deleted on completion (F3), but the projection survives it —
+        // orthogonal read model, not saga state.
+        (await LoadSagaAsync(mongo, orderId)).Should().BeNull("MarkCompleted() must still delete the saga document");
     }
 }

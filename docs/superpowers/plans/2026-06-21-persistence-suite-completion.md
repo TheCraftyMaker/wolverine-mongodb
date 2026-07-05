@@ -170,7 +170,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T2.2** ✅ | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | **Done** — 6/6 facts green net9/net10; full single-node suite 177 | Sonnet |
 | **T3.1** ✅ | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | **Done** | Sonnet |
 | **T4.1** ✅ | `demo/unit-of-work-example` | demo: MongoDbUnitOfWork example handler + test | **D5** | **Done** — RecordOrderAuditHandler + OrderAuditTests, 41/41 demo suite green | Sonnet |
-| **T4.2** | `demo/saga-cascade-consumer` | demo: fulfillment read-model projector for saga cascades | **D5** | Blocked by: D5 | Sonnet |
+| **T4.2** ✅ | `demo/saga-cascade-consumer` | demo: fulfillment read-model projector for saga cascades | **D5** | **Done** — FulfillmentStatusProjector + SagaFlowTests cascade fact, 42/42 demo suite green | Sonnet |
 | **T4.3** | `feat/mongo-database-registration` | feat/docs: resolve unkeyed IMongoDatabase registration | **D6, T1.1** | Partially blocked by: D6, T1.1 | **Opus / Fable 5** |
 | **T4.4** | `feat/node-clearall-scope` | feat: INodeAgentPersistence.ClearAllAsync scope | **D4** | Blocked by: D4 | Sonnet |
 | **T4.5** | `test/multinode-leadership-ungate` | test: re-evaluate + un-gate multinode leadership compliance | **D4** | Blocked by: D4 | **Opus 4.8** |
@@ -544,8 +544,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **D5** (uses the existing saga; independent of Tier-1 impl).
 - **Blocking status:** **Blocked by: D5.**
 
-- [ ] **Step 1:** Add the fulfillment projector + read-model field + route.
-- [ ] **Step 2:** Add/extend a test asserting the projection updates from the saga cascade. Run the demo suite green. Commit (`demo: fulfillment read-model projector for saga cascades`).
+- [x] **Step 1:** Add the fulfillment projector + read-model field + route.
+- [x] **Step 2:** Add/extend a test asserting the projection updates from the saga cascade. Run the demo suite green. Commit (`demo: fulfillment read-model projector for saga cascades`).
 
 ### Task T4.3: Resolve unkeyed `IMongoDatabase` registration
 
