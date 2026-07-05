@@ -120,6 +120,13 @@ public sealed class OrdersFixture : IAsyncLifetime
                 opts.LocalQueueFor<Contracts.Events.DiscountAppliedApplicationEvent>()
                     .UseDurableInbox();
 
+                // Saga cascade events consumed by FulfillmentStatusProjector — see Program.cs
+                // for the matching production routes.
+                opts.LocalQueueFor<Contracts.Events.FulfillmentShippedEvent>()
+                    .UseDurableInbox();
+                opts.LocalQueueFor<Contracts.Events.FulfillmentCompletedEvent>()
+                    .UseDurableInbox();
+
                 opts.Policies.AutoApplyTransactions();
             })
             .StartAsync();

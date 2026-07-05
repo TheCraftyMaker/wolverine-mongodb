@@ -25,7 +25,7 @@ demo/
     OrderDemo.Infrastructure/   ← Repositories, read-model projector, DI bootstrap
   tests/
     OrderDemo.IntegrationTests/ ← Testcontainers-based end-to-end tests
-                                   SagaFlowTests.cs ← 7 saga integration flows
+                                   SagaFlowTests.cs ← 8 saga integration flows (incl. cascade projection)
   docker-compose.yml            ← MongoDB replica set + RabbitMQ
   Directory.Packages.props      ← Central package versions (independent from root)
   nuget.config                  ← Points to nuget.org (local-ci source added by CI)
@@ -47,6 +47,12 @@ HTTP POST /orders
                                  → Queue "order-projections"
                                       → OrderSummaryProjector (durable inbox)
                                            → Upsert OrderSummary read model
+
+OrderFulfillmentSaga (Handle(OrderShippedApplicationEvent) / Handle(ConfirmDeliveryCommand))
+  → cascades FulfillmentShippedEvent / FulfillmentCompletedEvent
+       └─ Written to wolverine_outgoing_envelopes (same transaction as the saga write)
+       └─ Local durable queue → FulfillmentStatusProjector
+                                      → Upsert FulfillmentDeliveryStatus read model
 ```
 
 ---
@@ -109,8 +115,9 @@ Test classes:
 - `OrderBusinessRuleTests` — domain rules
 - `OrderProjectorTests` — read-model projection
 - `OutboxAtomicityTests` — proves transactional guarantee
-- `SagaFlowTests` — 7 saga integration flows (start, continue, complete, missing-state,
-  duplicate-message idempotency, across-restart state survival, saga/projector coexistence)
+- `SagaFlowTests` — 8 saga integration flows (start, continue, complete, missing-state,
+  duplicate-message idempotency, across-restart state survival, saga/projector coexistence,
+  saga-cascade-event projection via `FulfillmentStatusProjector`)
 
 ---
 

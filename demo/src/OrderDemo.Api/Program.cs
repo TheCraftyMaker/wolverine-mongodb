@@ -78,14 +78,15 @@ builder.Host.UseWolverine(opts =>
     // ── Saga cascade events ──────────────────────────────────────────────────
     //
     // OrderFulfillmentSaga returns FulfillmentShippedEvent / FulfillmentCompletedEvent from its
-    // handler methods to illustrate that a saga handler may cascade messages. This demo wires no
-    // consumer for them, so they are intentionally left UNROUTED (a no-op) rather than published to
-    // the exchange — the order-projections queue below binds the whole exchange but has no handler
-    // for these types, so routing them there would just be a no-handler discard. The library's own
-    // saga_atomicity tests cover saga-state + outbox commit/rollback atomicity rigorously.
-    // (FOLLOWUPS.md notes the option of adding a fulfillment read-model consumer here.)
+    // handler methods to illustrate that a saga handler may cascade messages. FulfillmentStatusProjector
+    // consumes them and projects a delivery-timeline read model (fulfillment_delivery_statuses) that
+    // OrderSummary does not track. Routed to a local durable queue rather than the RabbitMQ exchange —
+    // nothing outside this process needs these events, so an in-process queue keeps the routing simple
+    // while still exercising the outbox → durable-inbox path.
+    opts.LocalQueueFor<FulfillmentShippedEvent>().UseDurableInbox();
+    opts.LocalQueueFor<FulfillmentCompletedEvent>().UseDurableInbox();
 
-    // The read-side projector listens on this queue, bound to the exchange.
+    // The read-side order-summary projector listens on this queue, bound to the exchange.
     // UseDurableInbox() persists each message before processing so that crashes
     // during projection are automatically recovered on restart.
     opts.ListenToRabbitQueue("order-projections",

@@ -85,14 +85,13 @@ Promote to GitHub issues before the first public release.
   production example. Add a second handler (or a variant endpoint) that accepts
   `MongoDbUnitOfWork` directly so consumers can compare both patterns side by side.
 
-- **Demo saga cascade events have no consumer.** `OrderFulfillmentSaga` returns
-  `FulfillmentShippedEvent` / `FulfillmentCompletedEvent` to illustrate that a saga handler may
-  cascade messages, but the demo wires no consumer, so they are intentionally left unrouted (a
-  no-op) rather than delivered to the read-model queue (which has no handler for them). Optionally
-  add a fulfillment read-model projector (`Handle(FulfillmentShippedEvent)` /
-  `Handle(FulfillmentCompletedEvent)`) — e.g. recording a delivery timestamp/status the
-  `OrderSummary` does not otherwise track — plus a matching local-queue route in `OrdersFixture`
-  and an assertion in `SagaFlowTests`, to exercise the full saga → outbox → consumer path end to end.
+- **Demo saga cascade events have no consumer — resolved (T4.2).** `OrderFulfillmentSaga` returns
+  `FulfillmentShippedEvent` / `FulfillmentCompletedEvent`; `FulfillmentStatusProjector`
+  (`demo/src/OrderDemo.Infrastructure/Projectors/FulfillmentStatusProjector.cs`) now consumes both
+  via a local durable queue (`Program.cs` + `OrdersFixture`) and maintains the
+  `fulfillment_delivery_statuses` read model — delivery status/timestamps `OrderSummary` does not
+  track. `SagaFlowTests.ShipAndConfirmOrder_ProjectsFulfillmentDeliveryStatus` exercises the full
+  saga → outbox → consumer path end to end.
 
 - **Old single-field indexes not dropped on existing deployments.** The hardening
   pass replaced single-field `executionTime` and outgoing `ownerId` indexes with
