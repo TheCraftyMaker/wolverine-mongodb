@@ -15,10 +15,20 @@ Promote to GitHub issues before the first public release.
   reuses freed slots. A lowest-free-slot reuse strategy would keep node numbers
   compact across restarts.
 
-- **Unqualified `IMongoDatabase` singleton registration.** `UseMongoDbPersistence`
-  registers a single unkeyed `IMongoDatabase`. In an app that already registers
-  its own `IMongoDatabase`, this is a constraint/conflict. Document as a consumer
-  constraint or switch to a keyed/dedicated registration.
+- **Unqualified `IMongoDatabase` singleton registration — resolved (T4.3, 2026-07-05: documented as a consumer constraint).**
+  `UseMongoDbPersistence` registers a single unkeyed `IMongoDatabase` (`WolverineMongoDbExtensions.cs:59-60`).
+  An app that also registers its own unkeyed `IMongoDatabase` collides with it (DI resolves the last
+  registration for a single-service request). **Decision: document, do NOT switch to keyed/dedicated
+  registration.** Every code-generated frame resolves the database by type — `TransactionalFrame`
+  (which also builds `MongoDbUnitOfWork`), the saga frames, and the entity frames all use
+  `chain.FindVariable(typeof(IMongoDatabase))` — so a keyed/dedicated registration would force a keyed
+  lookup through every frame's variable resolution plus `MongoDbUnitOfWork`: a high-blast-radius codegen
+  change for a rare conflict (validated against both saga AND entity codegen — the reason T4.3 depends on
+  D6 + T1.1). The constraint and the app-level workarounds (reuse Wolverine's handle; resolve a different
+  database via `IMongoClient.GetDatabase(...)`; register the app's own under a keyed service / wrapper type)
+  are documented in `README.md` ("The registered `IMongoDatabase`") and `CLAUDE.md` (Key Design Decisions).
+  Revisit only if a real consumer needs a second unkeyed `IMongoDatabase` and a thin `WolverineMongoDatabase`
+  wrapper the frames resolve proves contained.
 
 - **`HasLeadershipLock` external-delete edge (residual, low priority).** The 75%
   lease margin means a node stops reporting leadership well before the lease

@@ -171,7 +171,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T3.1** ✅ | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | **Done** | Sonnet |
 | **T4.1** ✅ | `demo/unit-of-work-example` | demo: MongoDbUnitOfWork example handler + test | **D5** | **Done** — RecordOrderAuditHandler + OrderAuditTests, 41/41 demo suite green | Sonnet |
 | **T4.2** ✅ | `demo/saga-cascade-consumer` | demo: fulfillment read-model projector for saga cascades | **D5** | **Done** — FulfillmentStatusProjector + SagaFlowTests cascade fact, 42/42 demo suite green | Sonnet |
-| **T4.3** | `feat/mongo-database-registration` | feat/docs: resolve unkeyed IMongoDatabase registration | **D6, T1.1** | Partially blocked by: D6, T1.1 | **Opus / Fable 5** |
+| **T4.3** ✅ | `feat/mongo-database-registration` | feat/docs: resolve unkeyed IMongoDatabase registration | **D6, T1.1** | **Done** — route (a): documented as a consumer constraint (README + CLAUDE + FOLLOWUPS); no code change | **Opus / Fable 5** |
 | **T4.4** | `feat/node-clearall-scope` | feat: INodeAgentPersistence.ClearAllAsync scope | **D4** | Blocked by: D4 | Sonnet |
 | **T4.5** | `test/multinode-leadership-ungate` | test: re-evaluate + un-gate multinode leadership compliance | **D4** | Blocked by: D4 | **Opus 4.8** |
 | **T4.6** | `docs/pre-1.0-hardening-backlog` | docs: pre-1.0 hardening backlog (node reuse, index migration, fencing, saga indexes) | **D4** | Blocked by: D4 | Sonnet |
@@ -556,8 +556,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **D6, T1.1** (the entity frames must exist so a registration change is validated against both saga + entity codegen).
 - **Blocking status:** **Partially blocked by: D6, T1.1.**
 
-- [ ] **Step 1:** Make the call (default: document). If (b), introduce the dedicated registration + update every frame's `FindVariable`/`MethodCall` resolution.
-- [ ] **Step 2:** If (b): full suite (saga + entity + UoW) green on both TFMs. Either way, document the outcome. Commit (`feat/docs: resolve unkeyed IMongoDatabase registration`).
+- [x] **Step 1:** Made the call — **route (a): document**. D6 (needs no new registration) and D4 (classified "document-as-constraint (default)") both declined a dedicated type; neither favored (b). Verified every code-generated path resolves the single unkeyed `IMongoDatabase` by type (`TransactionalFrame.cs:57` + `MongoDbUnitOfWork` ctor `:78`; all saga + entity frames via `chain.FindVariable(typeof(IMongoDatabase))`), confirming the keyed route's high blast radius. No code changed.
+- [x] **Step 2:** Route (a), so no suite run required (docs-only, zero code paths touched; PR CI still runs the full suite). Documented the outcome in `README.md` ("The registered `IMongoDatabase`" + a Known-limitations bullet), `CLAUDE.md` (Key Design Decisions), and `FOLLOWUPS.md` (resolution note). Commit (`feat/docs: resolve unkeyed IMongoDatabase registration`).
 
 ### Task T4.4: `INodeAgentPersistence.ClearAllAsync` scope
 
