@@ -15,9 +15,15 @@ Promote to GitHub issues before the first public release.
   (`AppFixture.ClearAll()` → `RebuildAsync()`) actually calls. No code change; the
   boundary is now documented at the `ClearAllAsync` call site.
 
-- **Node-number allocation.** The counter is monotonically increasing and never
-  reuses freed slots. A lowest-free-slot reuse strategy would keep node numbers
-  compact across restarts.
+- **Node-number reuse — decision (T4.6, 2026-07-05: document/defer).** The counter
+  (`wolverine_counters` / `node_number`, `MongoDbMessageStore.NodeAgents.cs:16-20`) is a pure
+  monotonic increment; once a node deregisters, its slot is freed from `wolverine_nodes` but the
+  counter value never decreases, so the next registering node gets `count + 1`, not the freed
+  slot. **Decision: acceptable, deferred post-1.0.** Node numbers are short-lived coordination
+  identifiers, not long-lived external keys, so unbounded (if slow) growth is not a correctness
+  or resource concern at pre-1.0 scale. **If revisited:** track the lowest free slot (e.g. a
+  sorted set of released numbers consulted before incrementing the counter) rather than
+  redesigning the allocation scheme — no code change now.
 
 - **Unqualified `IMongoDatabase` singleton registration — resolved (T4.3, 2026-07-05: documented as a consumer constraint).**
   `UseMongoDbPersistence` registers a single unkeyed `IMongoDatabase` (`WolverineMongoDbExtensions.cs:59-60`).
@@ -66,12 +72,16 @@ Promote to GitHub issues before the first public release.
     still green, error-free log) attributed to a local Docker/host scheduling stall — net10.0 ran the
     identical suite 5× at max 8 s/test, corroborating an environment transient, not a coordination defect.
 
-- **Lease fencing token (epoch) as a future hardening option.** The leader lock
-  currently has no fencing token (monotonically increasing epoch). Adding one would
-  allow store writes to carry the epoch and reject writes from a node with a stale
-  epoch — eliminating the "paused node acts on stale leadership for external systems"
-  residual. Not needed for store-only leader work; track as a future hardening item
-  if leader-scoped external side effects become common.
+- **Lease fencing token (epoch) — decision (T4.6, 2026-07-05: document/defer).** The leader lock
+  document (`MongoDbMessageStore.Locking.cs`: `Id`, `NodeId`, `ExpiresAt`) has no fencing token
+  (monotonically increasing epoch). A fencing token would let store writes carry the epoch and
+  reject writes from a node holding a stale epoch, closing the residual where a paused node still
+  believes it holds leadership for a brief window (see the `HasLeadershipLock` external-delete
+  edge above). **Decision: not needed for store-only leader work; deferred as a future hardening
+  option.** The 75%-lease margin already mitigates the stale-leadership window for internal
+  coordination (the leader stops acting before a competitor can legitimately take over); a fencing
+  token only earns its complexity once leader-scoped **external** side effects (writes to a
+  system outside this store that must reject stale-epoch callers) become common. No code change.
 
 - **`IListenerStore` still `NullListenerStore` — non-goal for now, cheap optional follow-up shape recorded.**
   `MongoDbMessageStore.Listeners` returns `NullListenerStore.Instance`, matching Cosmos/RavenDb's
@@ -107,11 +117,16 @@ Promote to GitHub issues before the first public release.
   track. `SagaFlowTests.ShipAndConfirmOrder_ProjectsFulfillmentDeliveryStatus` exercises the full
   saga → outbox → consumer path end to end.
 
-- **Old single-field indexes not dropped on existing deployments.** The hardening
-  pass replaced single-field `executionTime` and outgoing `ownerId` indexes with
-  compound alternatives. Existing deployments keep the old indexes harmlessly (pre-1.0
-  beta; no migration planned). Add an explicit index migration step before 1.0 if
-  needed.
+- **Pre-1.0 index migration — decision (T4.6, 2026-07-05: document/defer).** The hardening pass
+  replaced single-field `executionTime` and outgoing `ownerId` indexes with compound alternatives
+  (`MongoDbMessageStore.Admin.cs:18-64`). Existing deployments keep the old single-field indexes in
+  place — MongoDB does not drop superseded indexes automatically, and `EnsureIndexesAsync` only
+  creates, never drops. **Decision: harmless, deferred.** The old indexes remain valid (just
+  suboptimal for the new query patterns) and impose no correctness issue; every current consumer
+  is a pre-1.0 beta deployment where a `RebuildAsync` (which recreates all indexes from scratch)
+  is an acceptable manual remedy if desired. **If revisited before 1.0:** add an explicit
+  `Admin.MigrateAsync()` step that drops the specific superseded index names before
+  `EnsureIndexesAsync` runs — no migration step exists today.
 
 ## Deferred from saga persistence (S6–S14)
 
@@ -132,10 +147,16 @@ Promote to GitHub issues before the first public release.
     `SagaDescriptorBuilder.Build(_runtime.Options.HandlerGraph, sagaType, "MongoDb")`. Until then, the
     reflection is pinned to and validated against the `external/wolverine` submodule (WolverineFx 6.x).
 
-- **Saga-specific indexes.** The saga collections have only the implicit `_id` unique
-  index. If query patterns (filtering sagas by status fields, range scans) are added
-  later, per-collection indexes may be worthwhile. The `RebuildAsync` path that creates
-  envelope indexes would be the right place to add them.
+- **Saga-specific indexes — decision (T4.6, 2026-07-05: document/defer).** `EnsureIndexesAsync`
+  (`MongoDbMessageStore.Admin.cs:18-64`) creates indexes on the system collections only (incoming,
+  outgoing, dead-letter, node-records); saga collections (`wolverine_saga_*`) get only the
+  implicit MongoDB `_id` unique index from the driver. **Decision: sufficient today, deferred.**
+  The current saga access pattern is exclusively load/insert/update/delete by `_id` (via
+  `MongoSagaOperations` in `SagaFrames.cs`), which the implicit index already serves. Secondary
+  indexes (filtering sagas by status fields, range scans) are only worth the write-amplification
+  cost once a concrete query pattern demands one. **Extension point:** `EnsureIndexesAsync` /
+  `RebuildAsync` (`MongoDbMessageStore.Admin.cs`) is where per-collection saga indexes belong when
+  that need arises — no code change now.
 
 ## Untested-but-inspected paths (add deterministic coverage later)
 
