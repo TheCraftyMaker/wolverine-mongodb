@@ -5,11 +5,15 @@ Promote to GitHub issues before the first public release.
 
 ## Deferred from the post-review hardening pass
 
-- **`INodeAgentPersistence.ClearAllAsync` scope.** It currently clears only the
-  node and assignment collections. Consider also clearing the counter, locks,
-  node-records, and agent-restriction collections (or document that
-  `IMessageStoreAdmin.RebuildAsync`/`ClearAllAsync` is the full reset and the
-  node-level one is intentionally narrow).
+- **`INodeAgentPersistence.ClearAllAsync` scope — resolved (T4.4, 2026-07-05: documented as
+  intentionally narrow).** It clears only the node and assignment collections
+  (`MongoDbMessageStore.NodeAgents.cs`) — the operational surface `INodeAgentPersistence`
+  owns. It does **not** clear the counter, locks, node-records, or agent-restriction
+  collections. `IMessageStoreAdmin.RebuildAsync`/`ClearAllAsync`
+  (`MongoDbMessageStore.Admin.cs`) is the full system reset: it clears all six system
+  collections plus every `wolverine_saga_*` collection, and is what the test harness
+  (`AppFixture.ClearAll()` → `RebuildAsync()`) actually calls. No code change; the
+  boundary is now documented at the `ClearAllAsync` call site.
 
 - **Node-number allocation.** The counter is monotonically increasing and never
   reuses freed slots. A lowest-free-slot reuse strategy would keep node numbers

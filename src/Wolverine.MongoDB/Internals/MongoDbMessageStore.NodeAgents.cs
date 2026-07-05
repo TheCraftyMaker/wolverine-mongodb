@@ -174,6 +174,11 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
             Builders<NodeRecordDocument>.Filter.Lt(x => x.Timestamp, cutoff));
     }
 
+    // Intentionally narrow: clears only node + assignment state, the operational surface
+    // INodeAgentPersistence owns. Counters/locks/node-records/agent-restrictions are left
+    // alone. A full system reset is IMessageStoreAdmin.ClearAllAsync/RebuildAsync
+    // (MongoDbMessageStore.Admin.cs), which clears all six system collections plus every
+    // wolverine_saga_* collection — that is the method the test harness calls.
     public async Task ClearAllAsync(CancellationToken cancellationToken)
     {
         await NodeDocs.DeleteManyAsync(FilterDefinition<NodeDocument>.Empty, cancellationToken);

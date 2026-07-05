@@ -172,7 +172,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T4.1** ✅ | `demo/unit-of-work-example` | demo: MongoDbUnitOfWork example handler + test | **D5** | **Done** — RecordOrderAuditHandler + OrderAuditTests, 41/41 demo suite green | Sonnet |
 | **T4.2** ✅ | `demo/saga-cascade-consumer` | demo: fulfillment read-model projector for saga cascades | **D5** | **Done** — FulfillmentStatusProjector + SagaFlowTests cascade fact, 42/42 demo suite green | Sonnet |
 | **T4.3** ✅ | `feat/mongo-database-registration` | feat/docs: resolve unkeyed IMongoDatabase registration | **D6, T1.1** | **Done** — route (a): documented as a consumer constraint (README + CLAUDE + FOLLOWUPS); no code change | **Opus / Fable 5** |
-| **T4.4** | `feat/node-clearall-scope` | feat: INodeAgentPersistence.ClearAllAsync scope | **D4** | Blocked by: D4 | Sonnet |
+| **T4.4** ✅ | `feat/node-clearall-scope` | feat: INodeAgentPersistence.ClearAllAsync scope | **D4** | **Done** — documented as intentionally narrow (D4's classification); no code-behavior change; 177/177 net9/net10 | Sonnet |
 | **T4.5** | `test/multinode-leadership-ungate` | test: re-evaluate + un-gate multinode leadership compliance | **D4** | Blocked by: D4 | **Opus 4.8** |
 | **T4.6** | `docs/pre-1.0-hardening-backlog` | docs: pre-1.0 hardening backlog (node reuse, index migration, fencing, saga indexes) | **D4** | Blocked by: D4 | Sonnet |
 | **V1** | `test/suite-completion-regression` | test: full cross-feature regression sweep | **T1.1–T4.6 merged** | Blocked by: all impl/test tasks | Sonnet |
@@ -568,8 +568,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **D4.**
 - **Blocking status:** **Blocked by: D4.**
 
-- [ ] **Step 1:** Decide widen-vs-document per D4; implement or document.
-- [ ] **Step 2:** Adjust/confirm tests; full suite green. Commit (`feat: INodeAgentPersistence.ClearAllAsync scope`).
+- [x] **Step 1:** Decided per D4's classification (document-as-narrow-by-design): `ClearAllAsync` stays narrow — `IMessageStoreAdmin.RebuildAsync`/`ClearAllAsync` is the full reset, and the test harness already calls that path. Documented the boundary with a comment at the `ClearAllAsync` call site (`MongoDbMessageStore.NodeAgents.cs`), `FOLLOWUPS.md`, and `CLAUDE.md`.
+- [x] **Step 2:** No behavior change, so no new test needed; confirmed full suite still green: 177/177 net9.0 + 177/177 net10.0. Commit (`feat: INodeAgentPersistence.ClearAllAsync scope`).
 
 ### Task T4.5: Re-evaluate + un-gate multinode leadership compliance
 
