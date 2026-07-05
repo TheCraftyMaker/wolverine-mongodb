@@ -1,4 +1,5 @@
 using OrderDemo.Contracts.Commands;
+using OrderDemo.Contracts.Commands.Audit;
 using OrderDemo.Contracts.Commands.Notes;
 using OrderDemo.Infrastructure.Persistence;
 using Wolverine;
@@ -88,6 +89,18 @@ public static class OrdersEndpoints
         .WithSummary("Delete an order note")
         .WithDescription("Demonstrates [Entity(\"NoteId\")] loading + Delete<OrderNote> as a return-value side effect.");
 
+        // POST /orders/{id}/audit — record an audit entry (MongoDbUnitOfWork showcase)
+        orders.MapPost("/{id:guid}/audit", async (Guid id, AuditBody body, IMessageBus bus) =>
+        {
+            await bus.InvokeAsync(new RecordOrderAuditCommand(id, body.Action, body.PerformedBy));
+            return Results.Accepted();
+        })
+        .WithSummary("Record an audit entry for an order")
+        .WithDescription(
+            "Demonstrates MongoDbUnitOfWork as a write surface: the handler writes directly to the " +
+            "order_audit_entries collection through uow.Collection<T>(name), with the session threaded " +
+            "automatically so the write commits atomically with the outbox.");
+
         // GET /orders — list all orders (read model)
         orders.MapGet("/", async (OrderSummaryRepository summaries, CancellationToken ct) =>
         {
@@ -105,4 +118,5 @@ public static class OrdersEndpoints
     public sealed record ConfirmBody(DateTimeOffset DeliveredAt);
     public sealed record NoteBody(string Text, string Author);
     public sealed record EditNoteBody(string NewText);
+    public sealed record AuditBody(string Action, string PerformedBy);
 }
