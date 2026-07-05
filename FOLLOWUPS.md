@@ -85,10 +85,22 @@ Promote to GitHub issues before the first public release.
 
 ## Deferred from saga persistence (S6–S14)
 
-- **`ISagaStoreDiagnostics` not implemented.** RavenDb implements this interface (Cosmos
-  does not). It exposes saga-explorer tooling for the Wolverine dashboard. Deferred —
-  the saga storage itself is complete; implement `ISagaStoreDiagnostics` separately once
-  the dashboard API stabilizes.
+- **`ISagaStoreDiagnostics` — implemented (T2.1, PR #131), with an upstream-contribution caveat.**
+  MongoDB now implements this saga-explorer interface (RavenDb does; Cosmos does not) in
+  `Internals/MongoDbSagaStoreDiagnostics.cs`, registered by `UseMongoDbPersistence`. Functional
+  test coverage lands in T2.2 (`test/saga-store-diagnostics`).
+  - **⚠️ Address when contributing this provider upstream to Wolverine.** The implementation reaches
+    three Wolverine core members that are `internal` and therefore inaccessible from this **external**
+    package — it is not on Wolverine's `[assembly: InternalsVisibleTo]` list, unlike the in-repo
+    RavenDb/Marten/EF Core/RDBMS providers, which call them directly: `SagaDescriptorBuilder.Build`,
+    `WolverineOptions.HandlerGraph`, and `HandlerGraph.Container`. They are bridged via isolated,
+    cached, non-throwing reflection in the three `Resolve*` methods of `MongoDbSagaStoreDiagnostics`,
+    each carrying a `// TODO(upstream)` marker. When this provider is moved into the Wolverine repo,
+    add `Wolverine.MongoDB` to Wolverine's `[InternalsVisibleTo]` (alongside `Wolverine.RavenDb`) and
+    collapse each reflective bridge to the direct member access every sibling provider uses — e.g.
+    `buildDescriptor` becomes the one-liner
+    `SagaDescriptorBuilder.Build(_runtime.Options.HandlerGraph, sagaType, "MongoDb")`. Until then, the
+    reflection is pinned to and validated against the `external/wolverine` submodule (WolverineFx 6.x).
 
 - **Saga-specific indexes.** The saga collections have only the implicit `_id` unique
   index. If query patterns (filtering sagas by status fields, range scans) are added

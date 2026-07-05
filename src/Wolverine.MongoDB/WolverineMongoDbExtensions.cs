@@ -61,6 +61,20 @@ public static class WolverineMongoDbExtensions
 
         options.CodeGeneration.InsertFirstPersistenceStrategy<MongoDbPersistenceFrameProvider>();
         options.CodeGeneration.ReferenceAssembly(typeof(WolverineMongoDbExtensions).Assembly);
+
+        // CritterWatch / saga-explorer diagnostic surface — MongoDB owns every saga whose state is
+        // stored in this database (matches RavenDb; above Cosmos, which does not register it). The
+        // runtime aggregator fans out across all registered ISagaStoreDiagnostics, so this lives
+        // next to the Marten / EF Core / RavenDb ones for hosts that mix saga storages. Mirrors
+        // WolverineRavenDbExtensions.cs:33-36. The impl takes IMongoClient (not the DI-registered
+        // IMongoDatabase) so it acquires the database handle itself, and databaseName is closed over
+        // from this method's parameter — the same name every collection in the store uses.
+        options.Services.AddSingleton<ISagaStoreDiagnostics>(sp =>
+            new MongoDbSagaStoreDiagnostics(
+                sp.GetRequiredService<Wolverine.Runtime.IWolverineRuntime>(),
+                sp.GetRequiredService<IMongoClient>(),
+                databaseName));
+
         return options;
     }
 }
