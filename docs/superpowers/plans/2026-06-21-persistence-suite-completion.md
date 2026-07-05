@@ -166,7 +166,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T1.1** ✅ | `feat/entity-storage-action-persistence` | feat: generic entity + IStorageAction persistence | **D6** | **Done** — unblocks T1.2/T1.3/T4.3 | **Opus / Fable 5** |
 | **T1.2** ✅ | `test/entity-atomicity-coexistence` | test: entity atomicity + saga/entity coexistence regression | **T1.1** | **Done** — 4 facts green net9/net10; full single-node suite 171 | **Opus / Fable 5** |
 | **T1.3** ✅ | `demo/entity-and-storage-action` | demo: `[Entity]`/`IStorageAction` handler + safety-net tests | **T1.1** | **Done** — 39/39 demo tests green | Sonnet |
-| **T2.1** | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | Blocked by: D2 | **Opus / Fable 5** |
+| **T2.1** ✅ | `feat/saga-store-diagnostics` | feat: MongoDbSagaStoreDiagnostics + registration | **D2** | **Done** — unblocks T2.2 | **Opus / Fable 5** |
 | **T2.2** | `test/saga-store-diagnostics` | test: MongoDb saga store diagnostics | **T2.1** | Blocked by: T2.1 | Sonnet |
 | **T3.1** | `docs/parity-non-goals` | docs: parity capabilities — non-goals + rationale (+ optional listener stub note) | **D3** | Blocked by: D3 | Sonnet |
 | **T4.1** | `demo/unit-of-work-example` | demo: MongoDbUnitOfWork example handler + test | **D5** | Blocked by: D5 | Sonnet |
@@ -483,8 +483,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **D2.**
 - **Blocking status:** **Blocked by: D2** (independent of Tier 1 — runs in parallel with the whole Tier-1 chain).
 
-- [ ] **Step 1:** Implement `MongoDbSagaStoreDiagnostics` (saga index, reflection read/list, count clamp, descriptor/state building) per the D2 RavenDb→MongoDB mapping.
-- [ ] **Step 2:** Register `ISagaStoreDiagnostics` in `UseMongoDbPersistence`; confirm the full library suite still green (startup + existing tests). Commit (`feat: MongoDbSagaStoreDiagnostics + registration`).
+- [x] **Step 1:** Implemented `MongoDbSagaStoreDiagnostics` mirroring `RavenDbSagaStoreDiagnostics`: lazy double-checked saga index (keyed by `FullName` + `Name`) filtered by `MongoDbPersistenceFrameProvider.CanPersist`; reflective `MakeGenericMethod` dispatch to typed private helpers `readSagaAsync<TSaga>` (`Find(Eq("_id", id))`) and `querySagasAsync<TSaga>` (`Find(Empty).Limit(count)`) against `MongoConstants.SagaCollectionName`; `count` clamped to `[0,1000]`; native `_id` matching (no `.ToString()` coercion) with identity extraction via `BsonClassMap...IdMemberMap.Getter`; `SagaInstanceState`/`SagaDescriptor` via the core helpers tagged `"MongoDb"`; RavenDb-parity `[UnconditionalSuppressMessage]` AOT annotations on the reflection dispatch + STJ. **Design deviation (confirmed with user, upstream-move-first):** `SagaDescriptorBuilder.Build`, `WolverineOptions.HandlerGraph`, and `HandlerGraph.Container` are all `internal` and unreachable from this **external** package (not on Wolverine's `[InternalsVisibleTo]`, unlike RavenDb/Marten/EF/RDBMS which call them directly). Reached via an isolated, cached, non-throwing reflective bridge (the three `Resolve*` methods) with a `TODO(upstream)` to collapse each to the direct member access every sibling provider uses once contributed into Wolverine.
+- [x] **Step 2:** Registered `AddSingleton<ISagaStoreDiagnostics>` in `UseMongoDbPersistence` (mirrors `WolverineRavenDbExtensions.cs:33-36`; takes `IMongoClient` + the threaded `databaseName`, resolving the DB handle itself). Library builds clean (0 warnings, net9.0 + net10.0). Full single-node suite green — **342 tests passed** on both TFMs; registration did not break startup or any existing test. Commit (`feat: MongoDbSagaStoreDiagnostics + registration`).
 
 ### Task T2.2: MongoDb saga store diagnostics test
 

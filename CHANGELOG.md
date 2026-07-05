@@ -8,6 +8,16 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Added
+- **Saga store diagnostics (`ISagaStoreDiagnostics`).** MongoDB now implements Wolverine's
+  read-only saga-explorer surface — matching RavenDb, and above Cosmos, which does not
+  implement it — so CritterWatch and other monitoring tools can list the Mongo-owned saga
+  types, read a single saga instance by id, and peek at recent instances. Registered
+  automatically by `UseMongoDbPersistence`. Reads run against the `wolverine_saga_<type>`
+  collections with native `_id` matching (no string coercion); `count` is clamped to
+  `[0, 1000]`; descriptors are tagged `"MongoDb"`. Registration does not affect startup or
+  the existing inbox/outbox/saga behavior (full single-node suite green on net9.0 + net10.0).
+
 ## [0.1.0-beta.7] - 2026-06-21
 
 ### Added
