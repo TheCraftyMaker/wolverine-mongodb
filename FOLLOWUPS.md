@@ -104,10 +104,13 @@ Promote to GitHub issues before the first public release.
   matching every provider except Marten. See `docs/superpowers/plans/2026-06-21-parity-non-goals.md`
   for the app-level `is_deleted` workaround.
 
-- **Demo app has no `MongoDbUnitOfWork` example.** The demo uses the repository
-  pattern with explicit `IClientSessionHandle` threading, which is the fuller
-  production example. Add a second handler (or a variant endpoint) that accepts
-  `MongoDbUnitOfWork` directly so consumers can compare both patterns side by side.
+- **Demo app has no `MongoDbUnitOfWork` example — resolved (T4.1).** `RecordOrderAuditHandler`
+  (`demo/src/OrderDemo.Application/Audit/RecordOrderAuditHandler.cs`) accepts `MongoDbUnitOfWork`
+  directly and writes an `OrderAuditEntry` through `Collection<T>("order_audit_entries")` —
+  no repository layer — wired to `POST /orders/{id}/audit`. `OrderAuditTests` proves the write
+  rolls back with the surrounding transaction (`cmd.ForceFailure` hook, mirroring
+  `saga_atomicity.cs`'s pattern). Sits alongside the existing repository +
+  `IClientSessionHandle` example so consumers can compare both patterns side by side.
 
 - **Demo saga cascade events have no consumer — resolved (T4.2).** `OrderFulfillmentSaga` returns
   `FulfillmentShippedEvent` / `FulfillmentCompletedEvent`; `FulfillmentStatusProjector`

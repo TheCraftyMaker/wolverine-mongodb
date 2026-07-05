@@ -20,12 +20,17 @@ demo/
     OrderDemo.Api/              ← Entry point: Wolverine + Mongo + Rabbit wiring, endpoints
     OrderDemo.Application/      ← Command handlers (PlaceOrder, ShipOrder, CancelOrder, ApplyDiscount)
                                    Sagas/OrderFulfillmentSaga.cs ← saga: Guid id, start/continue/complete
+                                   Notes/OrderNoteHandler.cs ← [Entity]/Insert|Update|Delete<OrderNote>
+                                   Audit/RecordOrderAuditHandler.cs ← MongoDbUnitOfWork example (no repository)
     OrderDemo.Contracts/        ← Commands + application events + saga trigger/continue/complete messages
     OrderDemo.Domain/           ← Aggregate root (Order), domain events, value objects
     OrderDemo.Infrastructure/   ← Repositories, read-model projector, DI bootstrap
+                                   Projectors/FulfillmentStatusProjector.cs ← saga-cascade-event consumer
   tests/
     OrderDemo.IntegrationTests/ ← Testcontainers-based end-to-end tests
                                    SagaFlowTests.cs ← 8 saga integration flows (incl. cascade projection)
+                                   OrderNoteFlowTests.cs ← entity persistence flow tests
+                                   OrderAuditTests.cs ← MongoDbUnitOfWork atomicity tests
   docker-compose.yml            ← MongoDB replica set + RabbitMQ
   Directory.Packages.props      ← Central package versions (independent from root)
   nuget.config                  ← Points to nuget.org (local-ci source added by CI)
@@ -88,10 +93,27 @@ public static async Task<AppEvent> Handle(Command cmd, IClientSessionHandle sess
 Repositories accept `IClientSessionHandle` on all mutating methods. Read methods don't need it.
 
 **Alternative — `MongoDbUnitOfWork`:** for handlers that write directly to collections without
-a repository layer, the library provides `MongoDbUnitOfWork` as a handler parameter. It
-threads the session automatically so it cannot be forgotten. The demo does not use it (the
-repository pattern is the fuller example), but it is documented in the library
-[README](../README.md#domain-write-atomicity).
+a repository layer, `RecordOrderAuditHandler.cs` accepts `MongoDbUnitOfWork` as a handler
+parameter, which threads the session automatically so it cannot be forgotten:
+
+```csharp
+public static async Task Handle(RecordOrderAuditCommand cmd, MongoDbUnitOfWork uow, CancellationToken ct)
+{
+    var entry = new OrderAuditEntry { Id = Guid.NewGuid(), OrderId = cmd.OrderId, Action = cmd.Action };
+    await uow.Collection<OrderAuditEntry>("order_audit_entries").InsertOneAsync(entry, ct);
+}
+```
+
+`cmd.ForceFailure` is a test-only hook (`OrderAuditTests`) proving the write above rolls back
+with the surrounding transaction, mirroring `saga_atomicity.cs`'s `Boom` flag pattern. Full API
+documented in the library [README](../README.md#domain-write-atomicity).
+
+**Third option — no session parameter at all:** `OrderNoteHandler.cs` demonstrates generic
+entity persistence (`[Entity]` load + `Insert`/`Update`/`Delete<T>` return values). Wolverine's
+generated frame handles the session entirely — the handler never sees `IClientSessionHandle` or
+`MongoDbUnitOfWork`. See the library [README](../README.md#entity-persistence). Entities have
+no built-in optimistic concurrency (unlike sagas' `Version` guard); the repository pattern above
+remains the path for app-controlled OCC.
 
 ---
 
@@ -118,6 +140,8 @@ Test classes:
 - `SagaFlowTests` — 8 saga integration flows (start, continue, complete, missing-state,
   duplicate-message idempotency, across-restart state survival, saga/projector coexistence,
   saga-cascade-event projection via `FulfillmentStatusProjector`)
+- `OrderNoteFlowTests` — entity persistence flows (`[Entity]`/`Insert`/`Update`/`Delete<OrderNote>`)
+- `OrderAuditTests` — `MongoDbUnitOfWork` write + rollback atomicity (`RecordOrderAuditHandler`)
 
 ---
 

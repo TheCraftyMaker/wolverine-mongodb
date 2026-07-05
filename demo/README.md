@@ -220,6 +220,48 @@ opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
 This tells Wolverine to run each handler independently. Without it, `SagaChain` would
 silently drop the projector and the read model would stop updating.
 
+## Entity persistence (`[Entity]` / `Insert`, `Update`, `Delete<T>`)
+
+`OrderNoteHandler` demonstrates Wolverine's generic entity persistence surface against a
+plain `OrderNote` document — no repository, no `IClientSessionHandle` parameter, no manual
+session handling:
+
+```csharp
+public static Insert<OrderNote> Handle(AddOrderNoteCommand cmd)
+    => new(new OrderNote { Id = Guid.NewGuid().ToString(), Text = cmd.Text, ... });
+
+public static Update<OrderNote> Handle(EditOrderNoteCommand cmd, [Entity("NoteId")] OrderNote note)
+{
+    note.Text = cmd.NewText;
+    return new Update<OrderNote>(note);
+}
+
+public static Delete<OrderNote> Handle(DeleteOrderNoteCommand cmd, [Entity("NoteId")] OrderNote note)
+    => new(note);
+```
+
+`[Entity("NoteId")]` loads the note whose `_id` matches `cmd.NoteId` before the handler runs
+(skipping the handler with a 404-style outcome if it's missing); returning `Insert`/`Update`/
+`Delete<OrderNote>` persists the change afterward, inside the same MongoDB transaction as any
+outbox writes. The note is stored in the `ordernote` collection (one un-prefixed collection per
+entity type — see the library README's [Entity persistence](../README.md#entity-persistence)).
+
+**Try it:**
+```bash
+# Add a note
+curl -X POST http://localhost:5000/orders/{orderId}/notes \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Customer requested gift wrap","author":"support-agent"}'
+
+# Edit it (use the noteId from the response above)
+curl -X POST http://localhost:5000/orders/notes/{noteId} \
+  -H "Content-Type: application/json" \
+  -d '{"newText":"Customer requested gift wrap + card"}'
+
+# Delete it
+curl -X DELETE http://localhost:5000/orders/notes/{noteId}
+```
+
 ## Key patterns demonstrated
 
 | Pattern | Where to look |
@@ -232,28 +274,37 @@ silently drop the projector and the read model would stop updating.
 | Handler in non-entry assembly | `Program.cs` — `opts.Discovery.IncludeAssembly(...)` |
 | Saga start / continue / complete | `OrderFulfillmentSaga.cs` |
 | Saga + projector co-handlers | `Program.cs` — `MultipleHandlerBehavior.Separated` |
+| Saga-cascade read-model consumer | `FulfillmentStatusProjector.cs` |
+| `[Entity]` load + `Insert`/`Update`/`Delete<T>` | `OrderNoteHandler.cs` |
+| `MongoDbUnitOfWork` write surface (no repository) | `RecordOrderAuditHandler.cs` |
 
 ## Session-bound writes
 
-The demo's repository pattern (explicit `IClientSessionHandle` threading through
-repository methods) is the full-control approach — repositories own the session
-lifetime contract and are testable in isolation.
+The demo shows two ways to write to MongoDB inside the Wolverine-managed transaction:
 
-For handlers that write directly to MongoDB collections without a repository
-layer, `MongoDbUnitOfWork` is a lighter-weight alternative — accept it as a
-handler parameter and the session is threaded automatically:
+**Repository pattern** (`OrderRepository` + `PlaceOrderHandler`) — explicit
+`IClientSessionHandle` threading through repository methods. Full control; repositories own
+the session lifetime contract and are testable in isolation. This is also the path to
+app-controlled optimistic concurrency (see `OrderRepository.UpdateAsync`'s version-guarded
+`ReplaceOneAsync`), since generic entity persistence (below) has no built-in OCC.
+
+**`MongoDbUnitOfWork`** (`RecordOrderAuditHandler`) — for handlers that write directly to a
+collection without a repository layer. Accept it as a handler parameter and the session is
+threaded automatically:
 
 ```csharp
-// No repository needed — the unit of work threads the session for you.
-public static async Task<OrderPlaced> Handle(PlaceOrder cmd, MongoDbUnitOfWork mongo, CancellationToken ct)
+public static async Task Handle(RecordOrderAuditCommand cmd, MongoDbUnitOfWork uow, CancellationToken ct)
 {
-    await mongo.Collection<Order>("orders").InsertOneAsync(new Order(cmd.OrderId), ct);
-    return new OrderPlaced(cmd.OrderId);
+    var entry = new OrderAuditEntry { Id = Guid.NewGuid(), OrderId = cmd.OrderId, Action = cmd.Action };
+    await uow.Collection<OrderAuditEntry>("order_audit_entries").InsertOneAsync(entry, ct);
 }
 ```
 
+Try it: `curl -X POST http://localhost:5000/orders/{orderId}/audit -H "Content-Type: application/json" -d '{"action":"note-added","performedBy":"support-agent"}'`
+
 See the library [README](../README.md#domain-write-atomicity) for the full
-`MongoDbUnitOfWork` API.
+`MongoDbUnitOfWork` API, and [Entity persistence](../README.md#entity-persistence) above for
+the third option — no session parameter at all.
 
 ## Configuration
 

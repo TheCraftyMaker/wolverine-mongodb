@@ -278,6 +278,63 @@ Wolverine's `SagaChain` silently drops the non-saga handler:
 opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
 ```
 
+## Entity persistence
+
+`Wolverine.MongoDB` also implements Wolverine's generic persistence surface — `[Entity]`
+parameter loading and `Insert<T>`/`Update<T>`/`Store<T>`/`Delete<T>`/`IStorageAction<T>`
+return-value side effects — for any plain document type, not just `Saga` subclasses. No
+additional registration is required.
+
+```csharp
+using Wolverine.Persistence;
+
+// Insert<T> — create a new document. Wolverine's generated frame upserts it
+// into the "ordernote" collection inside the active transaction.
+public static Insert<OrderNote> Handle(AddOrderNoteCommand cmd)
+    => new(new OrderNote { Id = Guid.NewGuid().ToString(), Text = cmd.Text });
+
+// [Entity] loads the document by id before the handler runs; Update<T>/Delete<T>
+// persist the mutated (or removed) document after it returns.
+public static Update<OrderNote> Handle(EditOrderNoteCommand cmd, [Entity("NoteId")] OrderNote note)
+{
+    note.Text = cmd.NewText;
+    return new Update<OrderNote>(note);
+}
+```
+
+- **Collection naming:** each entity type gets its own collection named
+  `<lowercased-type-name>` (e.g. `OrderNote` → `ordernote`) — un-prefixed, unlike the
+  `wolverine_saga_` sagas, because entity collections are application-owned data, not a
+  Wolverine system collection. `IMessageStoreAdmin.ClearAllAsync`/`RebuildAsync` never
+  touch them.
+- **Write semantics: upsert, no optimistic concurrency.** `Insert`/`Update`/`Store` all
+  compile to the same upserting write (`ReplaceOneAsync` with `IsUpsert = true`); `Delete`
+  removes by the entity's id. Plain entities do not carry a `Saga.Version`-style guard, so
+  concurrent writes are last-write-wins — matching Wolverine's Cosmos/RavenDb providers. If
+  your handler needs optimistic concurrency, use the repository pattern (accept
+  `IClientSessionHandle` directly and guard your own `ReplaceOneAsync` filter on a version
+  field), the same pattern the demo's `OrderRepository` uses for the `Order` aggregate.
+- **Id extraction:** the entity's `_id` value is read generically via the MongoDB driver's
+  class map (`BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap`) — the same convention the
+  driver itself uses to determine `_id`, not a `.ToString()` coercion.
+- **`[Entity]` not-found behavior** follows Wolverine core's `EntityAttribute` defaults
+  (`Required = true` skips the handler with a 404-style outcome when the entity is missing;
+  `MaybeSoftDeleted` is not applicable — see [Known limitations](#known-limitations)).
+- Entity writes run on the same MongoDB session as saga and outbox writes, so they commit
+  atomically with everything else the handler does.
+
+See the demo's [`OrderNoteHandler`](demo/src/OrderDemo.Application/Notes/OrderNoteHandler.cs)
+for a complete `Insert`/`Update`/`Delete` example wired to HTTP endpoints.
+
+## Saga store diagnostics
+
+`Wolverine.MongoDB` implements Wolverine's read-only `ISagaStoreDiagnostics` surface (the
+interface CritterWatch and other saga-explorer tooling use), matching RavenDb — Cosmos does
+not implement it. It is registered automatically by `UseMongoDbPersistence`; no extra setup
+is needed. Saga descriptors are tagged `"MongoDb"`, and reads target the same
+`wolverine_saga_<type>` collections the saga frames write to, matching by native `_id` (no
+string coercion). `ListSagaInstancesAsync` clamps its `count` argument to `[0, 1000]`.
+
 ## Multinode support
 
 `DurabilityMode.Balanced` is supported. MongoDB has no native control transport,
@@ -358,12 +415,14 @@ legitimately take over.
   clock is significantly skewed relative to others may not correctly observe lease
   expiry. Keep node clocks synchronized to well within the lease duration (NTP is
   sufficient for the default 1-minute lease).
-- **The `LeadershipElectionCompliance` suite is compile-gated.** The upstream
-  compliance facts require the lowest-numbered surviving node to win the election
-  race — an emergent property of very fast stores. Our `w:majority` lock cannot
-  guarantee this ordering, so the suite stays gated behind `#if RUN_MULTINODE`,
-  matching how Wolverine's own Cosmos provider gates the same facts `[Flaky]`.
-  Production confidence comes from the cross-node message-guarantee tests
+- **`LeadershipElectionCompliance` runs unconditionally in CI.** Earlier
+  WolverineFx releases required the lowest-numbered surviving node to win the
+  election race — a property our `w:majority` lock could not guarantee — so the
+  suite was compile-gated behind `#if RUN_MULTINODE`. WolverineFx 6.9.0 reworked
+  those facts around the "any healthy node leads" model this provider already
+  implements, so the gate was removed after 5 consecutive green runs on both
+  net9.0 and net10.0 (10/10 runs, 17/17 facts each). Production confidence also
+  continues to come from the cross-node message-guarantee tests
   (`multinode_end_to_end.cs`): exactly-once scheduled delivery and dead-node
   rescue, each verified with five consecutive green runs.
 
@@ -448,6 +507,15 @@ required beyond Docker Desktop.
 - **High-throughput contention.** The `findAndModify` lock approach serializes
   access per document; under very high concurrency this can bottleneck. Tune
   write concern and indexes accordingly.
+- **Four RDBMS/Marten-only capabilities are explicit non-goals**, matching the
+  closest document-store analogues (Cosmos, RavenDb): multi-tenancy (route on a
+  tenant-id field in your message payload, or run a separate host per tenant),
+  durable listeners (`IListenerStore` stays `NullListenerStore` — only matters if
+  you opt into `EnableDynamicListeners`), query-spec frames
+  (`ICompiledQuery<,>`-style compile-time queries — a Marten/EF Core concept with
+  no MongoDB analogue), and soft-delete (`[Entity(MaybeSoftDeleted = false)]` plus
+  a manual `is_deleted` filter is the app-level equivalent). See `CLAUDE.md`
+  ("Parity Capabilities — Non-Goals") for the full rationale per capability.
 
 ## License
 
