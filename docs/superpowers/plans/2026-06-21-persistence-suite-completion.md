@@ -175,7 +175,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T4.4** ✅ | `feat/node-clearall-scope` | feat: INodeAgentPersistence.ClearAllAsync scope | **D4** | **Done — PR #137 merged** — documented as intentionally narrow (D4's classification); no code-behavior change; 177/177 net9/net10 | Sonnet |
 | **T4.5** ✅ | `test/multinode-leadership-ungate` | test: re-evaluate + un-gate multinode leadership compliance | **D4** | **Done** — un-gated; 5× consecutive green on net9.0 + net10.0 (10/10, full `Category=multinode` suite, 17/17 incl. 13 leadership facts); `#if RUN_MULTINODE` removed; CI multinode step covers it via `[Trait]` (no ci.yml change) | **Opus 4.8** |
 | **T4.6** ✅ | `docs/pre-1.0-hardening-backlog` | docs: pre-1.0 hardening backlog (node reuse, index migration, fencing, saga indexes) | **D4** | **Done** — four dated document/defer decisions recorded in FOLLOWUPS.md + CLAUDE.md; no code change | Sonnet |
-| **V1** | `test/suite-completion-regression` | test: full cross-feature regression sweep | **T1.1–T4.6 merged** | Blocked by: all impl/test tasks | Sonnet |
+| **V1** ✅ | `test/suite-completion-regression` | test: full cross-feature regression sweep | **T1.1–T4.6 merged** | **Done** — clean regression sweep, no code/CI change needed; no PR (verification branch only) | Sonnet |
 | **V2** | `docs/suite-completion-sweep` | docs: suite completion + upstream-contribution notes | **T1.1–T4.6 merged** | Blocked by: all impl tasks (drafted in parallel) | Sonnet |
 | **V3** | *(no branch/PR)* | final verification on `main` (+ optional release) | **V1, V2 merged** | Blocked by: V1, V2 | Sonnet |
 
@@ -608,8 +608,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **T1.1–T4.6 merged.**
 - **Blocking status:** **Blocked by: all impl/test tasks.**
 
-- [ ] **Step 1:** Run all suites + pack + demo; record results.
-- [ ] **Step 2:** Confirm CI coverage; fix any gap; report. Commit only if CI changed.
+- [x] **Step 1:** Run all suites + pack + demo; record results.
+- [x] **Step 2:** Confirm CI coverage; fix any gap; report. Commit only if CI changed.
 
 ### Task V2: Documentation sweep + upstream-contribution notes
 
