@@ -146,6 +146,35 @@ When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op — documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
 
+### The registered `IMongoDatabase`
+
+`UseMongoDbPersistence("my_database")` registers a single **unkeyed**
+`IMongoDatabase` (pointing at `my_database`) in the container. Every
+code-generated handler frame — the transaction frame, saga and `[Entity]`
+persistence, and the `MongoDbUnitOfWork` write surface — resolves the database
+through this one registration. The database the generated code writes to is
+therefore fixed at registration time and shared with any `IMongoDatabase` you
+inject into your own handlers.
+
+Because the registration is unkeyed, **an app that also registers its own
+unkeyed `IMongoDatabase` collides with it.** `Microsoft.Extensions.DependencyInjection`
+resolves the *last* registration for a single-service request, so registration
+order alone would decide which database the Wolverine frames (and your own
+injections) resolve — a subtle way for writes to land in the wrong database. If
+your app needs a database handle of its own, do **not** register a second
+unkeyed `IMongoDatabase`. Instead:
+
+- reuse the one Wolverine registers (it points at the persistence database), or
+- inject `IMongoClient` and call `client.GetDatabase("other_database")` for a
+  different database, or
+- register your database under a **keyed** service (or a small wrapper type) and
+  resolve that explicitly, leaving the unkeyed `IMongoDatabase` to Wolverine.
+
+This is a deliberate, documented consumer constraint. The generated frames
+resolve `IMongoDatabase` by type, so a keyed or dedicated registration would be
+a high-blast-radius change to code generation for a rare conflict — not worth it
+while a single Wolverine database is the overwhelmingly common case.
+
 ## Saga persistence
 
 `Wolverine.MongoDB` supports [Wolverine sagas](https://wolverinefx.net/guide/durability/sagas.html)
@@ -412,6 +441,10 @@ required beyond Docker Desktop.
 - **Multinode leadership is lease-based, not fenced.** See
   [Multinode known limitations](#multinode-known-limitations) for the fencing
   caveat and clock-skew constraint.
+- **`UseMongoDbPersistence` registers a single unkeyed `IMongoDatabase`.** An app
+  that registers its own unkeyed `IMongoDatabase` conflicts with it. See
+  [The registered `IMongoDatabase`](#the-registered-imongodatabase) for the
+  workarounds.
 - **High-throughput contention.** The `findAndModify` lock approach serializes
   access per document; under very high concurrency this can bottleneck. Tune
   write concern and indexes accordingly.
