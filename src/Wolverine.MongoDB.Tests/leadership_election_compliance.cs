@@ -1,4 +1,3 @@
-#if RUN_MULTINODE
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
 using Wolverine.ComplianceTests;
@@ -7,30 +6,26 @@ using Xunit.Abstractions;
 
 namespace Wolverine.MongoDB.Tests;
 
-// MULTI-NODE LEADERSHIP-ELECTION COMPLIANCE — still compile-gated behind RUN_MULTINODE.
+// MULTI-NODE LEADERSHIP-ELECTION COMPLIANCE — the 13 upstream LeadershipElectionCompliance facts.
 //
-// Task 6 of the multinode plan attempted to un-gate this suite. 9–10 of the 12 facts pass
-// reliably, but `leader_switchover_between_nodes` (and the dependent
-// `singular_agent_is_only_running_on_one`) cannot reach five consecutive green runs: they hinge
-// on a non-deterministic leadership-claim race that Wolverine core decides by lock-arrival order,
-// which our durable (w:majority+j:true) Mongo lock loses ~half the time. No test-config knob
-// (lease / heartbeat-period sweeps, RavenDb-style config) fixes it.
+// History: Task 6 of the multinode plan (against WolverineFx 6.2.2) could NOT reach five
+// consecutive green runs. `leader_switchover_between_nodes` and the dependent
+// `singular_agent_is_only_running_on_one` hinged on a non-deterministic leadership-claim race
+// that core decided by lock-arrival order, which our durable (w:majority+j:true) Mongo lock lost
+// ~half the time. The suite was therefore compile-gated behind `#if RUN_MULTINODE`, matching how
+// Wolverine's own Cosmos provider gates the same facts [Flaky].
+//   Full diagnosis: docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md
 //
-// DECISION (2026-06-16): keep this suite GATED — deliberately, not pending work. The provider
-// keeps the production-appropriate "any healthy node leads" model rather than constraining
-// production to satisfy this upstream test's lowest-node assertion, matching how Wolverine's
-// own Cosmos provider gates the same facts [Flaky]. The "lowest live node wins" election that
-// would make these facts pass was analyzed and DECLINED for production (it degrades real
-// failover); it is documented as an upstream-parity option only. Production confidence for
-// multinode comes from the cross-node message-guarantee tests (plan Task 7), which are
-// leader-identity-independent — not from this leadership-identity suite.
-//
-// Full diagnosis, config matrix, interleavings, MassTransit comparison, and the documented
-// (declined) code change:
-//   docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md
-// (decision recorded in FOLLOWUPS.md).
-//
-// To work the suite locally: dotnet test -p:DefineConstants=RUN_MULTINODE
+// UN-GATED (2026-07-05, plan T4.5): WolverineFx 6.9.0 reworked these facts —
+// `leader_switchover_between_nodes` now uses a slow heartbeat plus an explicit `CheckAgentHealth`
+// trigger (removing the lock-arrival-order race), and the new
+// `take_over_leader_ship_if_leader_becomes_stale_with_racing_nodes` fact is built around the
+// "any healthy node leads" model this provider already implements — so un-gating did NOT require
+// the declined "lowest live node wins" election change. Verified 5x consecutive green on BOTH
+// net9.0 and net10.0 (10/10 runs of the full Category=multinode suite) before removing the guard.
+// The [Trait("Category","multinode")] below routes it into CI's existing multinode step with no
+// ci.yml change (that step already runs `dotnet test --filter "Category=multinode"`).
+//   Decision + 5x proof: FOLLOWUPS.md and the multinode-leadership-model-decision memory.
 [Trait("Category", "multinode")]
 [Collection("mongodb")]
 public class leadership_election_compliance : LeadershipElectionCompliance
@@ -58,4 +53,3 @@ public class leadership_election_compliance : LeadershipElectionCompliance
         return _fixture.ClearAll();
     }
 }
-#endif
