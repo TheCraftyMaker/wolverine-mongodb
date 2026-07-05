@@ -9,6 +9,30 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Added
+- **Generic entity persistence (`[Entity]`, `Insert<T>`/`Update<T>`/`Store<T>`/`Delete<T>`,
+  `IStorageAction<T>`).** MongoDB now implements Wolverine's generic persistence surface for
+  any plain document type, not just `Saga` subclasses — closing the one functional gap vs
+  Cosmos and RavenDb. `[Entity]` handler parameters load a document by id before the handler
+  runs; returning `Insert`/`Update`/`Store`/`Delete<T>` or an `IStorageAction<T>` persists it
+  afterward, atomically with the outbox on the same MongoDB transaction session.
+  - **`CanPersist` is now unconditional `true`** (previously scoped to `Saga` subclasses) —
+    the saga-vs-entity distinction moved into the frame factories, which branch on
+    `variable.VariableType.CanBeCastTo<Saga>()`. Saga behavior, OCC, and collection naming
+    are unchanged.
+  - **Collection naming:** one un-prefixed collection per entity type,
+    `<lowercased-type-name>` (e.g. `OrderNote` → `ordernote`) — distinct from sagas'
+    `wolverine_saga_` prefix, since entity collections are application data.
+  - **Write semantics:** `Insert`/`Update`/`Store` all upsert (`ReplaceOneAsync(IsUpsert=true)`,
+    matching Cosmos); no optimistic concurrency for plain entities — use the repository
+    pattern for app-controlled OCC. The entity's `_id` is extracted via the MongoDB driver's
+    class map (`BsonClassMap...IdMemberMap`), not a `.ToString()` coercion.
+  - **Coverage:** Wolverine's upstream `StorageActionCompliance` suite passes (all facts) via
+    `storage_action_compliance.cs`. Custom tests cover entity write + outbox atomicity, and
+    saga/entity coexistence in the same handler (frame-branching regression guard). Full
+    single-node suite green on net9.0 + net10.0; cross-node entity persistence verified under
+    `DurabilityMode.Balanced`.
+  - **Demo:** `OrderNoteHandler` demonstrates `Insert`/`[Entity]`+`Update`/`[Entity]`+`Delete`
+    against a real `OrderNote` document, wired to `POST/DELETE /orders/{id}/notes` endpoints.
 - **Saga store diagnostics (`ISagaStoreDiagnostics`).** MongoDB now implements Wolverine's
   read-only saga-explorer surface — matching RavenDb, and above Cosmos, which does not
   implement it — so CritterWatch and other monitoring tools can list the Mongo-owned saga
@@ -17,6 +41,23 @@ The major version tracks Wolverine's major version.
   collections with native `_id` matching (no string coercion); `count` is clamped to
   `[0, 1000]`; descriptors are tagged `"MongoDb"`. Registration does not affect startup or
   the existing inbox/outbox/saga behavior (full single-node suite green on net9.0 + net10.0).
+- **`MongoDbUnitOfWork` demo example.** `RecordOrderAuditHandler` shows the no-repository
+  write path — a handler that accepts `MongoDbUnitOfWork` directly and writes through
+  `Collection<T>(name)`, with the session threaded automatically — alongside the existing
+  repository + `IClientSessionHandle` example, wired to `POST /orders/{id}/audit`.
+- **Saga-cascade read-model consumer in the demo.** `FulfillmentStatusProjector` consumes
+  `OrderFulfillmentSaga`'s `FulfillmentShippedEvent`/`FulfillmentCompletedEvent` cascades via
+  a durable local queue and maintains a `fulfillment_delivery_statuses` read model, exercising
+  the full saga → outbox → consumer path end to end.
+
+### Changed
+- **Multinode leadership compliance is no longer compile-gated.** The upstream
+  `LeadershipElectionCompliance` suite (previously behind `#if RUN_MULTINODE` because earlier
+  WolverineFx releases required a leadership-race ordering guarantee this provider's
+  `w:majority` lock could not make) now runs unconditionally as part of CI's multinode step,
+  after WolverineFx 6.9.0 reworked the underlying facts around the "any healthy node leads"
+  model this provider already implements. Verified 5× consecutive green on net9.0 and net10.0
+  before un-gating.
 
 ## [0.1.0-beta.7] - 2026-06-21
 

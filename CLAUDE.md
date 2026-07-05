@@ -20,17 +20,32 @@ src/Wolverine.MongoDB/              ← Library (NuGet package)
   MongoDbUnitOfWork.cs              ← Public API: session-bound write helper
   Internals/                        ← All implementation (internal)
     SagaFrames.cs                   ← Saga codegen frames + MongoSagaOperations helpers
+    EntityFrames.cs                 ← Generic entity codegen frames + MongoEntityOperations helpers
+    MongoDbSagaStoreDiagnostics.cs  ← ISagaStoreDiagnostics implementation
 src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine source clone)
   MongoDbSagaHost.cs                ← ISagaHost implementation for compliance suites
   string_saga_storage_compliance.cs ← StringIdentifiedSagaComplianceSpecs<MongoDbSagaHost>
   guid_saga_storage_compliance.cs   ← GuidIdentifiedSagaComplianceSpecs (+ int, long)
   saga_atomicity.cs                 ← Custom atomicity, OCC, completion, and idempotency tests
   saga_multinode.cs                 ← [Category=multinode] cross-node exactly-once saga test
+  storage_action_compliance.cs      ← Wolverine's upstream StorageActionCompliance ([Entity]/IStorageAction<T>)
+  entity_atomicity.cs               ← Custom entity write + outbox atomicity, saga/entity coexistence
+  entity_multinode.cs               ← [Category=multinode] cross-node entity persistence
+  saga_store_diagnostics.cs         ← ISagaStoreDiagnostics integration coverage
+  leadership_election_compliance.cs ← Upstream LeadershipElectionCompliance ([Category=multinode], un-gated)
 demo/                               ← Separate solution, references package from CI nupkg
   src/OrderDemo.Application/Sagas/
     OrderFulfillmentSaga.cs         ← Demo saga: Guid id, start/continue/complete lifecycle
+  src/OrderDemo.Application/Notes/
+    OrderNoteHandler.cs             ← Demo [Entity]/Insert|Update|Delete<OrderNote> handlers
+  src/OrderDemo.Application/Audit/
+    RecordOrderAuditHandler.cs      ← Demo MongoDbUnitOfWork example (no repository layer)
+  src/OrderDemo.Infrastructure/Projectors/
+    FulfillmentStatusProjector.cs   ← Demo saga-cascade-event consumer (delivery-status read model)
   tests/OrderDemo.IntegrationTests/
-    SagaFlowTests.cs                ← 7 saga integration tests (start, ship, complete, etc.)
+    SagaFlowTests.cs                ← 8 saga integration tests (start, ship, complete, cascade, etc.)
+    OrderNoteFlowTests.cs           ← Entity persistence flow tests
+    OrderAuditTests.cs              ← MongoDbUnitOfWork atomicity tests
 .github/workflows/
   ci.yml                            ← Library tests (single-node + multinode steps) + pack; demo tests against fresh nupkg
   publish.yml                       ← NuGet push on v* tag
@@ -81,6 +96,33 @@ Three public entry points:
 |------|------|
 | `SagaFrames.cs` | `LoadSagaFrame`, `InsertSagaFrame`, `UpdateSagaFrame`, `DeleteSagaFrame` emitted by the provider; `MongoSagaOperations` static helpers (load/insert/update/delete on the session) |
 
+### Entity Persistence Implementation
+
+| File | Role |
+|------|------|
+| `EntityFrames.cs` | `LoadEntityFrame`, `MongoUpsertEntityFrame`, `MongoDeleteEntityByVariableFrame` emitted by the provider for non-`Saga` types; `MongoEntityOperations` static helpers (load/upsert/delete + `ApplyStorageActionAsync<T>` on the session) |
+
+Generic `[Entity]` loads and `Insert<T>`/`Update<T>`/`Store<T>`/`Delete<T>`/`IStorageAction<T>`
+return-value side effects for plain (non-saga) document types. `MongoDbPersistenceFrameProvider`'s
+write/load frame factories (`DetermineInsertFrame`/`DetermineUpdateFrame`/`DetermineStoreFrame`/
+`DetermineLoadFrame`) branch on `variable.VariableType.CanBeCastTo<Saga>()`: `Saga` subclasses keep
+the existing version-guarded saga frames untouched; everything else routes to the entity frames
+above. `DetermineDeleteFrame(Variable, …)` (the generic single-variable overload used by `Delete<T>`)
+and `DetermineStorageActionFrame` (used by `IStorageAction<T>`) are entity-only — sagas use the
+two-variable delete overload and never construct an `IStorageAction<T>`.
+
+### Saga Store Diagnostics Implementation
+
+| File | Role |
+|------|------|
+| `MongoDbSagaStoreDiagnostics.cs` | `ISagaStoreDiagnostics` implementation: `GetRegisteredSagasAsync`/`ReadSagaAsync`/`ListSagaInstancesAsync`, registered as a singleton by `UseMongoDbPersistence` |
+
+Read-only, reflection-driven surface for saga-explorer tooling (mirrors `RavenDbSagaStoreDiagnostics`).
+Saga descriptors are tagged `"MongoDb"` and indexed by both `FullName` and short `Name`.
+`ListSagaInstancesAsync`'s `count` argument is clamped to `[0, 1000]`. Reads go directly against the
+`wolverine_saga_<type>` collections the saga frames write to, matching on native `_id` (no string
+coercion, unlike Cosmos/RavenDb).
+
 ### MongoDB Collections
 
 | Collection | Purpose |
@@ -91,6 +133,7 @@ Three public entry points:
 | `wolverine_nodes` | Node registry (heartbeat, capabilities) |
 | `wolverine_node_assignments` | Agent-to-node mapping |
 | `wolverine_saga_<lowercased-type>` | One collection per saga type (e.g. `wolverine_saga_orderfulfillmentsaga`) |
+| `<lowercased-entity-type>` | One un-prefixed collection per app entity type persisted via `[Entity]`/`Insert`/`Update`/`Store`/`Delete<T>` (e.g. `OrderNote` → `ordernote`) — application-owned, not swept by `ClearAllAsync`/`RebuildAsync` |
 
 ### Key Design Decisions
 
@@ -119,6 +162,12 @@ Three public entry points:
 - **One collection per saga type:** `wolverine_saga_<lowercased-type-name>` (e.g. `wolverine_saga_orderfulfillmentsaga`). Idiomatic MongoDB — no cross-type `_id` collision. `ClearAllAsync`/`RebuildAsync` drop every collection matching the `wolverine_saga_` prefix.
 - **`CommitUnitOfWorkFrame` for saga chains / no double-commit:** `ApplyTransactionSupport` adds the commit postprocessor only when `chain is not SagaChain`. For saga chains the single commit+flush flows through `CommitUnitOfWorkFrame` (inlined by `SagaChain` after the saga write). Mirrors Cosmos/RavenDb.
 - **`MultipleHandlerBehavior.Separated` for saga + non-saga co-handlers:** a `SagaChain` calls `Handlers.Clear()`, silently dropping co-registered non-saga handlers. When a saga and a projector consume the same message, set `opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated` so each runs independently. Required in the demo.
+- **`CanPersist` is unconditional `true` (T1.1):** matching Cosmos/RavenDb, the provider now advertises persistence support for every entity type, not just `Saga` subclasses — required because `[Entity]` parameter loads key on `CanPersist(parameterType)`. The saga-vs-entity distinction moved entirely into the frame factories (see Entity Persistence Implementation above); `CanPersist` no longer gates it. `persistenceService` stays `typeof(IMongoDatabase)`.
+- **Entity write semantics: upsert-only, no OCC (T1.1, D6 LD2):** `Insert<T>`/`Update<T>`/`Store<T>` all compile to the same `ReplaceOneAsync(..., IsUpsert = true)` (`MongoUpsertEntityFrame`) — entities carry no `Saga.Version`-style guard, so writes are last-write-wins, matching Cosmos's `CosmosDbUpsertFrame`. `Delete<T>` removes by id (`MongoDeleteEntityByVariableFrame`). App-level optimistic concurrency remains available via the repository pattern (a hand-guarded `ReplaceOneAsync` filter), the same path the demo's `OrderRepository` uses for the `Order` aggregate.
+- **Entity collection naming + id extraction (T1.1, D6 LD3):** `MongoConstants.EntityCollectionName(Type) => type.Name.ToLowerInvariant()` — deliberately **un-prefixed** (unlike `wolverine_saga_*`) because entity collections hold application data, not Wolverine system state; `ClearAllAsync`/`RebuildAsync`'s `wolverine_saga_` sweep never touches them. The entity's `_id` value is extracted generically via `BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap` — the driver's own Id-member convention — not Cosmos's `entity.ToString()` coercion.
+- **`ISagaStoreDiagnostics` registered unconditionally (T2.1):** `UseMongoDbPersistence` always registers `MongoDbSagaStoreDiagnostics` as a singleton — no opt-in flag, matching how RavenDb registers its implementation. The Wolverine runtime's diagnostics aggregator tolerates zero or multiple registered implementations, so unconditional registration is safe even in a mixed-provider app.
+- **Diagnostics reaches internal Wolverine members via reflection, not direct calls (T2.1):** `MongoDbSagaStoreDiagnostics` needs `SagaDescriptorBuilder.Build`, `WolverineOptions.HandlerGraph`, and `HandlerGraph.Container` — all `internal` to Wolverine core. Because this provider ships as an **external** NuGet package (not on Wolverine's `[InternalsVisibleTo]` list, unlike the in-repo RavenDb/Marten/EF Core/RDBMS providers), it bridges each member through isolated, cached, non-throwing reflection, each call site carrying a `// TODO(upstream)` marker. When contributed upstream into the Wolverine repo, add `Wolverine.MongoDB` to `[InternalsVisibleTo]` and collapse each bridge to the direct member access every sibling provider uses.
+- **Multinode leadership compliance un-gated (T4.5, 2026-07-05):** the upstream `LeadershipElectionCompliance` suite was compile-gated behind `#if RUN_MULTINODE` because earlier WolverineFx releases required the lowest-numbered surviving node to win a leadership-claim race our `w:majority` lock couldn't guarantee. WolverineFx 6.9.0 reworked those facts around the "any healthy node leads" model this provider already implements. Verified 5× consecutive green on net9.0 **and** net10.0 (10/10 runs, 17/17 facts each); the `#if` guard was removed and `[Trait("Category","multinode")]` now routes the suite into CI's existing multinode step with no `ci.yml` change.
 - **Pre-1.0 hardening backlog — four dated document/defer decisions (T4.6, 2026-07-05):** no behavior changed; each is tracked in `FOLLOWUPS.md` with rationale and an extension point if revisited.
   - **Node-number reuse:** the node-number counter (`MongoDbMessageStore.NodeAgents.cs:16-20`) is a pure monotonic increment that never reuses a freed slot. Acceptable — node numbers are short-lived coordination identifiers, not long-lived keys. If revisited post-1.0: track the lowest free slot instead of redesigning allocation.
   - **Pre-1.0 index migration:** the hardening pass added compound indexes (`MongoDbMessageStore.Admin.cs:18-64`) but `EnsureIndexesAsync` only creates indexes, never drops superseded single-field ones from existing beta deployments. Harmless (old indexes stay valid, just suboptimal); every consumer today is pre-1.0 beta. Add an explicit `Admin.MigrateAsync()` drop step only if needed before 1.0.

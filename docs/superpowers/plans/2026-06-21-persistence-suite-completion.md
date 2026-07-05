@@ -176,7 +176,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T4.5** ✅ | `test/multinode-leadership-ungate` | test: re-evaluate + un-gate multinode leadership compliance | **D4** | **Done** — un-gated; 5× consecutive green on net9.0 + net10.0 (10/10, full `Category=multinode` suite, 17/17 incl. 13 leadership facts); `#if RUN_MULTINODE` removed; CI multinode step covers it via `[Trait]` (no ci.yml change) | **Opus 4.8** |
 | **T4.6** ✅ | `docs/pre-1.0-hardening-backlog` | docs: pre-1.0 hardening backlog (node reuse, index migration, fencing, saga indexes) | **D4** | **Done** — four dated document/defer decisions recorded in FOLLOWUPS.md + CLAUDE.md; no code change | Sonnet |
 | **V1** ✅ | `test/suite-completion-regression` | test: full cross-feature regression sweep | **T1.1–T4.6 merged** | **Done** — clean regression sweep, no code/CI change needed; no PR (verification branch only) | Sonnet |
-| **V2** | `docs/suite-completion-sweep` | docs: suite completion + upstream-contribution notes | **T1.1–T4.6 merged** | Blocked by: all impl tasks (drafted in parallel) | Sonnet |
+| **V2** ✅ | `docs/suite-completion-sweep` | docs: suite completion + upstream-contribution notes | **T1.1–T4.6 merged** | **Done** — README/CLAUDE/CHANGELOG/FOLLOWUPS/demo docs/upstream-contribution-notes updated, every claim truth-checked against `main` | Sonnet |
 | **V3** | *(no branch/PR)* | final verification on `main` (+ optional release) | **V1, V2 merged** | Blocked by: V1, V2 | Sonnet |
 
 > **Recommended execution order.** The five discovery tasks (D1–D5) run **fully in parallel** the moment the plan PR merges. D6 (the Tier-1 design gate) follows D1+D5. **T1.1 is the single most important task and the head of the critical path.** Tiers 2, 3, and 4 are **independent tracks** that need only their own discovery (D2/D3/D4/D5) — they can proceed in parallel with the entire Tier-1 chain. Once T1.1 merges, T1.2/T1.3 and T4.3 fan out. V1/V2 close out once everything is merged; V3 is the final on-`main` gate.
@@ -620,7 +620,17 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **T1.1–T4.6 merged** (drafts can start in parallel; finalize against merged `main`).
 - **Blocking status:** **Blocked by: all impl tasks** (drafted in parallel).
 
-- [ ] **Step 1:** Edit each doc; truth-check against code on `main`. Commit (`docs: suite completion + upstream contribution notes`).
+- [x] **Step 1:** Edited README.md (entity persistence, saga store diagnostics, fixed stale
+  multinode-gating claim, Tier-3 non-goals), CLAUDE.md (Entity Persistence Implementation +
+  Saga Store Diagnostics Implementation sections, repo layout, Key Design Decisions),
+  CHANGELOG.md (`## [Unreleased]` entries for entity persistence, diagnostics, demo additions,
+  multinode un-gating), FOLLOWUPS.md (closed the stale "no `MongoDbUnitOfWork` example" item),
+  demo/README.md + demo/CLAUDE.md (`OrderNoteHandler`, `RecordOrderAuditHandler`,
+  `FulfillmentStatusProjector`), and `docs/upstream-contribution-notes.md` (`StorageActionCompliance`
+  subclass, diagnostics reflection-bridge caveat, entity id-extraction delta, corrected the two
+  stale "Known gaps" bullets). Every claim verified against code on `main` via a dedicated
+  fact-verification pass before writing (file:line for each). Commit
+  (`docs: suite completion + upstream contribution notes`).
 
 ### Task V3: Final verification on `main` (+ optional release)
 
