@@ -3,8 +3,8 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="WolverineFx" Version="6.9.0" />
-    <PackageVersion Include="WolverineFx.ComplianceTests" Version="6.9.0" />
+    <PackageVersion Include="WolverineFx" Version="6.16.0" />
+    <PackageVersion Include="WolverineFx.ComplianceTests" Version="6.16.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />

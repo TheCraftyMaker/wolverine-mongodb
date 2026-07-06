@@ -8,6 +8,13 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Changed
+- Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.16.0 and re-pinned the
+  `external/wolverine` submodule to `V6.16.0`. Full compliance suite (177 facts) and multinode
+  suite (17 facts) re-verified green on both net9.0 and net10.0; no provider code changes
+  required. Demo's `WolverineFx`/`WolverineFx.RabbitMQ`/`WolverineFx.RuntimeCompilation` bumped
+  to match (6.13.1 → 6.16.0); demo integration suite (42 tests) re-verified green.
+
 ## [1.0.0] - 2026-07-06
 
 ### Added
