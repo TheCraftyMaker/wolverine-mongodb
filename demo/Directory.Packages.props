@@ -3,10 +3,6 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <!-- >= 6.8.0 is required for the EnvelopeHistory thread-safety fix (JasperFx/wolverine
-         c139fd9a4, "Make TrackedSession bookkeeping thread-safe"): _records access is now
-         locked, so TrackActivity over external transports (RabbitMQ) no longer races and
-         intermittently NREs in IsComplete(). -->
     <PackageVersion Include="WolverineFx" Version="6.16.0" />
     <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.16.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
