@@ -7,8 +7,8 @@
          EnvelopeHistory thread-safety fix (JasperFx/wolverine c139fd9a4, "Make TrackedSession
          bookkeeping thread-safe"): _records access is now locked, so TrackActivity over external
          transports (RabbitMQ) no longer races and intermittently NREs in IsComplete(). -->
-    <PackageVersion Include="WolverineFx" Version="6.13.1" />
-    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.13.1" />
+    <PackageVersion Include="WolverineFx" Version="6.16.0" />
+    <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.16.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.17" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.16.10" />
