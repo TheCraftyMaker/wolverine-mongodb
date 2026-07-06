@@ -206,7 +206,7 @@ dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolv
 Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required.
 
 **CI:** the `library` job checks out with `submodules: recursive` (the Wolverine source is the
-`external/wolverine` submodule, pinned to the `V6.9.0` commit — keep the pin in sync with
+`external/wolverine` submodule, pinned to the `V6.16.0` commit — keep the pin in sync with
 `WolverineFx` in `Directory.Packages.props`), runs the compliance suite in two steps
 (`Category!=multinode` then `Category=multinode`), then packs the library at version `0.0.0-ci`.
 The `demo` job downloads that nupkg and runs the end-to-end integration tests against it, so
