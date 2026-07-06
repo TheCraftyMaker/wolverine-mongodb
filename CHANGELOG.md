@@ -8,6 +8,8 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-06
+
 ### Added
 - **Generic entity persistence (`[Entity]`, `Insert<T>`/`Update<T>`/`Store<T>`/`Delete<T>`,
   `IStorageAction<T>`).** MongoDB now implements Wolverine's generic persistence surface for

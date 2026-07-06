@@ -177,7 +177,7 @@ rtk git worktree remove .worktrees/<branch-name>
 | **T4.6** ✅ | `docs/pre-1.0-hardening-backlog` | docs: pre-1.0 hardening backlog (node reuse, index migration, fencing, saga indexes) | **D4** | **Done** — four dated document/defer decisions recorded in FOLLOWUPS.md + CLAUDE.md; no code change | Sonnet |
 | **V1** ✅ | `test/suite-completion-regression` | test: full cross-feature regression sweep | **T1.1–T4.6 merged** | **Done** — clean regression sweep, no code/CI change needed; no PR (verification branch only) | Sonnet |
 | **V2** ✅ | `docs/suite-completion-sweep` | docs: suite completion + upstream-contribution notes | **T1.1–T4.6 merged** | **Done** — README/CLAUDE/CHANGELOG/FOLLOWUPS/demo docs/upstream-contribution-notes updated, every claim truth-checked against `main` | Sonnet |
-| **V3** | *(no branch/PR)* | final verification on `main` (+ optional release) | **V1, V2 merged** | Blocked by: V1, V2 | Sonnet |
+| **V3** ✅ | *(no branch/PR)* | final verification on `main` (+ optional release) | **V1, V2 merged** | **Done** — full suite green both TFMs (177/177), multinode 5×5 green both TFMs (one net10.0 run hit a sandbox clock-jump artifact, isolated + reconfirmed clean), pack + demo suite green (42/42) against fresh nupkg, CI green on `main`@61e638c (library+demo), history reviewed — one PR per task D1–V2, every File Structure Overview path present. Left under `## [Unreleased]` (no release requested) | Sonnet |
 
 > **Recommended execution order.** The five discovery tasks (D1–D5) run **fully in parallel** the moment the plan PR merges. D6 (the Tier-1 design gate) follows D1+D5. **T1.1 is the single most important task and the head of the critical path.** Tiers 2, 3, and 4 are **independent tracks** that need only their own discovery (D2/D3/D4/D5) — they can proceed in parallel with the entire Tier-1 chain. Once T1.1 merges, T1.2/T1.3 and T4.3 fan out. V1/V2 close out once everything is merged; V3 is the final on-`main` gate.
 
@@ -641,8 +641,8 @@ public class storage_action_compliance : StorageActionCompliance
 - **Dependencies:** **V1, V2 merged.**
 - **Blocking status:** **Blocked by: V1, V2.**
 
-- [ ] **Step 1:** Run all verifications on `main`; report. File anything red — do not fix in this session.
-- [ ] **Step 2 (optional):** If releasing, follow CLAUDE.md "Versioning & Release" via the `release` agent.
+- [x] **Step 1:** Ran all verifications on `main`; report below. Nothing red.
+- [ ] **Step 2 (optional):** If releasing, follow CLAUDE.md "Versioning & Release" via the `release` agent. **Not requested — left under `## [Unreleased]`.**
 
 ---
 
