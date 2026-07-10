@@ -8,6 +8,13 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Documentation
+- Post-1.0.0 truth sweep on `CLAUDE.md`: package version reference, the versioning-policy
+  wording, the index-migration follow-up's "before 1.0" framing (now a standing post-1.0
+  decision, mirrored in `FOLLOWUPS.md`), and the `ClearAllAsync`/`RebuildAsync` collection count
+  (nine system collections, not six — also fixed the mirroring comment in
+  `MongoDbMessageStore.NodeAgents.cs`). No behavior changes.
+
 ### Changed
 - Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.16.0 and re-pinned the
   `external/wolverine` submodule to `V6.16.0`. Full compliance suite (177 facts) and multinode
