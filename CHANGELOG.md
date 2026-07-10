@@ -8,6 +8,13 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- `EditAndReplayAsync` no longer throws `EndOfStreamException` when editing a body-less poison
+  dead letter (one stored via `DeadLetterMessage.ForUnserializableEnvelope`, e.g. an envelope
+  whose body could not be serialized). It now reconstructs the envelope through
+  `DeadLetterMessage.ToEnvelope()` — which already guards `Body is { Length: > 0 }` — before
+  applying the edited body, instead of calling `EnvelopeSerializer.Deserialize` directly on an
+  empty byte array.
 ### Documentation
 - Post-1.0.0 truth sweep on `CLAUDE.md`: package version reference, the versioning-policy
   wording, the index-migration follow-up's "before 1.0" framing (now a standing post-1.0
