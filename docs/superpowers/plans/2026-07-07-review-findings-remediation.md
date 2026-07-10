@@ -446,8 +446,10 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Write the failing test: Guid-keyed diag saga, `ReadSagaAsync(sagaName, guid.ToString())` → null today (FAIL).
-- [ ] **Step 2:** Implement `coerceIdentity`; run → PASS; full suite green. CHANGELOG. Commit (`fix: diagnostics identity coercion`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test: Guid-keyed diag saga, `ReadSagaAsync(sagaName, guid.ToString())` → null today (FAIL).
+- [x] **Step 2:** Implement `coerceIdentity`; run → PASS; full suite green. CHANGELOG. Commit (`fix: diagnostics identity coercion`), push, PR, checks green, update plan doc.
+
+**Status: done.** PR [#158](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/158), branch `fix/diagnostics-identity-coercion`. RED confirmed both failure modes: the Guid-keyed identity case failed with `GuidSerializer cannot serialize a Guid when GuidRepresentation is Unspecified` (a second, pre-existing bug the string-coercion test surfaced — the filter boxed identity as `object`, forcing the driver through `ObjectSerializer` instead of the class map), and the string-identity case returned null. Fix: `coerceIdentity(object, Type)` mirroring Marten, plus making `readSagaAsync` generic over `TSaga, TId` so the filter resolves through the collection's class-map serializer. Full suite green on both TFMs (179/179 each), all CI checks green.
 
 ### Task F14: Bounded NuGet dependency ranges
 
