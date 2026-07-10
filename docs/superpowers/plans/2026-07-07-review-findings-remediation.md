@@ -184,9 +184,9 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Trace `DurableReceiver` + RDBMS batch semantics; record the contract verbatim.
-- [ ] **Step 2:** Trace claim scoping, release atomicity, registration-before-claim, and shutdown ordering in the submodule + local source.
-- [ ] **Step 3:** Verify the in-transaction bulk-write failure mode; write the notes doc. Commit (`docs: durability contract discovery`).
+- [x] **Step 1:** Trace `DurableReceiver` + RDBMS batch semantics; record the contract verbatim.
+- [x] **Step 2:** Trace claim scoping, release atomicity, registration-before-claim, and shutdown ordering in the submodule + local source.
+- [x] **Step 3:** Verify the in-transaction bulk-write failure mode; write the notes doc. Commit (`docs: durability contract discovery`).
 
 ### Task F3: Identity-mapping design (DESIGN GATE)
 
