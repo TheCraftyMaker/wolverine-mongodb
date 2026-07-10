@@ -219,8 +219,8 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none to start; **refine after F3/F4** (exception contracts feed assertions).
 - **Blocking status:** **Can start immediately** (finalize assertion details once F3/F4 land).
 
-- [ ] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
-- [ ] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
+- [x] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
+- [x] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
 
 ---
 
@@ -470,7 +470,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc. — [PR #156](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/156), all checks green.
 
 ---
 
