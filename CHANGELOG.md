@@ -9,6 +9,15 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+- `MongoDbSagaStoreDiagnostics.ReadSagaAsync` now coerces the caller-supplied identity to the
+  saga's native id type (`Guid`/`int`/`long`/`string`) before querying, per the
+  `ISagaStoreDiagnostics` contract — mirrors `MartenSagaStoreDiagnostics.coerceIdentity`. A
+  string handed in for a `Guid`/`int`/`long`-keyed saga (e.g. an id rehydrated from a URL or JSON
+  payload) previously always returned "not found"; an unparseable/mismatched identity still
+  returns "not found" rather than throwing. Along the way, the filter value is now dispatched
+  through a generic `TId` parameter instead of a boxed `object`, so `Guid`-keyed sagas resolve via
+  the collection's own class-map serializer instead of failing with
+  `GuidSerializer cannot serialize a Guid when GuidRepresentation is Unspecified`.
 - `EditAndReplayAsync` no longer throws `EndOfStreamException` when editing a body-less poison
   dead letter (one stored via `DeadLetterMessage.ForUnserializableEnvelope`, e.g. an envelope
   whose body could not be serialized). It now reconstructs the envelope through
