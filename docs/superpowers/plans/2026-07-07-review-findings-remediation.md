@@ -470,7 +470,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc. — [PR #156](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/156), all checks green.
 
 ---
 
