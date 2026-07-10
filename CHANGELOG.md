@@ -8,6 +8,14 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- `EditAndReplayAsync` no longer throws `EndOfStreamException` when editing a body-less poison
+  dead letter (one stored via `DeadLetterMessage.ForUnserializableEnvelope`, e.g. an envelope
+  whose body could not be serialized). It now reconstructs the envelope through
+  `DeadLetterMessage.ToEnvelope()` — which already guards `Body is { Length: > 0 }` — before
+  applying the edited body, instead of calling `EnvelopeSerializer.Deserialize` directly on an
+  empty byte array.
+
 ### Changed
 - Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.16.0 and re-pinned the
   `external/wolverine` submodule to `V6.16.0`. Full compliance suite (177 facts) and multinode
