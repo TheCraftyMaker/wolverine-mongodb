@@ -458,8 +458,8 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Apply the ranges; `dotnet build` + full test suite green.
-- [ ] **Step 2:** Pack and inspect the nuspec (quote it in the PR body). CHANGELOG. Commit (`fix: bounded NuGet dependency ranges`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Apply the ranges; `dotnet build` + full test suite green.
+- [x] **Step 2:** Pack and inspect the nuspec (quote it in the PR body). CHANGELOG. Commit (`fix: bounded NuGet dependency ranges`), push, PR, checks green, update plan doc. **Done: [PR #160](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/160), all 7 checks green.**
 
 ### Task F15: Post-1.0.0 documentation truth sweep
 
