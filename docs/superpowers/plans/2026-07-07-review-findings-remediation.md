@@ -171,9 +171,9 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Read the Wolverine identity-resolution and storage-action call sites in `external/wolverine`; confirm the Verified Facts, flag drift.
-- [ ] **Step 2:** Verify the driver's class-map semantics against MongoDB.Driver 3.9 source/docs (freeze rules, unmapped-id insert behavior); record exact behaviors.
-- [ ] **Step 3:** Enumerate the local defect sites; write the notes doc. Commit (`docs: identity-mapping discovery`).
+- [x] **Step 1:** Read the Wolverine identity-resolution and storage-action call sites in `external/wolverine`; confirm the Verified Facts, flag drift.
+- [x] **Step 2:** Verify the driver's class-map semantics against MongoDB.Driver 3.9 source/docs (freeze rules, unmapped-id insert behavior); record exact behaviors.
+- [x] **Step 3:** Enumerate the local defect sites; write the notes doc. Commit (`docs: identity-mapping discovery`).
 
 ### Task F2: Inbox/recovery/shutdown contract discovery
 
