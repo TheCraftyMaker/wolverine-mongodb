@@ -120,14 +120,16 @@ Promote to GitHub issues before the first public release.
   track. `SagaFlowTests.ShipAndConfirmOrder_ProjectsFulfillmentDeliveryStatus` exercises the full
   saga → outbox → consumer path end to end.
 
-- **Pre-1.0 index migration — decision (T4.6, 2026-07-05: document/defer).** The hardening pass
-  replaced single-field `executionTime` and outgoing `ownerId` indexes with compound alternatives
-  (`MongoDbMessageStore.Admin.cs:18-64`). Existing deployments keep the old single-field indexes in
-  place — MongoDB does not drop superseded indexes automatically, and `EnsureIndexesAsync` only
-  creates, never drops. **Decision: harmless, deferred.** The old indexes remain valid (just
-  suboptimal for the new query patterns) and impose no correctness issue; every current consumer
-  is a pre-1.0 beta deployment where a `RebuildAsync` (which recreates all indexes from scratch)
-  is an acceptable manual remedy if desired. **If revisited before 1.0:** add an explicit
+- **Index migration — decision (T4.6, 2026-07-05; re-affirmed post-1.0 2026-07-10: document/defer).**
+  The hardening pass replaced single-field `executionTime` and outgoing `ownerId` indexes with
+  compound alternatives (`MongoDbMessageStore.Admin.cs:18-64`). Deployments created before that
+  pass keep the old single-field indexes in place — MongoDB does not drop superseded indexes
+  automatically, and `EnsureIndexesAsync` only creates, never drops. **Decision: harmless,
+  deferred.** The old indexes remain valid (just suboptimal for the new query patterns) and impose
+  no correctness issue; a `RebuildAsync` (which recreates all indexes from scratch) is an
+  acceptable manual remedy if desired. This was originally framed as a "before 1.0" checkpoint —
+  the package shipped [1.0.0] on 2026-07-06 with no migration step added, so this is now a
+  standing post-1.0 decision, not a lapsed pre-1.0 TODO. **If revisited:** add an explicit
   `Admin.MigrateAsync()` step that drops the specific superseded index names before
   `EnsureIndexesAsync` runs — no migration step exists today.
 

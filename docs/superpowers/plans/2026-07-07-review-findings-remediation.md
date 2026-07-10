@@ -219,8 +219,8 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none to start; **refine after F3/F4** (exception contracts feed assertions).
 - **Blocking status:** **Can start immediately** (finalize assertion details once F3/F4 land).
 
-- [ ] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
-- [ ] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
+- [x] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
+- [x] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
 
 ---
 
@@ -360,9 +360,9 @@ public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Write the failing test: store a poison letter (empty `Body`), call `EditAndReplayAsync` with a valid new body → today throws `EndOfStreamException` (assert the current failure first to prove the repro).
-- [ ] **Step 2:** Route the envelope reconstruction through `doc.ToEnvelope()` (which carries the guard) before applying the edited body; run → PASS. Normal-letter regression test PASS.
-- [ ] **Step 3:** Full suite green; CHANGELOG entry. Commit (`fix: EditAndReplayAsync tolerates body-less poison letters`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test: store a poison letter (empty `Body`), call `EditAndReplayAsync` with a valid new body → today throws `EndOfStreamException` (assert the current failure first to prove the repro).
+- [x] **Step 2:** Route the envelope reconstruction through `doc.ToEnvelope()` (which carries the guard) before applying the edited body; run → PASS. Normal-letter regression test PASS.
+- [x] **Step 3:** Full suite green; CHANGELOG entry. Commit (`fix: EditAndReplayAsync tolerates body-less poison letters`), push, PR, checks green, update plan doc. PR [#157](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/157), checks green.
 
 ### Task F10: Destination-scoped incoming claims
 
@@ -472,7 +472,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc. — [PR #156](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/156), all checks green.
 
 ---
 
