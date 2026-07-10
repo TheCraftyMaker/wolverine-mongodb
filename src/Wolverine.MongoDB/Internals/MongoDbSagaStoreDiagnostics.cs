@@ -20,7 +20,9 @@ namespace Wolverine.MongoDB.Internals;
 /// database so monitoring tools (CritterWatch in particular) can surface saga state JSON without
 /// reaching into MongoDB directly. Mirrors <c>RavenDbSagaStoreDiagnostics</c>; MongoDB stores each
 /// saga type in its own <c>wolverine_saga_&lt;type&gt;</c> collection with a native <c>_id</c>
-/// (Guid/string/int/long), so — unlike RavenDb's string-only ids — the identity is used as-is.
+/// (Guid/string/int/long). Per the <see cref="ISagaStoreDiagnostics"/> contract, the caller-supplied
+/// identity is coerced to the saga's native id type before querying (e.g. a <c>string</c> handed in
+/// for a <c>Guid</c>-keyed saga is parsed) — mirrors <c>MartenSagaStoreDiagnostics.coerceIdentity</c>.
 /// </summary>
 /// <remarks>
 /// <para>Wolverine's runtime aggregator (<c>AggregateSagaStoreDiagnostics</c>) fans out across every
@@ -69,42 +71,74 @@ internal sealed class MongoDbSagaStoreDiagnostics : ISagaStoreDiagnostics
         return Task.FromResult<IReadOnlyList<SagaDescriptor>>(descriptors);
     }
 
-    // A private generic helper readSagaAsync<TSaga> is invoked reflectively because the saga type is
-    // only known at runtime; MongoDB needs the closed IMongoCollection<TSaga> to deserialize the saga
-    // POCO. Same MakeGenericMethod pattern the provider uses for DetermineStorageActionFrame.
+    // A private generic helper readSagaAsync<TSaga, TId> is invoked reflectively because both the
+    // saga type and its native id type are only known at runtime; MongoDB needs the closed
+    // IMongoCollection<TSaga> to deserialize the saga POCO, and the filter value must be statically
+    // typed as TId (not `object`) so the driver resolves "_id" through TSaga's class map — the same
+    // GuidSerializer/[BsonGuidRepresentation] the id member carries — instead of falling back to
+    // ObjectSerializer, which cannot serialize an unrepresented Guid. Same MakeGenericMethod pattern
+    // the provider uses for DetermineStorageActionFrame.
     [UnconditionalSuppressMessage("Trimming", "IL2060",
-        Justification = "Generic readSagaAsync<TSaga> invoked reflectively; saga types statically rooted via handler discovery. See AOT guide.")]
+        Justification = "Generic readSagaAsync<TSaga, TId> invoked reflectively; saga types statically rooted via handler discovery. See AOT guide.")]
     [UnconditionalSuppressMessage("AOT", "IL3050",
-        Justification = "MakeGenericMethod over the runtime saga type; saga types statically rooted via handler discovery. See AOT guide.")]
+        Justification = "MakeGenericMethod over the runtime saga/id types; saga types statically rooted via handler discovery. See AOT guide.")]
     public async Task<SagaInstanceState?> ReadSagaAsync(string sagaTypeName, object identity, CancellationToken ct)
     {
         if (!sagaIndex().TryGetValue(sagaTypeName, out var sagaType)) return null;
         if (identity is null) return null;
 
+        var idMemberMap = BsonClassMap.LookupClassMap(sagaType).IdMemberMap;
+        if (idMemberMap is null) return null;
+
+        // The ISagaStoreDiagnostics contract expects the implementation to coerce as needed (a
+        // caller may hand a string for a Guid/int/long-keyed saga — e.g. a URL-rehydrated id).
+        var coerced = coerceIdentity(identity, idMemberMap.MemberType);
+        if (coerced is null) return null;
+
         var helper = typeof(MongoDbSagaStoreDiagnostics)
             .GetMethod(nameof(readSagaAsync), BindingFlags.Instance | BindingFlags.NonPublic)!
-            .MakeGenericMethod(sagaType);
+            .MakeGenericMethod(sagaType, coerced.GetType());
 
-        var task = (Task<SagaInstanceState?>)helper.Invoke(this, [sagaType, identity, ct])!;
+        var task = (Task<SagaInstanceState?>)helper.Invoke(this, [coerced, ct])!;
         return await task.ConfigureAwait(false);
     }
 
-    private async Task<SagaInstanceState?> readSagaAsync<TSaga>(Type sagaType, object identity, CancellationToken ct)
+    private async Task<SagaInstanceState?> readSagaAsync<TSaga, TId>(TId identity, CancellationToken ct)
         where TSaga : class
     {
         var collection = _client.GetDatabase(_databaseName)
-            .GetCollection<TSaga>(MongoConstants.SagaCollectionName(sagaType));
+            .GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
 
-        // Builders<TSaga>.Filter.Eq("_id", identity): the driver resolves "_id" to the mapped id
-        // member and serialises the (boxed, native-typed) identity with that member's serializer —
-        // no .ToString() coercion, unlike RavenDb which stores all saga ids as strings.
         var saga = await collection
             .Find(Builders<TSaga>.Filter.Eq("_id", identity))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
         if (saga is null) return null;
-        return buildInstance(sagaType, identity, saga);
+        return buildInstance(typeof(TSaga), identity!, saga);
+    }
+
+    // Mirrors MartenSagaStoreDiagnostics.coerceIdentity: pass-through when the caller already handed
+    // us the saga's native id type; parse a string into Guid/int/long when the native type demands
+    // it (the common case — a diagnostics caller rehydrating an id from a URL or JSON payload never
+    // has the original CLR type). Unparseable/unconvertible input returns null, which routes upstream
+    // as "saga not found" — the right behavior for a mistyped id, and never a throw.
+    private static object? coerceIdentity(object identity, Type idType)
+    {
+        var sourceType = identity.GetType();
+        if (sourceType == idType) return identity;
+
+        try
+        {
+            if (idType == typeof(Guid) && identity is string s) return Guid.Parse(s);
+            if (idType == typeof(int) && identity is string si) return int.Parse(si);
+            if (idType == typeof(long) && identity is string sl) return long.Parse(sl);
+            return Convert.ChangeType(identity, idType);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2060",
@@ -123,13 +157,14 @@ internal sealed class MongoDbSagaStoreDiagnostics : ISagaStoreDiagnostics
             .GetMethod(nameof(querySagasAsync), BindingFlags.Instance | BindingFlags.NonPublic)!
             .MakeGenericMethod(sagaType);
 
-        var task = (Task<IReadOnlyList<SagaInstanceState>>)helper.Invoke(this, [sagaType, clamped, ct])!;
+        var task = (Task<IReadOnlyList<SagaInstanceState>>)helper.Invoke(this, [clamped, ct])!;
         return await task.ConfigureAwait(false);
     }
 
-    private async Task<IReadOnlyList<SagaInstanceState>> querySagasAsync<TSaga>(Type sagaType, int count, CancellationToken ct)
+    private async Task<IReadOnlyList<SagaInstanceState>> querySagasAsync<TSaga>(int count, CancellationToken ct)
         where TSaga : class
     {
+        var sagaType = typeof(TSaga);
         var collection = _client.GetDatabase(_databaseName)
             .GetCollection<TSaga>(MongoConstants.SagaCollectionName(sagaType));
 

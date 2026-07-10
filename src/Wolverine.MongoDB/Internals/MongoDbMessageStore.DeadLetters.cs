@@ -88,7 +88,7 @@ public partial class MongoDbMessageStore : IDeadLetters
         var doc = await DeadLetterDocs.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelopeId)).FirstOrDefaultAsync(token);
         if (doc is null) return;
 
-        var envelope = EnvelopeSerializer.Deserialize(doc.Body);
+        var envelope = doc.ToEnvelope().Envelope;
         envelope.Data = newBody;
         doc.Body = EnvelopeSerializer.Serialize(envelope);
         doc.Replayable = true;

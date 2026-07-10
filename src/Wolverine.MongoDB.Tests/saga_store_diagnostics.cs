@@ -39,8 +39,10 @@ public class saga_store_diagnostics
                 // name.
                 opts.CodeGeneration.TypeLoadMode = TypeLoadMode.Dynamic;
 
-                // Only this file's saga — never the other test handlers in the assembly.
-                opts.Discovery.DisableConventionalDiscovery().IncludeType(typeof(DiagSaga));
+                // Only this file's sagas — never the other test handlers in the assembly.
+                opts.Discovery.DisableConventionalDiscovery()
+                    .IncludeType(typeof(DiagSaga))
+                    .IncludeType(typeof(DiagGuidSaga));
 
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
@@ -132,6 +134,34 @@ public class saga_store_diagnostics
         read.ShouldBeNull();
         list.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task read_saga_returns_state_for_guid_keyed_instance_by_guid_identity()
+    {
+        using var host = await BuildHostAsync();
+        var sagaId = Guid.NewGuid();
+        await host.InvokeMessageAndWaitAsync(new StartDiagGuidSaga(sagaId, "gamma"));
+
+        var diagnostics = host.GetRuntime().SagaStorage;
+        var state = await diagnostics.ReadSagaAsync(typeof(DiagGuidSaga).FullName!, sagaId, CancellationToken.None);
+
+        state.ShouldNotBeNull();
+        state.State.GetProperty("Note").GetString().ShouldBe("gamma");
+    }
+
+    [Fact]
+    public async Task read_saga_returns_state_for_guid_keyed_instance_by_string_identity()
+    {
+        using var host = await BuildHostAsync();
+        var sagaId = Guid.NewGuid();
+        await host.InvokeMessageAndWaitAsync(new StartDiagGuidSaga(sagaId, "delta"));
+
+        var diagnostics = host.GetRuntime().SagaStorage;
+        var state = await diagnostics.ReadSagaAsync(typeof(DiagGuidSaga).FullName!, sagaId.ToString(), CancellationToken.None);
+
+        state.ShouldNotBeNull();
+        state.State.GetProperty("Note").GetString().ShouldBe("delta");
+    }
 }
 
 public record StartDiagSaga(string Id, string Note);
@@ -142,6 +172,20 @@ public class DiagSaga : Wolverine.Saga
     public string Note { get; set; } = "";
 
     public void Start(StartDiagSaga cmd)
+    {
+        Id = cmd.Id;
+        Note = cmd.Note;
+    }
+}
+
+public record StartDiagGuidSaga(Guid Id, string Note);
+
+public class DiagGuidSaga : Wolverine.Saga
+{
+    public Guid Id { get; set; }
+    public string Note { get; set; } = "";
+
+    public void Start(StartDiagGuidSaga cmd)
     {
         Id = cmd.Id;
         Note = cmd.Note;

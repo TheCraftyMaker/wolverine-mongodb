@@ -184,9 +184,9 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Trace `DurableReceiver` + RDBMS batch semantics; record the contract verbatim.
-- [ ] **Step 2:** Trace claim scoping, release atomicity, registration-before-claim, and shutdown ordering in the submodule + local source.
-- [ ] **Step 3:** Verify the in-transaction bulk-write failure mode; write the notes doc. Commit (`docs: durability contract discovery`).
+- [x] **Step 1:** Trace `DurableReceiver` + RDBMS batch semantics; record the contract verbatim.
+- [x] **Step 2:** Trace claim scoping, release atomicity, registration-before-claim, and shutdown ordering in the submodule + local source.
+- [x] **Step 3:** Verify the in-transaction bulk-write failure mode; write the notes doc. Commit (`docs: durability contract discovery`).
 
 ### Task F3: Identity-mapping design (DESIGN GATE)
 
@@ -219,8 +219,8 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none to start; **refine after F3/F4** (exception contracts feed assertions).
 - **Blocking status:** **Can start immediately** (finalize assertion details once F3/F4 land).
 
-- [ ] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
-- [ ] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
+- [x] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
+- [x] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
 
 ---
 
@@ -360,9 +360,9 @@ public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Write the failing test: store a poison letter (empty `Body`), call `EditAndReplayAsync` with a valid new body → today throws `EndOfStreamException` (assert the current failure first to prove the repro).
-- [ ] **Step 2:** Route the envelope reconstruction through `doc.ToEnvelope()` (which carries the guard) before applying the edited body; run → PASS. Normal-letter regression test PASS.
-- [ ] **Step 3:** Full suite green; CHANGELOG entry. Commit (`fix: EditAndReplayAsync tolerates body-less poison letters`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test: store a poison letter (empty `Body`), call `EditAndReplayAsync` with a valid new body → today throws `EndOfStreamException` (assert the current failure first to prove the repro).
+- [x] **Step 2:** Route the envelope reconstruction through `doc.ToEnvelope()` (which carries the guard) before applying the edited body; run → PASS. Normal-letter regression test PASS.
+- [x] **Step 3:** Full suite green; CHANGELOG entry. Commit (`fix: EditAndReplayAsync tolerates body-less poison letters`), push, PR, checks green, update plan doc. PR [#157](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/157), checks green.
 
 ### Task F10: Destination-scoped incoming claims
 
@@ -446,8 +446,10 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Write the failing test: Guid-keyed diag saga, `ReadSagaAsync(sagaName, guid.ToString())` → null today (FAIL).
-- [ ] **Step 2:** Implement `coerceIdentity`; run → PASS; full suite green. CHANGELOG. Commit (`fix: diagnostics identity coercion`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test: Guid-keyed diag saga, `ReadSagaAsync(sagaName, guid.ToString())` → null today (FAIL).
+- [x] **Step 2:** Implement `coerceIdentity`; run → PASS; full suite green. CHANGELOG. Commit (`fix: diagnostics identity coercion`), push, PR, checks green, update plan doc.
+
+**Status: done.** PR [#158](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/158), branch `fix/diagnostics-identity-coercion`. RED confirmed both failure modes: the Guid-keyed identity case failed with `GuidSerializer cannot serialize a Guid when GuidRepresentation is Unspecified` (a second, pre-existing bug the string-coercion test surfaced — the filter boxed identity as `object`, forcing the driver through `ObjectSerializer` instead of the class map), and the string-identity case returned null. Fix: `coerceIdentity(object, Type)` mirroring Marten, plus making `readSagaAsync` generic over `TSaga, TId` so the filter resolves through the collection's class-map serializer. Full suite green on both TFMs (179/179 each), all CI checks green.
 
 ### Task F14: Bounded NuGet dependency ranges
 
@@ -470,7 +472,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
 
-- [ ] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Fix the four verified drifts + the code comment; re-verify each corrected claim against source. Commit (`docs: post-1.0.0 truth sweep`), push, PR, checks green, update plan doc. — [PR #156](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/156), all checks green.
 
 ---
 
