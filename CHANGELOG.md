@@ -9,6 +9,15 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+- **Bounded NuGet dependency ranges.** `WolverineFx` and `MongoDB.Driver` package dependencies
+  are now bounded to their major version (`[6.16.0,7.0.0)` and `[3.9.0,4.0.0)` respectively,
+  instead of the open-ended `>= x.y.z` NuGet emits by default. A consumer that let its
+  transitive restore drift to `WolverineFx` 7.x or `MongoDB.Driver` 4.x would previously
+  compile and restore cleanly, then fail at runtime against an untested API surface — and
+  `MongoDbSagaStoreDiagnostics`'s reflection bridges into Wolverine internals are
+  non-throwing by design, so a breaking internal rename would degrade silently rather than
+  fail loudly. The bound now makes an incompatible restore fail immediately.
+  `WolverineFx.ComplianceTests` (test-only, never packed) is left unbounded.
 - `MongoDbSagaStoreDiagnostics.ReadSagaAsync` now coerces the caller-supplied identity to the
   saga's native id type (`Guid`/`int`/`long`/`string`) before querying, per the
   `ISagaStoreDiagnostics` contract — mirrors `MartenSagaStoreDiagnostics.coerceIdentity`. A
