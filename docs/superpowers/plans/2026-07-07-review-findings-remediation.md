@@ -219,8 +219,8 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** none to start; **refine after F3/F4** (exception contracts feed assertions).
 - **Blocking status:** **Can start immediately** (finalize assertion details once F3/F4 land).
 
-- [ ] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
-- [ ] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
+- [x] **Step 1:** Verify upstream suite coverage; build the finding→test mapping.
+- [x] **Step 2:** Design the demo entity + tests; write the doc. Commit (`docs: remediation test inventory + demo design`).
 
 ---
 
