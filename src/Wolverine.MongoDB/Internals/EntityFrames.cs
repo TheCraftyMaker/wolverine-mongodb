@@ -28,6 +28,27 @@ namespace Wolverine.MongoDB.Internals;
 public static class MongoEntityOperations
 {
     /// <summary>
+    /// The single way to obtain an entity collection handle — every operation below routes through it
+    /// so the class-map alignment invariant holds <i>by construction</i>: you cannot get a handle for
+    /// an entity type without its Wolverine-resolved identity member having been mapped to <c>_id</c>
+    /// first, and any operation added later inherits the guarantee. This is also what makes
+    /// <see cref="IdOf{T}"/> (the write side) and the frames' <c>Eq("_id", …)</c> filters (the read
+    /// side) agree without either of them changing.
+    ///
+    /// <para>This runtime leg is <b>required</b>, not belt-and-braces. The frame constructors also
+    /// align (buying a loud failure at host build), but in <c>TypeLoadMode.Static</c> Wolverine
+    /// attaches pre-generated handler types without ever calling <c>HandlerChain.AssembleTypes</c>,
+    /// so no frame constructor runs at all. Codegen-time-only alignment would therefore be silently
+    /// absent from pre-generated/AOT deployments — a mode-dependent variant of the very corruption
+    /// this guards against. Cost is one lock-free dictionary probe against a network round-trip.</para>
+    /// </summary>
+    private static IMongoCollection<T> entityCollection<T>(IMongoDatabase database) where T : class
+    {
+        MongoIdentityMapping.EnsureIdMember(typeof(T));
+        return database.GetCollection<T>(MongoConstants.EntityCollectionName(typeof(T)));
+    }
+
+    /// <summary>
     /// Load an entity document by its <c>_id</c> within the session/transaction. Returns
     /// <c>null</c> when no document matches — exactly the contract Wolverine core's <c>[Entity]</c>
     /// not-found / <c>Required</c> short-circuit expects (it owns the null-guard, the provider does not).
@@ -36,7 +57,7 @@ public static class MongoEntityOperations
         IMongoDatabase database, IClientSessionHandle session, TId id, CancellationToken cancellationToken)
         where T : class
     {
-        var collection = database.GetCollection<T>(MongoConstants.EntityCollectionName(typeof(T)));
+        var collection = entityCollection<T>(database);
         return collection
             .Find(session, Builders<T>.Filter.Eq("_id", id))
             .FirstOrDefaultAsync(cancellationToken);
@@ -55,7 +76,7 @@ public static class MongoEntityOperations
         IMongoDatabase database, TId id, CancellationToken cancellationToken)
         where T : class
     {
-        var collection = database.GetCollection<T>(MongoConstants.EntityCollectionName(typeof(T)));
+        var collection = entityCollection<T>(database);
         return collection
             .Find(Builders<T>.Filter.Eq("_id", id))
             .FirstOrDefaultAsync(cancellationToken);
@@ -73,7 +94,7 @@ public static class MongoEntityOperations
         IMongoDatabase database, IClientSessionHandle session, T entity, CancellationToken cancellationToken)
         where T : class
     {
-        var collection = database.GetCollection<T>(MongoConstants.EntityCollectionName(typeof(T)));
+        var collection = entityCollection<T>(database);
         return collection.ReplaceOneAsync(
             session,
             Builders<T>.Filter.Eq("_id", IdOf(entity)),
@@ -91,7 +112,7 @@ public static class MongoEntityOperations
         IMongoDatabase database, IClientSessionHandle session, T entity, CancellationToken cancellationToken)
         where T : class
     {
-        var collection = database.GetCollection<T>(MongoConstants.EntityCollectionName(typeof(T)));
+        var collection = entityCollection<T>(database);
         return collection.DeleteOneAsync(
             session,
             Builders<T>.Filter.Eq("_id", IdOf(entity)),
@@ -127,8 +148,13 @@ public static class MongoEntityOperations
     /// This honors the driver's default Id-member convention (e.g. <c>Todo.Id</c>) and works for every
     /// native id type (<c>string</c>/<c>Guid</c>/<c>int</c>/<c>long</c>) with no per-type code. It is
     /// explicitly <b>not</b> Cosmos's <c>entity.ToString()</c> hack, which would be wrong for a POCO
-    /// whose <c>ToString()</c> is its type name. The throw surfaces a clear, early error if generic
-    /// persistence is registered for a type with no mapped id member.
+    /// whose <c>ToString()</c> is its type name.
+    ///
+    /// <para>Deliberately unchanged by the identity-agreement fix: every caller reaches this only via
+    /// <see cref="entityCollection{T}"/>, which has already aligned the class map, so the driver's
+    /// mapped id member <i>is</i> Wolverine's resolved identity member. The read filters and this write
+    /// side therefore agree by construction. The throw stays as a backstop and is unreachable in
+    /// practice — alignment fails loudly first.</para>
     /// </summary>
     private static object IdOf<T>(T entity)
         => BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap?.Getter(entity)
@@ -153,6 +179,13 @@ internal class LoadEntityFrame : AsyncFrame
 
     public LoadEntityFrame(Type entityType, Variable id)
     {
+        // Codegen-time alignment: the _id filter below carries the value of Wolverine's resolved
+        // identity member, so the driver must serialize that same member as _id. Doing it here makes
+        // a conflicting class map or an unalignable identity member fail loudly during host build
+        // rather than as a silent null on the first load. (The runtime leg in entityCollection<T>
+        // covers TypeLoadMode.Static, where this constructor never runs.)
+        MongoIdentityMapping.EnsureIdMember(entityType);
+
         _id = id;
         uses.Add(id);
         Entity = new Variable(entityType, this);
@@ -206,6 +239,10 @@ internal class MongoUpsertEntityFrame : AsyncFrame
 
     public MongoUpsertEntityFrame(Variable entity)
     {
+        // See LoadEntityFrame's constructor — same codegen-time alignment, so the key this write
+        // lands under is the same one every [Entity] load filters on.
+        MongoIdentityMapping.EnsureIdMember(entity.VariableType);
+
         _entity = entity;
         uses.Add(entity);
     }
@@ -248,6 +285,9 @@ internal class MongoDeleteEntityByVariableFrame : AsyncFrame
 
     public MongoDeleteEntityByVariableFrame(Variable entity)
     {
+        // See LoadEntityFrame's constructor — same codegen-time alignment.
+        MongoIdentityMapping.EnsureIdMember(entity.VariableType);
+
         _entity = entity;
         uses.Add(entity);
     }

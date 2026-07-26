@@ -136,8 +136,26 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
     // Generic single-variable delete (Delete<T> return value, Delete.cs:26). Entity-only — sagas reach
     // delete through the two-variable overload above via SagaChain. The handed variable IS the entity
     // (core's EntityVariable); the _id is class-map-extracted inside MongoEntityOperations.DeleteAsync.
+    //
+    // LD4: a saga arriving here came from a plain handler's Delete<TSaga> return value, and nothing
+    // upstream guards it (Delete.cs:22-26 is gated only by CanPersist, which this provider hardcodes
+    // true). Before this guard the delete silently targeted the un-prefixed ENTITY collection while
+    // the saga lives in wolverine_saga_*, so it appeared to succeed and affected nothing. Routing it
+    // to the saga frames instead was rejected: without a SagaChain there is no captured oldVersion,
+    // which would trade a visible bug for silent OCC corruption inside the saga collection.
     public Frame DetermineDeleteFrame(Variable variable, IServiceContainer container)
-        => new MongoDeleteEntityByVariableFrame(variable);
+    {
+        if (variable.VariableType.CanBeCastTo<Saga>())
+        {
+            throw new InvalidOperationException(
+                $"Cannot use Delete<{variable.VariableType.FullNameInCode()}> from a non-saga handler: " +
+                "saga types are managed by Wolverine saga chains, which own the saga's identity, " +
+                "version guard, and collection. Complete the saga from a saga handler with " +
+                "MarkCompleted() instead.");
+        }
+
+        return new MongoDeleteEntityByVariableFrame(variable);
+    }
 
     // Generic IStorageAction<T>/UnitOfWork<T> return value (IStorageAction.cs:27,:96). Entity-only.
     // Mirrors RavenDb/Cosmos's MethodCall-to-a-static-applier pattern: codegen auto-resolves
@@ -149,6 +167,22 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
         Justification = "MakeGenericMethod over the runtime entity type during Dynamic codegen; matches RavenDb/Cosmos providers. AOT consumers run pre-generated frames in TypeLoadMode.Static.")]
     public Frame DetermineStorageActionFrame(Type entityType, Variable action, IServiceContainer container)
     {
+        // LD4 — same rejection as the single-variable DetermineDeleteFrame above, for the
+        // IStorageAction<TSaga> form (IStorageAction.cs:23-27, Storage.cs:63-74, also gated only by
+        // CanPersist). Guard first: nothing may be constructed for a saga on this path.
+        if (entityType.CanBeCastTo<Saga>())
+        {
+            throw new InvalidOperationException(
+                $"Cannot use IStorageAction<{entityType.FullNameInCode()}> from a non-saga handler: " +
+                "saga types are managed by Wolverine saga chains, which own the saga's identity, " +
+                "version guard, and collection. Return the saga from a saga handler, or complete it " +
+                "with MarkCompleted(), instead.");
+        }
+
+        // No custom frame exists on this path (it builds a bare MethodCall), so the codegen-time
+        // class-map alignment every entity frame constructor performs goes here instead.
+        MongoIdentityMapping.EnsureIdMember(entityType);
+
         var method = typeof(MongoEntityOperations)
             .GetMethod(nameof(MongoEntityOperations.ApplyStorageActionAsync))!
             .MakeGenericMethod(entityType);
