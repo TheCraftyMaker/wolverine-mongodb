@@ -9,6 +9,35 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+- **Generic entity loads and writes now agree on the same identity member.** The `[Entity]` load
+  frame filtered `_id` with the value of the member *Wolverine* resolved
+  (`[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`), while
+  `Insert`/`Update`/`Store`/`Delete<T>` keyed `_id` off whatever the *driver* mapped
+  (`Id`/`id`/`_id`, plus `[BsonId]`). When the two named different members, writes landed under one
+  key and reads probed another — an entity keyed only on e.g. `ShipmentId` had no mapped `_id` at
+  all (the write threw "has no mapped _id member"), and the review's poisoned shape (an entity
+  carrying **both** `{TypeName}Id` and `Id`) worked only for as long as the application kept the two
+  members equal. Every entity frame constructor — plus `DetermineStorageActionFrame`, which builds a
+  bare `MethodCall` and so has no constructor to hook — now calls the same
+  `MongoIdentityMapping.EnsureIdMember` the saga frames use, and every runtime operation goes
+  through a single collection accessor that aligns first (required because `TypeLoadMode.Static`
+  attaches pre-generated handlers without ever constructing frames).
+  - **Entities whose identity member is named `Id` are completely unaffected — on disk and in the
+    BSON registry** — whether that member is declared on the type or inherited from a base class,
+    as are `[BsonId]`-annotated members at any level. `MongoEntityOperations.IdOf` is unchanged:
+    once the class map is aligned, the driver's mapped id member *is* Wolverine's resolved one.
+  - The same two unalignable shapes the saga frames reject now also fail with an actionable
+    `InvalidOperationException` **at host build** for entities: an identity member declared on a
+    base type, and a different, base-declared member already occupying `_id`.
+- **A non-saga handler returning `Delete<TSaga>` or `IStorageAction<TSaga>` now fails at host build
+  instead of writing to the wrong collection.** Nothing upstream guards those paths — they are
+  gated only by `CanPersist`, which this provider hardcodes `true` — so both compiled cleanly and
+  then targeted the un-prefixed **entity** collection (`orderfulfillmentsaga`) rather than
+  `wolverine_saga_orderfulfillmentsaga`, with no `Saga.Version` guard. The write appeared to
+  succeed and affected nothing the saga machinery reads. Routing them to the saga frames was
+  rejected: without a `SagaChain` there is no captured `oldVersion`, which would trade a visible
+  bug for silent optimistic-concurrency corruption inside the saga collection. Sagas are completed
+  with `MarkCompleted()` from a saga handler; no sibling provider supports this path either.
 - **Incoming recovery claims are destination-scoped in `MessageIdentity.IdAndDestination` mode.**
   `ReassignIncomingAsync` filtered on the raw envelope `Guid`, but in `IdAndDestination` mode the
   inbox identity unit is the `(envelope id, destination)` pair — one Guid legitimately has a
