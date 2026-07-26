@@ -109,7 +109,7 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F13** | `fix/diagnostics-identity-coercion` | fix: ISagaStoreDiagnostics identity coercion (Marten parity) | — | Can start immediately | Sonnet |
 | **F14** | `fix/nuget-dependency-ranges` | fix: bounded NuGet dependency ranges for WolverineFx + MongoDB.Driver | — | Can start immediately | Sonnet |
 | **F15** | `docs/truth-sweep` | docs: post-1.0.0 truth sweep (version, versioning rule, collection counts) | — | Can start immediately | Sonnet |
-| **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | **Unblocked** — F8 (#183) and F10 (#184) both merged | Sonnet |
+| **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | **Done** (#187) — 214 single-node + 18 multinode green on net9.0 and net10.0 | Sonnet |
 | **F17** | `chore/store-efficiency` | chore: DLQ replay batching, cached node collections, parallel node loads | **F11** | Partially blocked by: F11 (shares Durability.cs; NodeAgents parts independent) | Sonnet |
 | **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | Blocked by: F5, F6, F7 (merged & packed) | Sonnet |
 | **F19** | `test/remediation-regression` | test: full cross-feature regression (inbox+outbox+saga+entity+solo+multinode) | **F6–F18 merged** | Blocked by: F6–F18 | Sonnet |
@@ -557,7 +557,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** **F8, F10** (same files — avoid conflicts).
 - **Blocking status:** **Unblocked** — F8 ([#183](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/183)) and F10 ([#184](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/184)) are both merged.
 
-- [ ] **Step 1:** Apply refactors 1–4; full suite + multinode green on both TFMs. FOLLOWUPS entry for `AgentUri`. Commit (`chore: deduplicate inbox/outbox definitions + AnyNode sentinel`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Apply refactors 1–4; full suite + multinode green on both TFMs. FOLLOWUPS entry for `AgentUri`. Commit (`chore: deduplicate inbox/outbox definitions + AnyNode sentinel`), push, PR, checks green, update plan doc. — Done via [#187](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/187).
 
 ### Task F17: Store efficiency sweep
 

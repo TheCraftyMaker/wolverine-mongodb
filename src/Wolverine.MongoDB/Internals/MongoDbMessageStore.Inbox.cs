@@ -1,6 +1,5 @@
 using MongoDB.Driver;
 using Wolverine.Persistence.Durability;
-using Wolverine.Transports;
 
 namespace Wolverine.MongoDB.Internals;
 
@@ -171,14 +170,7 @@ public partial class MongoDbMessageStore : IMessageInbox
     }
 
     public Task MarkIncomingEnvelopeAsHandledAsync(Envelope envelope)
-    {
-        var id = InboxIdentity(envelope);
-        return Incoming.UpdateOneAsync(
-            Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
-            Builders<IncomingMessage>.Update
-                .Set(x => x.Status, EnvelopeStatus.Handled)
-                .Set(x => x.KeepUntil, DateTimeOffset.UtcNow.Add(_options.Durability.KeepAfterMessageHandling)));
-    }
+        => MarkIncomingEnvelopeAsHandledAsync(new[] { envelope });
 
     public Task MarkIncomingEnvelopeAsHandledAsync(IReadOnlyList<Envelope> envelopes)
     {
@@ -198,30 +190,32 @@ public partial class MongoDbMessageStore : IMessageInbox
             Builders<IncomingMessage>.Update.Set(x => x.Attempts, envelope.Attempts));
     }
 
+    /// <summary>
+    /// Shared by <see cref="ScheduleExecutionAsync"/> and
+    /// <see cref="RescheduleExistingEnvelopeForRetryAsync"/> — both move an incoming envelope back
+    /// to <see cref="EnvelopeStatus.Scheduled"/>, released to <see cref="MongoConstants.AnyNode"/>,
+    /// with the envelope's current execution time and attempt count. One definition so the two call
+    /// sites can't drift.
+    /// </summary>
+    private static UpdateDefinition<IncomingMessage> SchedulingUpdate(Envelope envelope)
+        => Builders<IncomingMessage>.Update
+            .Set(x => x.ExecutionTime, envelope.ScheduledTime?.ToUniversalTime())
+            .Set(x => x.Status, EnvelopeStatus.Scheduled)
+            .Set(x => x.Attempts, envelope.Attempts)
+            .Set(x => x.OwnerId, MongoConstants.AnyNode);
+
     public Task ScheduleExecutionAsync(Envelope envelope)
     {
         var id = InboxIdentity(envelope);
-        return Incoming.UpdateOneAsync(
-            Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
-            Builders<IncomingMessage>.Update
-                .Set(x => x.ExecutionTime, envelope.ScheduledTime?.ToUniversalTime())
-                .Set(x => x.Status, EnvelopeStatus.Scheduled)
-                .Set(x => x.Attempts, envelope.Attempts)
-                .Set(x => x.OwnerId, 0));
+        return Incoming.UpdateOneAsync(Builders<IncomingMessage>.Filter.Eq(x => x.Id, id), SchedulingUpdate(envelope));
     }
 
     public async Task RescheduleExistingEnvelopeForRetryAsync(Envelope envelope)
     {
         envelope.Status = EnvelopeStatus.Scheduled;
-        envelope.OwnerId = TransportConstants.AnyNode;
+        envelope.OwnerId = MongoConstants.AnyNode;
         var id = InboxIdentity(envelope);
-        var result = await Incoming.UpdateOneAsync(
-            Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
-            Builders<IncomingMessage>.Update
-                .Set(x => x.Status, EnvelopeStatus.Scheduled)
-                .Set(x => x.OwnerId, 0)
-                .Set(x => x.ExecutionTime, envelope.ScheduledTime?.ToUniversalTime())
-                .Set(x => x.Attempts, envelope.Attempts));
+        var result = await Incoming.UpdateOneAsync(Builders<IncomingMessage>.Filter.Eq(x => x.Id, id), SchedulingUpdate(envelope));
         if (result.MatchedCount == 0)
         {
             await StoreIncomingAsync(envelope);
@@ -277,5 +271,5 @@ public partial class MongoDbMessageStore : IMessageInbox
             Builders<IncomingMessage>.Filter.And(
                 Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, ownerId),
                 Builders<IncomingMessage>.Filter.Eq(x => x.ReceivedAt, receivedAt.ToString())),
-            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, 0));
+            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode));
 }
