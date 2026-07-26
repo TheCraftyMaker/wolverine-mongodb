@@ -201,6 +201,19 @@ Promote to GitHub issues before the first public release.
   which is gated on the same event). The Mongo-specific assertions to drop when lifting are the direct
   `_id` BSON-type reads; the lifecycle assertions transfer as-is.
 
+- **`AgentAssignmentDocument.Id`/`AgentUri` duplication — decision (F16, 2026-07-27: document/defer).**
+  `AgentAssignmentDocument` (`Internals/AgentAssignmentDocument.cs`) stores the agent URI twice:
+  once as the BSON `_id` (`Id`, the natural key every write already keys on) and again verbatim in
+  the `agentUri` element (`AgentUri`), which every read (`AssignAgentsAsync`/`GetAgentsAsync`/
+  `AllAgentsAsync` in `MongoDbMessageStore.NodeAgents.cs`) re-parses back into a `Uri`. F16 was
+  scoped to behavior-preserving code refactors only (no document-schema changes), so this is
+  deliberately left as-is rather than folded into that PR. **Decision: harmless, deferred** — the
+  duplication costs one redundant string per document, not a correctness issue, and dropping
+  `AgentUri` in favor of re-deriving it from `Id` (`new Uri(doc.Id)`) is a document-shape change
+  that needs its own red-first test pass, not a drive-by. **If revisited:** replace `AgentUri`
+  reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
+  (test or app) reads the `agentUri` field directly first.
+
 ## Untested-but-inspected paths (add deterministic coverage later)
 
 - Bulk `StoreIncomingAsync` non-duplicate-error rethrow branch (no clean way to

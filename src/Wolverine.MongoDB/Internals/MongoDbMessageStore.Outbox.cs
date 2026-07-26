@@ -38,8 +38,7 @@ public partial class MongoDbMessageStore : IMessageOutbox
     {
         if (discards.Length > 0)
         {
-            await Outgoing.DeleteManyAsync(
-                Builders<OutgoingMessage>.Filter.In(x => x.Id, discards.Select(e => e.Id)));
+            await DeleteOutgoingAsync(discards);
         }
 
         if (reassigned.Length > 0)

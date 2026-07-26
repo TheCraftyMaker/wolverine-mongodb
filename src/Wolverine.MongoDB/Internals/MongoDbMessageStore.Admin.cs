@@ -111,18 +111,18 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
 
     public async Task ReleaseAllOwnershipAsync()
     {
-        await Incoming.UpdateManyAsync(Builders<IncomingMessage>.Filter.Ne(x => x.OwnerId, 0),
-            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, 0));
-        await Outgoing.UpdateManyAsync(Builders<OutgoingMessage>.Filter.Ne(x => x.OwnerId, 0),
-            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, 0));
+        await Incoming.UpdateManyAsync(Builders<IncomingMessage>.Filter.Ne(x => x.OwnerId, MongoConstants.AnyNode),
+            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode));
+        await Outgoing.UpdateManyAsync(Builders<OutgoingMessage>.Filter.Ne(x => x.OwnerId, MongoConstants.AnyNode),
+            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode));
     }
 
     public async Task ReleaseAllOwnershipAsync(int ownerId)
     {
         await Incoming.UpdateManyAsync(Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, ownerId),
-            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, 0));
+            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode));
         await Outgoing.UpdateManyAsync(Builders<OutgoingMessage>.Filter.Eq(x => x.OwnerId, ownerId),
-            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, 0));
+            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode));
     }
 
     public async Task CheckConnectivityAsync(CancellationToken token)
