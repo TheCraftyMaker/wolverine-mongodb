@@ -30,8 +30,12 @@ public class inbox
             () => store.Inbox.StoreIncomingAsync(envelope));
     }
 
+    // Batch atomicity itself is covered in inbox_batch_atomicity.cs. This fact adds the one thing
+    // that file deliberately does not assert: that the reported dupe list is exact, not merely
+    // non-empty. The post-abort existence probe makes that achievable even though the server's
+    // own write-error list is fail-fast/partial.
     [Fact]
-    public async Task bulk_store_throws_for_dupe_subset_and_persists_the_rest()
+    public async Task bulk_store_reports_only_the_dupe_and_persists_nothing()
     {
         var store = _fixture.BuildMessageStore();
         await store.Admin.RebuildAsync();
@@ -52,9 +56,11 @@ public class inbox
         ex.Duplicates.Count.ShouldBe(1);
         ex.Duplicates.Single().Id.ShouldBe(existing.Id);
 
-        // The non-duplicate envelopes must still have persisted (unordered insert).
-        (await store.Inbox.ExistsAsync(fresh1, CancellationToken.None)).ShouldBeTrue();
-        (await store.Inbox.ExistsAsync(fresh2, CancellationToken.None)).ShouldBeTrue();
+        // The batch is all-or-nothing: the fresh envelopes must NOT have persisted, or
+        // DurableReceiver's per-envelope retry would complete them as duplicates without
+        // ever enqueuing them.
+        (await store.Inbox.ExistsAsync(fresh1, CancellationToken.None)).ShouldBeFalse();
+        (await store.Inbox.ExistsAsync(fresh2, CancellationToken.None)).ShouldBeFalse();
     }
 
     [Fact]

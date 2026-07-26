@@ -19,29 +19,136 @@ public partial class MongoDbMessageStore : IMessageInbox
         }
     }
 
+    /// <summary>
+    /// MongoDB ignores collection/database-level write concern for operations inside a
+    /// transaction — the commit is governed by the transaction's own write concern. The store's
+    /// durability pin (<see cref="MongoDbMessageStore"/> ctor: w:majority + j:true) lives on the
+    /// database handle and does NOT survive into a transaction, so wrapping a write without
+    /// explicit options would silently downgrade it to the consumer's client default (often w:1).
+    /// These options restate the pin.
+    /// </summary>
+    private static readonly TransactionOptions InboxTransactionOptions = new(
+        readConcern: ReadConcern.Majority,
+        writeConcern: WriteConcern.WMajority.With(journal: true));
+
+    private const int DuplicateKeyErrorCode = 11000;
+
+    /// <summary>
+    /// A batch store is all-or-nothing: either every envelope persists or none does.
+    /// <para>
+    /// <c>DurableReceiver</c> re-posts the whole batch through its per-envelope path after a
+    /// <see cref="DuplicateIncomingEnvelopeException"/> (<c>DurableReceiver.cs:706-717</c>), and
+    /// that path <em>completes</em> a duplicate at the listener without enqueuing it (<c>:522</c>,
+    /// <c>:530</c>). A partially-persisted batch therefore strands its fresh envelopes: stored,
+    /// owned by this live node, never handled, and invisible to orphan recovery (which matches only
+    /// <c>OwnerId == AnyNode</c>). Transaction-wrapping restores the RDBMS provider's contract
+    /// (<c>MessageDatabase.Incoming.cs:174-213</c>).
+    /// </para>
+    /// </summary>
     public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
     {
         if (envelopes.Count == 0) return;
         var docs = envelopes.Select(e => new IncomingMessage(e, InboxIdentity(e))).ToList();
+
+        // WithTransactionAsync transparently retries TransientTransactionError /
+        // UnknownTransactionCommitResult and aborts automatically if the body throws.
+        using var session = await _client.StartSessionAsync();
         try
         {
-            await Incoming.InsertManyAsync(docs, new InsertManyOptions { IsOrdered = false });
+            await session.WithTransactionAsync(async (s, ct) =>
+            {
+                // IsOrdered = false is inert with respect to error handling here — inside a
+                // transaction the server aborts on the FIRST write error regardless. It is kept
+                // for the success path's batching behavior.
+                await Incoming.InsertManyAsync(s, docs, new InsertManyOptions { IsOrdered = false }, ct);
+                return true;
+            }, InboxTransactionOptions);
         }
-        catch (MongoBulkWriteException<IncomingMessage> ex)
+        catch (Exception e) when (isDuplicateKeyFailure(e))
         {
-            var dupes = ex.WriteErrors
-                .Where(w => w.Category == ServerErrorCategory.DuplicateKey)
-                .Select(w => envelopes[w.Index])
-                .ToList();
-            var others = ex.WriteErrors
-                .Where(w => w.Category != ServerErrorCategory.DuplicateKey)
-                .ToList();
+            // The transaction is already aborted, so nothing from this batch survives and a single
+            // existence probe now yields the complete, precise duplicate list — no dependency on
+            // which exception shape the driver surfaced, or on how much the fail-fast server
+            // managed to report.
+            var dupes = await probeForExistingAsync(envelopes);
 
-            // Non-duplicate failures must surface — silently swallowing them would lose messages.
-            if (others.Count > 0) throw;
-            if (dupes.Count > 0) throw new DuplicateIncomingEnvelopeException(dupes);
+            if (dupes.Count == 0)
+            {
+                // Nothing pre-existed, yet a duplicate key was rejected: two envelopes within this
+                // batch share an identity. Report the members of every repeated identity group.
+                dupes = envelopes.GroupBy(InboxIdentity)
+                    .Where(g => g.Count() > 1)
+                    .SelectMany(g => g)
+                    .Distinct()
+                    .ToList();
+            }
+
+            // DuplicateIncomingEnvelopeException must never be constructed empty, and a genuinely
+            // unexplained failure has to surface as itself.
+            if (dupes.Count == 0) throw;
+            throw new DuplicateIncomingEnvelopeException(dupes);
         }
     }
+
+    /// <summary>
+    /// One query, complete list: every batch identity that exists in the inbox. Only ever called
+    /// after the batch transaction aborted, so anything found is a pre-existing document — a
+    /// genuine duplicate.
+    /// </summary>
+    private async Task<List<Envelope>> probeForExistingAsync(IReadOnlyList<Envelope> envelopes)
+    {
+        var ids = envelopes.Select(InboxIdentity).Distinct().ToList();
+        var present = await Incoming
+            .Find(Builders<IncomingMessage>.Filter.In(x => x.Id, ids))
+            .Project(x => x.Id)
+            .ToListAsync();
+
+        var presentSet = present.ToHashSet();
+        return envelopes.Where(e => presentSet.Contains(InboxIdentity(e))).ToList();
+    }
+
+    /// <summary>
+    /// Recognises a duplicate-key failure across every shape the driver can surface for a failed
+    /// insert inside a session, by category or by code 11000, walking inner exceptions.
+    /// <para>
+    /// Verified against MongoDB.Driver 3.10.0 / mongo:7: an in-transaction duplicate surfaces as
+    /// <c>MongoBulkWriteException&lt;IncomingMessage&gt;</c> with a <em>single</em> write error
+    /// (<c>code=11000</c>, <c>category=DuplicateKey</c>) at the index of the first offending
+    /// document — the server fails fast, so later indexes are never attempted and the write-error
+    /// list cannot be used to enumerate duplicates. That is why the dupe list comes from a
+    /// post-abort probe instead. The remaining branches keep the classifier tolerant of other
+    /// shapes rather than dependent on this one.
+    /// </para>
+    /// <para>
+    /// Returns <c>false</c> when the exception carries <em>any</em> non-duplicate write error: a
+    /// mixed failure must surface as itself so <c>DurableReceiver.cs:718</c> pauses the listener
+    /// and runs the inbox-unavailable path instead of being reported as a duplicate.
+    /// </para>
+    /// </summary>
+    private static bool isDuplicateKeyFailure(Exception exception)
+    {
+        switch (exception)
+        {
+            case MongoBulkWriteException bulk:
+                if (bulk.WriteErrors.Any(w => !isDuplicateKey(w.Category, w.Code))) return false;
+                return bulk.WriteErrors.Any(w => isDuplicateKey(w.Category, w.Code));
+
+            case MongoWriteException write:
+                return write.WriteError is { } error && isDuplicateKey(error.Category, error.Code);
+
+            case MongoCommandException command:
+                return command.Code == DuplicateKeyErrorCode;
+
+            case AggregateException aggregate:
+                return aggregate.InnerExceptions.Any(isDuplicateKeyFailure);
+
+            default:
+                return exception.InnerException is { } inner && isDuplicateKeyFailure(inner);
+        }
+    }
+
+    private static bool isDuplicateKey(ServerErrorCategory category, int code)
+        => category == ServerErrorCategory.DuplicateKey || code == DuplicateKeyErrorCode;
 
     public async Task<bool> ExistsAsync(Envelope envelope, CancellationToken cancellation)
     {

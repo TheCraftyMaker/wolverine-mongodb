@@ -101,7 +101,7 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F5** | `docs/remediation-test-inventory` | docs: remediation — test inventory + demo impact design | — | Can start immediately | Sonnet |
 | **F6** | `fix/saga-identity-mapping` | fix: saga identity conventions map to _id (+ fail-fast id resolution) | **F3** | **Done** (#181) — 197 facts green net9.0+net10.0, multinode 18/18, zero edited compliance facts | **Fable 5 / Opus** |
 | **F7** | `fix/entity-identity-and-saga-guards` | fix: entity load/write identity agreement + saga guard on Delete/IStorageAction | **F3, F6** | **Can start** — F3 (#179/#180) and F6 (#181) merged. Scope narrowed by the F3 amendment: `MongoIdentityMapping` needs **no** change (§4.2 note), leaving the entity frame wiring, the two LD4 guards, test row 24, and design §7(d)'s CLAUDE.md bullet (deliberately left by F6) | **Fable 5 / Opus** |
-| **F8** | `fix/batch-inbox-atomicity` | fix: all-or-nothing batch StoreIncomingAsync on duplicate | **F4** | Blocked by: F4 | **Fable 5 / Opus** |
+| **F8** | `fix/batch-inbox-atomicity` | fix: all-or-nothing batch StoreIncomingAsync on duplicate | **F4** | **Done** (#182) — 201 single-node + 18 multinode green on net9.0 and net10.0; in-transaction failure shape empirically pinned (see Step 2) | **Fable 5 / Opus** |
 | **F9** | `fix/dlq-edit-replay-empty-body` | fix: EditAndReplayAsync tolerates body-less poison dead letters | — | Can start immediately | Sonnet |
 | **F10** | `fix/destination-scoped-claims` | fix: destination-scoped incoming claims (IdAndDestination) | **F4** | Blocked by: F4 | **Fable 5 / Opus** |
 | **F11** | `fix/dead-node-release-race` | fix: two-tick-confirmed dead-node ownership release | **F4** | Blocked by: F4 | **Fable 5 / Opus** |
@@ -399,10 +399,19 @@ public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
 }
 ```
 
-- [ ] **Step 1:** Write the failing test (a): pre-store one envelope, batch-store it plus 4 fresh ones, assert the exception **and** `Incoming` count unchanged for the fresh ids → FAIL today (4 fresh docs persist).
-- [ ] **Step 2:** Implement the transaction wrap; confirm the duplicate-classification against the F2-verified in-transaction failure mode (adjust `MongoBulkWriteException` vs `MongoCommandException` handling to what the driver actually throws in a txn — if it differs from the shape above, follow the driver, not the snippet).
-- [ ] **Step 3:** Tests (a)+(b) PASS; full suite + `--filter "Category=multinode"` green on both TFMs. CHANGELOG entry.
-- [ ] **Step 4:** Commit (`fix: all-or-nothing batch StoreIncomingAsync`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test (a): pre-store one envelope, batch-store it plus 4 fresh ones, assert the exception **and** `Incoming` count unchanged for the fresh ids → FAIL today (4 fresh docs persist). **Confirmed red:** `should be 0L but was 4L`. The intra-batch-duplicate fact failed the same way (`should be 0 but was 2`).
+- [x] **Step 2:** Implement the transaction wrap; confirm the duplicate-classification against the F2-verified in-transaction failure mode. **Empirically pinned** (MongoDB.Driver 3.10.0 / mongo:7, throwaway probe): an in-transaction duplicate surfaces as `MongoBulkWriteException<IncomingMessage>` with **one** write error (`index` = first offending document, `code=11000`, `category=DuplicateKey`), no inner exception — i.e. the same type as the non-transactional path, but fail-fast, so the write-error list cannot enumerate duplicates. Confirms §1d's post-abort probe as the dupe-list source; the classifier keeps the other shapes per §1b's tolerance requirement. Recorded in the `isDuplicateKeyFailure` doc comment.
+- [x] **Step 3:** Tests (a)+(b) PASS; full suite + `--filter "Category=multinode"` green on both TFMs — **201 single-node + 18 multinode on net9.0 and net10.0**. CHANGELOG entry added.
+- [x] **Step 4:** Commit (`fix: all-or-nothing batch StoreIncomingAsync on duplicate`), push, PR, checks green, update plan doc.
+
+**Existing-test amendment (not a weakened assertion).** `inbox.cs`'s
+`bulk_store_throws_for_dupe_subset_and_persists_the_rest` asserted the *defect* by name — that the
+non-duplicate envelopes "must still have persisted (unordered insert)". It is renamed
+`bulk_store_reports_only_the_dupe_and_persists_nothing` and its two `ShouldBeTrue()` persistence
+assertions inverted. Its distinct value is retained and deliberately not duplicated in the new file:
+it asserts the dupe list is **exact** (`Count == 1`, the pre-stored envelope), which the post-abort
+probe makes achievable, whereas `inbox_batch_atomicity.cs` asserts only `≥1` per LD2's robustness
+preference.
 
 ### Task F9: `EditAndReplayAsync` tolerates body-less poison letters
 
