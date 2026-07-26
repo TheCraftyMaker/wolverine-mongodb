@@ -143,6 +143,21 @@ The major version tracks Wolverine's major version.
   `MongoDbMessageStore.NodeAgents.cs`). No behavior changes.
 
 ### Changed
+- **Store efficiency sweep — behavior-preserving.** `ReplayDeadLettersAsync` now caps its
+  `Find` with `.Limit(Durability.RecoveryBatchSize)` like every sibling recovery path, and
+  replays the fetched batch with one `StoreIncomingAsync(list)` + one `DeleteManyAsync` instead
+  of a `StoreIncomingAsync`/`DeleteOneAsync` pair per letter. Because batch `StoreIncomingAsync`
+  is all-or-nothing, a duplicate anywhere in the batch (the crash-window shape: a previous pass
+  re-inserted the envelope but didn't finish deleting its DLQ doc) makes the batch throw
+  `DuplicateIncomingEnvelopeException`; the method now catches that and falls back to the
+  original per-letter path so every other letter in the batch still replays and the documented
+  idempotent-replay behavior is preserved. `MongoDbMessageStore.NodeAgents.cs`: the
+  `NodeDocs`/`AssignmentDocs`/`RecordDocs`/`RestrictionDocs`/`Counters` collection handles are now
+  cached in the constructor instead of resolved on every call (matching `Incoming`/`Outgoing`);
+  `LoadAllNodesAsync` fetches nodes and assignments concurrently via `Task.WhenAll` and joins them
+  with a `ToLookup`; `PersistAgentRestrictionsAsync` issues one `BulkWriteAsync` (mixing
+  `DeleteOneModel`/`ReplaceOneModel`) instead of one round trip per restriction, mirroring
+  `AssignAgentsAsync`.
 - Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.21.0 and re-pinned the
   `external/wolverine` submodule to `V6.21.0`. Full compliance suite and multinode suite
   re-verified green on both net9.0 and net10.0; no provider code changes required. Demo's

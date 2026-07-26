@@ -21,7 +21,10 @@ public partial class MongoDbMessageStore
     {
         var replayable = await DeadLetterDocs
             .Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Replayable, true))
+            .Limit(_options.Durability.RecoveryBatchSize)
             .ToListAsync(token);
+
+        var toReplay = new List<(DeadLetterMessage Doc, Envelope Envelope)>();
 
         foreach (var doc in replayable)
         {
@@ -39,20 +42,45 @@ public partial class MongoDbMessageStore
             var envelope = EnvelopeSerializer.Deserialize(doc.Body);
             envelope.Status = EnvelopeStatus.Incoming;
             envelope.OwnerId = MongoConstants.AnyNode;
+            toReplay.Add((doc, envelope));
+        }
 
-            try
-            {
-                await StoreIncomingAsync(envelope);
-            }
-            catch (DuplicateIncomingEnvelopeException)
-            {
-                // A previous pass (or a competing node) already re-inserted this envelope
-                // and crashed before deleting the DLQ doc. Fall through: removing the
-                // DLQ doc below is what converges the replay.
-            }
+        if (toReplay.Count == 0)
+        {
+            return;
+        }
 
-            await DeadLetterDocs.DeleteOneAsync(
-                Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, doc.Id), token);
+        try
+        {
+            // Batch store is all-or-nothing (F8): the common case (no duplicates in the batch)
+            // persists every envelope and deletes every handled DLQ doc in two round trips
+            // instead of one StoreIncomingAsync + DeleteOneAsync pair per letter.
+            await StoreIncomingAsync(toReplay.Select(x => x.Envelope).ToList());
+            await DeadLetterDocs.DeleteManyAsync(
+                Builders<DeadLetterMessage>.Filter.In(x => x.Id, toReplay.Select(x => x.Doc.Id)), token);
+        }
+        catch (DuplicateIncomingEnvelopeException)
+        {
+            // The batch persisted nothing: at least one envelope in it already exists in the
+            // inbox (the crash-window shape below). Fall back to the per-letter path so every
+            // OTHER letter in the batch still replays, and the documented idempotent-replay
+            // behavior (a duplicate converges by deleting its DLQ doc) survives.
+            foreach (var (doc, envelope) in toReplay)
+            {
+                try
+                {
+                    await StoreIncomingAsync(envelope);
+                }
+                catch (DuplicateIncomingEnvelopeException)
+                {
+                    // A previous pass (or a competing node) already re-inserted this envelope
+                    // and crashed before deleting the DLQ doc. Fall through: removing the
+                    // DLQ doc below is what converges the replay.
+                }
+
+                await DeadLetterDocs.DeleteOneAsync(
+                    Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, doc.Id), token);
+            }
         }
     }
 
