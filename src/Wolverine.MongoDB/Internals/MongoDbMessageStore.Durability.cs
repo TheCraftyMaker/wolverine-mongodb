@@ -169,28 +169,89 @@ public partial class MongoDbMessageStore
     }
 
     /// <summary>
-    /// Releases incoming/outgoing ownership held by node numbers that have no
-    /// registered node document (crashed nodes). Mirrors the RDBMS
-    /// ReleaseOrphanedMessagesOperation. Safe to run on any node, any time:
-    /// a live node always has a node document, so its in-flight work is never touched.
+    /// Node numbers observed as owned-but-unregistered on the previous recovery tick. Per-store
+    /// state, not per-agent: <c>StartScheduledJobs</c> and <c>BuildAgent</c> each construct a new
+    /// <c>MongoDbDurabilityAgent</c>, so "one agent per store" is not guaranteed by construction,
+    /// while one dead-set per database is. Today the recovery loop is the only live caller (the
+    /// scheduled-jobs agent is never started), so no locking is required; if a future Wolverine
+    /// version starts a second agent, add an <c>Interlocked</c>/<c>lock</c> guard here rather than
+    /// moving this field onto the agent.
+    /// </summary>
+    private HashSet<int>? _previousDeadOwners;
+
+    /// <summary>
+    /// Releases incoming/outgoing ownership held by node numbers that are confirmed dead: a number
+    /// must be observed as owned-but-unregistered on TWO consecutive recovery ticks before its
+    /// envelopes are released, and the release write names those numbers positively
+    /// (<c>Filter.In(confirmed)</c>) rather than excluding a possibly-stale live snapshot
+    /// (<c>Filter.Nin(live)</c>).
+    ///
+    /// Why this is sound (do not weaken to a single tick):
+    ///  1. A number only enters the candidate set if some document already carries it as OwnerId.
+    ///  2. A node cannot own anything before <c>INodeAgentPersistence.PersistAsync</c> has written
+    ///     its node document (PersistAsync allocates the number and writes the doc before
+    ///     returning, and the leader can only assign this store's durability agent from the
+    ///     persisted node table).
+    ///  3. The owned-set read happens BEFORE the live-set read, so "owned but not live" means the
+    ///     node document existed at the earlier instant and was gone at the later one — i.e. it was
+    ///     deleted on shutdown (NodeAgentController), never merely mid-registration.
+    ///  4. Node numbers are monotonic and never reused (see the node-number-reuse decision in
+    ///     CLAUDE.md, T4.6), so a number issued after the previous tick cannot appear in the
+    ///     previous tick's dead set. Together with (3), a confirmed number was dead for the whole
+    ///     interval between the two ticks, not merely at one instant.
+    ///
+    /// (3) and (4) are independent on purpose: even if a future change reused freed node numbers,
+    /// (3) would still exclude a starting node and the In(confirmed) whitelist would still exclude
+    /// any number unobserved at both reads.
+    ///
+    /// Cost: a crashed node's envelopes are rescued one recovery interval later than before.
+    /// Graceful shutdown is unaffected — it releases ownership directly via ReleaseAllOwnershipAsync.
+    /// Residual (out of scope, see FOLLOWUPS): if a *live* node's document is deleted by a reaper
+    /// while it is still claiming, its work is released after two ticks — the same semantic the RDBMS
+    /// single-statement release has; closing it requires an ownership fencing token.
     /// </summary>
     internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
     {
-        var liveNumbers = await NodeDocs
+        // OWNED FIRST, LIVE SECOND. This order is load-bearing (see fact 3 above): it makes the
+        // liveness check strictly later than the evidence of ownership, so a node that is merely
+        // mid-registration can never produce the "owned but not live" pattern.
+        var owned = new HashSet<int>();
+        owned.UnionWith(await Incoming
+            .Distinct(x => x.OwnerId, FilterDefinition<IncomingMessage>.Empty, cancellationToken: token)
+            .ToListAsync(token));
+        owned.UnionWith(await Outgoing
+            .Distinct(x => x.OwnerId, FilterDefinition<OutgoingMessage>.Empty, cancellationToken: token)
+            .ToListAsync(token));
+
+        var live = (await NodeDocs
             .Find(FilterDefinition<NodeDocument>.Empty)
             .Project(x => x.AssignedNodeNumber)
-            .ToListAsync(token);
+            .ToListAsync(token)).ToHashSet();
 
         // AnyNode (0) is by definition not "owned".
-        liveNumbers.Add(MongoConstants.AnyNode);
+        live.Add(MongoConstants.AnyNode);
+
+        var deadNow = owned.Where(n => !live.Contains(n)).ToHashSet();
+        var confirmed = _previousDeadOwners is null
+            ? []
+            : deadNow.Intersect(_previousDeadOwners).ToList();
+
+        // Assigned on EVERY path, including the early return below: a tick that finds nothing dead
+        // must not leave a stale set behind for the next tick to confirm against.
+        _previousDeadOwners = deadNow;
+
+        if (confirmed.Count == 0)
+        {
+            return;
+        }
 
         await Incoming.UpdateManyAsync(
-            Builders<IncomingMessage>.Filter.Nin(x => x.OwnerId, liveNumbers),
+            Builders<IncomingMessage>.Filter.In(x => x.OwnerId, confirmed),
             Builders<IncomingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode),
             cancellationToken: token);
 
         await Outgoing.UpdateManyAsync(
-            Builders<OutgoingMessage>.Filter.Nin(x => x.OwnerId, liveNumbers),
+            Builders<OutgoingMessage>.Filter.In(x => x.OwnerId, confirmed),
             Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode),
             cancellationToken: token);
     }
