@@ -97,7 +97,7 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F1** | `docs/identity-mapping-discovery` | docs: remediation — identity-mapping discovery (Wolverine conventions vs driver class map) | — | Can start immediately | Sonnet |
 | **F2** | `docs/durability-contracts-discovery` | docs: remediation — inbox/recovery/shutdown contract discovery | — | Can start immediately | Sonnet |
 | **F3** | `docs/identity-mapping-design` | docs: remediation — identity-mapping design (DESIGN GATE, LD1+LD4) | **F1** | Blocked by: F1 | **Fable 5 / Opus** |
-| **F4** | `docs/durability-coordination-design` | docs: remediation — durability & coordination design (DESIGN GATE, LD2+LD3) | **F2** | Blocked by: F2 | **Fable 5 / Opus** |
+| **F4** | `docs/durability-coordination-design` | docs: remediation — durability & coordination design (DESIGN GATE, LD2+LD3) | **F2** | **Done** — contracts binding for F8/F10/F11/F12 | **Fable 5 / Opus** |
 | **F5** | `docs/remediation-test-inventory` | docs: remediation — test inventory + demo impact design | — | Can start immediately | Sonnet |
 | **F6** | `fix/saga-identity-mapping` | fix: saga identity conventions map to _id (+ fail-fast id resolution) | **F3** | Blocked by: F3 | **Fable 5 / Opus** |
 | **F7** | `fix/entity-identity-and-saga-guards` | fix: entity load/write identity agreement + saga guard on Delete/IStorageAction | **F3, F6** | Blocked by: F3, F6 | **Fable 5 / Opus** |
@@ -208,7 +208,26 @@ The dominant risk is **concurrency/codegen correctness that passes a green suite
 - **Dependencies:** **F2.**
 - **Blocking status:** **Blocked by: F2.**
 
-- [ ] **Step 1:** Synthesize F2; resolve decisions 1–4; write the design doc. Commit (`docs: durability & coordination design`).
+- [x] **Step 1:** Synthesize F2; resolve decisions 1–4; write the design doc. Commit (`docs: durability & coordination design`).
+
+**Status: done.** `docs/superpowers/plans/2026-07-07-durability-coordination-design.md`, branch
+`docs/durability-coordination-design`. All four contracts are binding; **OQ3 → LD2 Option A**
+(transaction wrap) and **OQ4 → LD3 two-tick confirmation** are settled. Deviations from this plan's
+sketches, each argued in the design doc: (a) F8 uses the store's existing
+`session.WithTransactionAsync(...)` shape (`Inbox.cs:154-165` precedent) instead of manual
+`StartTransaction`/`Commit`/`Abort`, and **must** pass explicit `TransactionOptions`
+(`w:majority + j:true`) because MongoDB ignores the database-handle write-concern pin inside a
+transaction; (b) the duplicate list is rebuilt from a **single post-abort `_id` existence probe**
+(complete and driver-shape-independent) rather than `WriteErrors[i].Index`, which removes the
+partial-dupe-list caveat — tests still assert persistence count as the load-bearing fact;
+(c) LD3 additionally binds **owned-read-before-live-read** ordering and `Filter.In(confirmed)`
+(never `Filter.Nin(liveSnapshot)`), which closes the plan's cited race on its own — two-tick
+confirmation plus monotonic node numbers is the second, independent leg; (d) F12 needs **no** csproj
+change (`InternalsVisibleTo Wolverine.MongoDB.Tests` already exists at
+`src/Wolverine.MongoDB/Wolverine.MongoDB.csproj:14`). Also flagged: F11 must **amend** the existing
+single-tick assertion in `dead_node_ownership_release.cs:45-52` (strictly stronger, not weakened),
+and §0 records that the fact base was re-verified against the current submodule pin **V6.21.0**
+(F2 ran against V6.16.0 — substance unchanged, `DurableReceiver.cs` citations moved).
 
 ### Task F5: Test inventory + demo impact design
 
@@ -317,7 +336,10 @@ MongoIdentityMapping.EnsureIdMember(sagaType, idMember);
 - **Dependencies:** **F4.**
 - **Blocking status:** **Blocked by: F4.**
 
-Implementation shape (LD2 Option A):
+Implementation shape (LD2 Option A) — **superseded by F4's binding contract**
+(`2026-07-07-durability-coordination-design.md` §1): use `session.WithTransactionAsync` with explicit
+`TransactionOptions` (`w:majority + j:true`), and build the dupe list from a post-abort `_id`
+existence probe. The snippet below is kept for context only:
 
 ```csharp
 public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
@@ -390,7 +412,8 @@ public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
 - **Dependencies:** **F4.**
 - **Blocking status:** **Blocked by: F4.**
 
-Implementation shape (LD3):
+Implementation shape (LD3) — refined by F4 §2: read the **owned set before the live set**, and note
+that F11 must also amend the existing single-tick assertion in `dead_node_ownership_release.cs:45-52`:
 
 ```csharp
 private HashSet<int>? _previousDeadOwners;   // recovery loop = one caller; no locking needed
