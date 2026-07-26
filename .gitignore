@@ -24,5 +24,8 @@ artifacts/
 .vs/
 *.user
 
+# Playwright MCP session logs
+.playwright-mcp/
+
 # /teach workspace (personal learning materials — not part of the package)
 .teach/
