@@ -9,6 +9,34 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+- **Sagas keyed by any Wolverine identity convention other than `Id` now persist and load
+  correctly.** Wolverine resolves a saga's identity member by its own convention
+  (`[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`), while the MongoDB
+  driver only recognises `Id`/`id`/`_id` (plus `[BsonId]`). Nothing reconciled the two, so a saga
+  keyed on e.g. `ShipmentId` was written with a **server-generated `ObjectId` `_id`**: every load
+  returned `null`, every "start" silently accumulated another unfindable orphan document, and no
+  continuation or completion ever found the saga. `MongoIdentityMapping` now aligns the two at
+  codegen time (from all four saga frame constructors) *and* at runtime (via
+  `MongoSagaOperations`' collection accessor — required because `TypeLoadMode.Static` attaches
+  pre-generated handlers without ever constructing frames).
+  - **Sagas whose identity member is named `Id` are completely unaffected — on disk and in the
+    BSON registry.** The helper first asks what the driver will actually resolve, walking the
+    type's base chain, and does nothing at all when that already matches Wolverine's answer. That
+    covers `Id` declared on the saga *and* `Id` inherited from a base class, plus any
+    `[BsonId]`-annotated member at any level.
+  - Two shapes the driver makes unalignable now fail with an actionable
+    `InvalidOperationException` **at codegen** instead of corrupting data or failing on a first
+    write: an identity member declared on a **base** type (the driver will not let a subclass's
+    class map claim it — remedy: `[BsonId]` on that member, or register a class map for the
+    declaring type, either of which fixes every subclass at once), and a **different**,
+    base-declared member already occupying `_id`.
+- **Unresolvable saga identity members now fail loudly instead of inventing one.**
+  `UpdateSagaFrame` previously fell back to `?? "Id"` / `?? typeof(string)`, emitting generated
+  code that referenced a member which may not exist — surfacing as a cryptic compile error inside
+  the *generated* source. All identity resolution now funnels through
+  `MongoIdentityMapping.ResolveIdMember`, which throws the same `ArgumentException`
+  `DetermineSagaIdType` already threw; `DetermineSagaIdType` delegates to it, so there is one code
+  path and one message.
 - `MongoDbSagaStoreDiagnostics.ReadSagaAsync` now coerces the caller-supplied identity to the
   saga's native id type (`Guid`/`int`/`long`/`string`) before querying, per the
   `ISagaStoreDiagnostics` contract — mirrors `MartenSagaStoreDiagnostics.coerceIdentity`. A

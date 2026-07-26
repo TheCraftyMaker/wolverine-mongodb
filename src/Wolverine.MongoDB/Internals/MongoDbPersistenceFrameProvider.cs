@@ -83,14 +83,17 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
     // resolver — the same call the built-in lightweight provider uses
     // (LightweightSagaPersistenceFrameProvider.cs:80-82). No hand-rolled reflection.
     //
+    // Delegates to MongoIdentityMapping.ResolveIdMember so identity resolution has exactly ONE code
+    // path and one message across the provider and every saga/entity frame (the ArgumentException
+    // type and message text are unchanged from before that consolidation).
+    //
     // Scope: core only consults this on the envelope-header-only identity path
     // (SagaChain.cs:290-292, the SagaIdMember == null branch). Messages that carry a saga-id
     // member resolve the type from that member directly via PullSagaIdFromMessageFrame, so the
     // load/delete frames key _id off whatever typed sagaId variable they are handed regardless.
+    // GetRawMemberType() is non-null by construction — see UpdateSagaFrame's constructor.
     public Type DetermineSagaIdType(Type sagaType, IServiceContainer container)
-        => SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType()
-           ?? throw new ArgumentException(
-               $"Unable to determine the identity member for {sagaType.FullNameInCode()}", nameof(sagaType));
+        => MongoIdentityMapping.ResolveIdMember(sagaType).GetRawMemberType()!;
 
     // Used for sagas AND [Entity] parameter loads (EntityAttribute.cs:165). Branch saga-vs-entity:
     // Saga subclasses keep the version-aware saga load; plain entities get the simple entity load.

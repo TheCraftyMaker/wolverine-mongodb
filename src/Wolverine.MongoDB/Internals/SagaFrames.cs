@@ -26,6 +26,25 @@ namespace Wolverine.MongoDB.Internals;
 public static class MongoSagaOperations
 {
     /// <summary>
+    /// The single way to obtain a saga collection handle — every operation below routes through it so
+    /// the class-map alignment invariant holds <i>by construction</i>: you cannot get a handle for a
+    /// saga type without its Wolverine-resolved identity member having been mapped to <c>_id</c>
+    /// first, and any operation added later inherits the guarantee.
+    ///
+    /// <para>This runtime leg is <b>required</b>, not belt-and-braces. The frame constructors also
+    /// align (buying a loud failure at host build), but in <c>TypeLoadMode.Static</c> Wolverine
+    /// attaches pre-generated handler types without ever calling <c>HandlerChain.AssembleTypes</c>,
+    /// so no frame constructor runs at all. Codegen-time-only alignment would therefore be silently
+    /// absent from pre-generated/AOT deployments — a mode-dependent variant of the very corruption
+    /// this guards against. Cost is one lock-free dictionary probe against a network round-trip.</para>
+    /// </summary>
+    private static IMongoCollection<TSaga> sagaCollection<TSaga>(IMongoDatabase database) where TSaga : class
+    {
+        MongoIdentityMapping.EnsureIdMember(typeof(TSaga));
+        return database.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
+    }
+
+    /// <summary>
     /// Load a saga document by its <c>_id</c> within the session/transaction. Returns
     /// <c>null</c> when no document matches (the caller's null-guard becomes the
     /// "unknown saga" / "start new saga" branch).
@@ -34,7 +53,7 @@ public static class MongoSagaOperations
         IMongoDatabase database, IClientSessionHandle session, TId sagaId, CancellationToken cancellationToken)
         where TSaga : class
     {
-        var collection = database.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
+        var collection = sagaCollection<TSaga>(database);
         return collection
             .Find(session, Builders<TSaga>.Filter.Eq("_id", sagaId))
             .FirstOrDefaultAsync(cancellationToken);
@@ -53,7 +72,7 @@ public static class MongoSagaOperations
         IMongoDatabase database, IClientSessionHandle session, TSaga saga, CancellationToken cancellationToken)
         where TSaga : Saga
     {
-        var collection = database.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
+        var collection = sagaCollection<TSaga>(database);
         saga.Version = 1;
         return collection.InsertOneAsync(session, saga, options: null, cancellationToken);
     }
@@ -75,7 +94,7 @@ public static class MongoSagaOperations
         IMongoDatabase database, IClientSessionHandle session, TSaga saga, TId sagaId, CancellationToken cancellationToken)
         where TSaga : Saga
     {
-        var collection = database.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
+        var collection = sagaCollection<TSaga>(database);
 
         var oldVersion = saga.Version;
         saga.Version = oldVersion + 1;
@@ -109,7 +128,7 @@ public static class MongoSagaOperations
         IMongoDatabase database, IClientSessionHandle session, TId sagaId, CancellationToken cancellationToken)
         where TSaga : class
     {
-        var collection = database.GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
+        var collection = sagaCollection<TSaga>(database);
         return collection.DeleteOneAsync(
             session,
             Builders<TSaga>.Filter.Eq("_id", sagaId),
@@ -131,6 +150,11 @@ internal class LoadSagaFrame : AsyncFrame
 
     public LoadSagaFrame(Type sagaType, Variable sagaId)
     {
+        // Codegen-time alignment: makes a conflicting class map or an unresolvable identity member
+        // fail loudly during host build rather than on the first message. (The runtime leg in
+        // MongoSagaOperations covers TypeLoadMode.Static, where this constructor never runs.)
+        MongoIdentityMapping.EnsureIdMember(sagaType);
+
         _sagaId = sagaId;
         uses.Add(sagaId);
         Saga = new Variable(sagaType, this);
@@ -175,6 +199,8 @@ internal class InsertSagaFrame : AsyncFrame
 
     public InsertSagaFrame(Variable saga)
     {
+        MongoIdentityMapping.EnsureIdMember(saga.VariableType);
+
         _saga = saga;
         uses.Add(saga);
     }
@@ -223,10 +249,18 @@ internal class UpdateSagaFrame : AsyncFrame
         _saga = saga;
         uses.Add(saga);
 
+        // Resolve — never guess. The old `?? "Id"` / `?? typeof(string)` fallbacks silently invented a
+        // member that may not exist, surfacing as a cryptic compile error in the *generated* source
+        // ("no member 'Id' on …") instead of naming the real problem. ResolveIdMember throws the same
+        // ArgumentException DetermineSagaIdType throws, from the one shared code path.
         var sagaType = saga.VariableType;
-        var idMember = SagaChain.DetermineSagaIdMember(sagaType, sagaType);
-        _idMember = idMember?.Name ?? "Id";
-        _idType = idMember?.GetRawMemberType() ?? typeof(string);
+        var idMember = MongoIdentityMapping.ResolveIdMember(sagaType);
+        MongoIdentityMapping.EnsureIdMember(sagaType, idMember);
+        _idMember = idMember.Name;
+
+        // Non-null by construction: DetermineSagaIdMember only ever returns members drawn from
+        // GetFields()/GetProperties(), for both of which GetRawMemberType() is defined.
+        _idType = idMember.GetRawMemberType()!;
     }
 
     public override IEnumerable<Variable> FindVariables(IMethodVariables chain)
@@ -267,6 +301,8 @@ internal class DeleteSagaFrame : AsyncFrame
 
     public DeleteSagaFrame(Variable sagaId, Variable saga)
     {
+        MongoIdentityMapping.EnsureIdMember(saga.VariableType);
+
         _sagaId = sagaId;
         _saga = saga;
         uses.Add(sagaId);

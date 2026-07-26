@@ -178,6 +178,20 @@ Promote to GitHub issues before the first public release.
   `RebuildAsync` (`MongoDbMessageStore.Admin.cs`) is where per-collection saga indexes belong when
   that need arises — no code change now.
 
+- **Contribute the non-`Id` saga identity-convention matrix upstream — deferred (F6, 2026-07-26).**
+  `Wolverine.ComplianceTests` covers only `Id`-membered sagas: `String`/`Guid`/`Int`/`Long`
+  `IdentifiedSagaComplianceSpecs` all run on `BasicWorkflow<TStart,TCompleteThree,TId>`, whose identity
+  member is `Id`. **No upstream spec exercises any of the other four identity conventions Wolverine
+  itself resolves** (`[SagaIdentity]`, `{TypeName}Id`, `{Name-minus-Saga}Id`, `SagaId`) — which is why
+  this provider shipped 1.0.0 unable to persist any of them, with a fully green suite. The coverage now
+  lives in `src/Wolverine.MongoDB.Tests/saga_identity_conventions.cs`, written in compliance style (one
+  POCO per convention, lifecycle-driven start→update→complete, no Mongo-specific assertions in the
+  *arrange* half) precisely so it can be lifted into `Wolverine.ComplianceTests` later. **Deferred, not
+  abandoned:** every saga provider is equally exposed to this gap, so the natural home is upstream, and
+  the natural moment is when this provider is contributed (see the `ISagaStoreDiagnostics` entry above,
+  which is gated on the same event). The Mongo-specific assertions to drop when lifting are the direct
+  `_id` BSON-type reads; the lifecycle assertions transfer as-is.
+
 ## Untested-but-inspected paths (add deterministic coverage later)
 
 - Bulk `StoreIncomingAsync` non-duplicate-error rethrow branch (no clean way to
