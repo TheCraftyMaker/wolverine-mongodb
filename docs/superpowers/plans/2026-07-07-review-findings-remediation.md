@@ -306,10 +306,39 @@ MongoIdentityMapping.EnsureIdMember(sagaType, idMember);
 // the resolved member serializes AS _id, so read and write agree for every convention.
 ```
 
-- [ ] **Step 1:** Write the failing tests first (`saga_identity_conventions.cs`): a `ShipmentSaga { Guid ShipmentId }`-style saga (`{Name-minus-Saga}Id`) and a `[SagaIdentity] string`-keyed saga, each driven start→update→complete via `IHost` + real handlers; assert via direct Mongo reads that the document `_id` is the identity value (native type) and that update/complete find it. Run → **FAIL today** (load returns null / duplicate saga docs — the review's exact failure mode).
-- [ ] **Step 2:** Implement `MongoIdentityMapping` + wire the four saga frame ctors + replace the `UpdateSagaFrame` fallback with the throw. Dump generated code for one convention saga (`HandlerGraph`/`SourceCode` reflection per the repo's "dump generated handler source" convention) and confirm the frames still emit the same session-bound operations.
-- [ ] **Step 3:** Run the new tests → PASS. Run the full library suite (both TFMs) → green, **zero changes to compliance facts**. Add the CHANGELOG `### Fixed` entry.
-- [ ] **Step 4:** Commit (`fix: saga identity conventions map to _id`), push, PR, checks green, update this plan doc.
+- [x] **Step 1:** Write the failing tests first (`saga_identity_conventions.cs`): a `ShipmentSaga { Guid ShipmentId }`-style saga (`{Name-minus-Saga}Id`) and a `[SagaIdentity] string`-keyed saga, each driven start→update→complete via `IHost` + real handlers; assert via direct Mongo reads that the document `_id` is the identity value (native type) and that update/complete find it. Run → **FAIL today** (load returns null / duplicate saga docs — the review's exact failure mode).
+- [x] **Step 2:** Implement `MongoIdentityMapping` + wire the four saga frame ctors + replace the `UpdateSagaFrame` fallback with the throw. Dump generated code for one convention saga (`HandlerGraph`/`SourceCode` reflection per the repo's "dump generated handler source" convention) and confirm the frames still emit the same session-bound operations.
+- [x] **Step 3:** Run the new tests → PASS. Run the full library suite (both TFMs) → green, **zero changes to compliance facts**. Add the CHANGELOG `### Fixed` entry.
+- [x] **Step 4:** Commit (`fix: saga identity conventions map to _id`), push, PR, checks green, update this plan doc.
+
+**Status: done**, in two passes either side of the F3 amendment.
+
+**Pass 1** implemented F3 as originally written and covered all four non-`Id` precedence tiers plus the
+helper's branch matrix — all green (11 facts). It then **broke 40 previously-green compliance facts** and
+stopped per the escalation rule rather than improvising. Cause: `AutoMap()` maps only a class's *own*
+declared members, so the design's single-unfrozen-probe predicate reported "no id member" for an
+identity member declared on a **base** class — the shape of every upstream compliance saga
+(`BasicWorkflow<TStart,TCompleteThree,TId>.Id`) — and the write path then hit the driver's refusal to
+`MapIdMember` a member it does not own (`ArgumentOutOfRangeException: The memberInfo argument must be
+for class StringBasicWorkflow, but was for class BasicWorkflow`3`). Neither semantic was in F1 or F3's
+original §2 probe. Reported with a probe transcript instead of a repair.
+
+**F3 amendment** (PR #180) added §2.8's probe battery and resolved it: **D6**, the "driver already
+agrees" predicate becomes a base-chain walk (most-derived-first, reading registered maps or auto-mapping
+a throwaway per level — verified exact against `LookupClassMap` on 8 shapes and all four real
+`*BasicWorkflow` types, registering nothing); **D7**, two shapes the mechanism cannot fix now throw at
+codegen with verified remedies. Freezing a probe was rejected because `Freeze()` registers the *base*
+type's map globally.
+
+**Pass 2** implemented §10.1's F6-facing diff. Everything from pass 1 survived unchanged — the memo/lock
+structure, `ResolveIdMember`, the four frame ctors, `sagaCollection<TSaga>()`, `DetermineSagaIdType`'s
+delegation, the `?? "Id"` removal — confirming the mechanism was sound and only the predicate was wrong.
+Final: **197 facts green on net9.0 and net10.0** (181 pre-existing + 16 new), multinode green, **zero
+edited compliance facts**, and the generated source verified identical in shape to an `Id`-keyed saga
+(only the emitted member name differs). §7(d)'s LD4 CLAUDE.md bullet is deliberately **left to F7** —
+it documents the `Delete<TSaga>`/`IStorageAction<TSaga>` throws, which do not exist until F7 ships, and
+CLAUDE.md must not describe unimplemented behavior. The upstream-contribution note for the identity
+matrix is in `FOLLOWUPS.md`.
 
 ### Task F7: Entity identity agreement + saga guards on storage-action paths
 
