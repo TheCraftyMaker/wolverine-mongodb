@@ -123,14 +123,19 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
             return Task.CompletedTask;
         }
 
-        var ids = incoming.Select(x => x.Id).ToList();
+        // Claim by document _id, not by envelope Guid: in MessageIdentity.IdAndDestination the
+        // identity unit is (envelope id, destination), so one Guid can have a document per
+        // destination and filtering on EnvelopeId would also claim siblings this caller never
+        // loaded — stranding them (owned, but never enqueued for their own listener). In the
+        // default IdOnly mode the _id IS the Guid string, so the filter values are unchanged.
+        var ids = incoming.Select(InboxIdentity).ToList();
 
         // Compare-and-swap: only claim envelopes still owned by "any node". An envelope already
         // owned by another node (claimed between our read and this write) must not be stolen —
         // the OwnerId == AnyNode guard makes this an atomic claim per document.
         return Incoming.UpdateManyAsync(
             Builders<IncomingMessage>.Filter.And(
-                Builders<IncomingMessage>.Filter.In(x => x.EnvelopeId, ids),
+                Builders<IncomingMessage>.Filter.In(x => x.Id, ids),
                 Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
             Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
     }

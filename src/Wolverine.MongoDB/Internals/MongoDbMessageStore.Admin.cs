@@ -26,7 +26,8 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
                 Builders<IncomingMessage>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.ExecutionTime)),
             new CreateIndexModel<IncomingMessage>(
                 Builders<IncomingMessage>.IndexKeys.Ascending(x => x.OwnerId).Ascending(x => x.ReceivedAt)),
-            // Reassignment CAS and reschedule filter by EnvelopeId.
+            // RescheduleAsync and the scheduled-message queries filter by EnvelopeId.
+            // (The reassignment CAS keys on _id — see ReassignIncomingAsync.)
             new CreateIndexModel<IncomingMessage>(
                 Builders<IncomingMessage>.IndexKeys.Ascending(x => x.EnvelopeId)),
             new CreateIndexModel<IncomingMessage>(

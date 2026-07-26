@@ -149,16 +149,18 @@ public partial class MongoDbMessageStore
 
             // Only enqueue the envelopes this node actually won. The CAS in ReassignIncomingAsync
             // skips any that another node claimed between our read and write, so re-read which ids
-            // we now own and enqueue exactly those to avoid double-processing.
-            var ids = envelopes.Select(x => x.Id).ToList();
-            var claimedIds = await Incoming.Distinct(x => x.EnvelopeId,
+            // we now own and enqueue exactly those to avoid double-processing. Key on the document
+            // _id, the same identity unit ReassignIncomingAsync claims on: in IdAndDestination mode
+            // the envelope Guid is not unique per destination, so it cannot map winners back
+            // unambiguously. The page comes from distinct documents, so _id is injective here.
+            var byId = envelopes.ToDictionary(InboxIdentity);
+            var claimedIds = await Incoming.Distinct(x => x.Id,
                 Builders<IncomingMessage>.Filter.And(
-                    Builders<IncomingMessage>.Filter.In(x => x.EnvelopeId, ids),
+                    Builders<IncomingMessage>.Filter.In(x => x.Id, byId.Keys),
                     Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, nodeNumber)),
                 cancellationToken: token).ToListAsync(token);
 
-            var claimedSet = claimedIds.ToHashSet();
-            var claimed = envelopes.Where(e => claimedSet.Contains(e.Id)).ToList();
+            var claimed = claimedIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
             if (claimed.Count > 0)
             {
                 await circuit.EnqueueDirectlyAsync(claimed);

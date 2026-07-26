@@ -9,6 +9,21 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+- **Incoming recovery claims are destination-scoped in `MessageIdentity.IdAndDestination` mode.**
+  `ReassignIncomingAsync` filtered on the raw envelope `Guid`, but in `IdAndDestination` mode the
+  inbox identity unit is the `(envelope id, destination)` pair — one Guid legitimately has a
+  document per destination. Claiming a recovery page for one listener therefore also claimed every
+  sibling destination's document, stranding it: owned by a node that never enqueued it for that
+  listener, and invisible to future orphan recovery (which only reclaims `OwnerId == AnyNode`).
+  Both the claim and `RecoverOrphanedIncomingAsync`'s post-claim CAS re-read now key on the
+  document `_id` (`InboxIdentity(envelope)`), and the re-read maps winners back through an
+  `_id`-keyed dictionary — the envelope Guid is not unique per destination, so it could not have
+  mapped winners back unambiguously either.
+  - **No change in the default `IdOnly` mode**, where `InboxIdentity(e) == e.Id.ToString()`: the
+    `_id` *is* the Guid string, so the filter values are byte-identical to before.
+  - `RescheduleAsync` stays `EnvelopeId`-keyed (its upstream signature takes a bare `Guid`, so
+    "every document for this envelope id" follows from the contract), and the `envelopeId` index is
+    retained for it and the scheduled-message queries.
 - **A batch `StoreIncomingAsync` containing a duplicate no longer strands the batch's fresh
   envelopes.** The unordered `InsertManyAsync` committed every non-duplicate document before the
   duplicate-key error surfaced. `DurableReceiver` then re-posted the whole batch through its
