@@ -30,7 +30,8 @@
     <UseWolverineSource Condition="'$(UseWolverineSource)' == ''">false</UseWolverineSource>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
-  </ItemGroup>
+  <!-- SourceLink is not referenced explicitly: the .NET SDK (8.0+) imports Microsoft.SourceLink.GitHub
+       itself when it detects a GitHub origin, and an explicit PackageReference would set
+       SuppressImplicitGitSourceLink and shadow the SDK-bundled version. PublishRepositoryUrl and
+       EmbedUntrackedSources above are all the source-link configuration this repo needs. -->
 </Project>

@@ -10,7 +10,7 @@ The major version tracks Wolverine's major version.
 
 ### Fixed
 - **Bounded NuGet dependency ranges.** `WolverineFx` and `MongoDB.Driver` package dependencies
-  are now bounded to their major version (`[6.17.3,7.0.0)` and `[3.9.0,4.0.0)` respectively,
+  are now bounded to their major version (`[6.21.0,7.0.0)` and `[3.10.0,4.0.0)` respectively,
   instead of the open-ended `>= x.y.z` NuGet emits by default. A consumer that let its
   transitive restore drift to `WolverineFx` 7.x or `MongoDB.Driver` 4.x would previously
   compile and restore cleanly, then fail at runtime against an untested API surface — and
@@ -41,11 +41,28 @@ The major version tracks Wolverine's major version.
   `MongoDbMessageStore.NodeAgents.cs`). No behavior changes.
 
 ### Changed
-- Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.17.3 and re-pinned the
-  `external/wolverine` submodule to `V6.17.3`. Full compliance suite and multinode suite
+- Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.21.0 and re-pinned the
+  `external/wolverine` submodule to `V6.21.0`. Full compliance suite and multinode suite
   re-verified green on both net9.0 and net10.0; no provider code changes required. Demo's
   `WolverineFx`/`WolverineFx.RabbitMQ`/`WolverineFx.RuntimeCompilation` bumped to match
-  (6.13.1 → 6.17.3).
+  (6.13.1 → 6.21.0). **6.21.0, not the latest 6.22.0:** 6.22.0 adds a `bool? Replayable` filter to
+  `DeadLetterEnvelopeQuery` plus a `DeadLetterAdminCompliance.query_by_replayable_flag` fact that
+  this provider does not yet satisfy — the upgrade is scoped separately in
+  `docs/superpowers/plans/2026-07-26-wolverine-6.22-upgrade.md`.
+- **One version per package across both solutions.** The library and the demo are separate
+  dependabot ecosystems, so their pins had drifted apart. `MongoDB.Driver` was `3.9.0` (range
+  floor) in the library and `3.10.0` in the demo; `Microsoft.NET.Test.Sdk` was 18.8.1 vs 18.6.0
+  and `Testcontainers.MongoDb` 4.13.0 vs 4.12.0. Every shared package now names a single
+  version — the latest — in both `Directory.Packages.props` files. The library keeps its
+  major-bounded range syntax so the packed nuspec stays permissive for consumers; the range
+  floor now equals the demo's exact pin.
+- Dropped the explicit `Microsoft.SourceLink.GitHub` `PackageReference`. The .NET SDK has
+  bundled SourceLink since 8.0 and imports `Microsoft.SourceLink.GitHub` automatically for a
+  GitHub origin; an explicit reference sets `SuppressImplicitGitSourceLink` and shadows the
+  SDK-bundled copy with a NuGet-restored one. Verified equivalent: the packed `.snupkg` PDB
+  still carries the `raw.githubusercontent.com/TheCraftyMaker/wolverine-mongodb/<commit>/*`
+  document mapping, and the nuspec still carries `<repository>` metadata from
+  `PublishRepositoryUrl`. Removes a recurring dependabot bump with no behavior change.
 
 ## [1.0.0] - 2026-07-06
 
