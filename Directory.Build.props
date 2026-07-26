@@ -29,8 +29,4 @@
     <UseWolverineSource Condition="'$(UseWolverineSource)' == '' and Exists('$(WolverineSourcePath)\src\Wolverine\Wolverine.csproj')">true</UseWolverineSource>
     <UseWolverineSource Condition="'$(UseWolverineSource)' == ''">false</UseWolverineSource>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
-  </ItemGroup>
 </Project>
