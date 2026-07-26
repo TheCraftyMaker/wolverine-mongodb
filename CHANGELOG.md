@@ -9,6 +9,24 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+- **A batch `StoreIncomingAsync` containing a duplicate no longer strands the batch's fresh
+  envelopes.** The unordered `InsertManyAsync` committed every non-duplicate document before the
+  duplicate-key error surfaced. `DurableReceiver` then re-posted the whole batch through its
+  per-envelope path, which *completes* a duplicate at the listener **without enqueuing it** — so
+  each fresh envelope that had already persisted was left in the inbox owned by this live node,
+  never handled, and invisible to orphan recovery (which only reclaims `OwnerId == AnyNode`). The
+  batch insert is now wrapped in a replica-set transaction, making it all-or-nothing and restoring
+  the RDBMS provider's contract.
+  - The transaction carries **explicit** options (`w:majority` + `j:true`, `readConcern:majority`)
+    because MongoDB ignores database-handle write concern inside a transaction — without them the
+    store's durability pin would have silently degraded to the consumer's client default.
+  - `DuplicateIncomingEnvelopeException`'s duplicate list is now built from a single post-abort
+    `_id` existence probe, so it is complete and precise rather than limited to what the fail-fast
+    server reported (verified: an in-transaction duplicate yields exactly one write error, at the
+    first offending index). An intra-batch duplicate — no pre-existing document — falls back to
+    grouping the batch by inbox identity; a failure explained by neither rethrows unchanged, as
+    does any non-duplicate write error.
+  - The **single-envelope** `StoreIncomingAsync` overload is unchanged: no session, no transaction.
 - **Sagas keyed by any Wolverine identity convention other than `Id` now persist and load
   correctly.** Wolverine resolves a saga's identity member by its own convention
   (`[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`), while the MongoDB
