@@ -103,13 +103,13 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F7** | `fix/entity-identity-and-saga-guards` | fix: entity load/write identity agreement + saga guard on Delete/IStorageAction | **F3, F6** | **Can start** — F3 (#179/#180) and F6 (#181) merged. Scope narrowed by the F3 amendment: `MongoIdentityMapping` needs **no** change (§4.2 note), leaving the entity frame wiring, the two LD4 guards, test row 24, and design §7(d)'s CLAUDE.md bullet (deliberately left by F6) | **Fable 5 / Opus** |
 | **F8** | `fix/batch-inbox-atomicity` | fix: all-or-nothing batch StoreIncomingAsync on duplicate | **F4** | **Done** (#183) — 201 single-node + 18 multinode green on net9.0 and net10.0; in-transaction failure shape empirically pinned (see Step 2) | **Fable 5 / Opus** |
 | **F9** | `fix/dlq-edit-replay-empty-body` | fix: EditAndReplayAsync tolerates body-less poison dead letters | — | Can start immediately | Sonnet |
-| **F10** | `fix/destination-scoped-claims` | fix: destination-scoped incoming claims (IdAndDestination) | **F4** | Blocked by: F4 | **Fable 5 / Opus** |
+| **F10** | `fix/destination-scoped-claims` | fix: destination-scoped incoming claims (IdAndDestination) | **F4** | **Done** (#184) — 204 single-node + 18 multinode green on net9.0 and net10.0; `IdOnly` byte-equivalence verified by inspection | **Fable 5 / Opus** |
 | **F11** | `fix/dead-node-release-race` | fix: two-tick-confirmed dead-node ownership release | **F4** | Blocked by: F4 | **Fable 5 / Opus** |
 | **F12** | `fix/durability-agent-shutdown` | fix: durability agent StopAsync awaits its loops + disposes CTSes | **F4** | Partially blocked by: F4 (mechanical part startable; await/timeout semantics from F4) | Sonnet |
 | **F13** | `fix/diagnostics-identity-coercion` | fix: ISagaStoreDiagnostics identity coercion (Marten parity) | — | Can start immediately | Sonnet |
 | **F14** | `fix/nuget-dependency-ranges` | fix: bounded NuGet dependency ranges for WolverineFx + MongoDB.Driver | — | Can start immediately | Sonnet |
 | **F15** | `docs/truth-sweep` | docs: post-1.0.0 truth sweep (version, versioning rule, collection counts) | — | Can start immediately | Sonnet |
-| **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | Blocked by: F8, F10 (same files) | Sonnet |
+| **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | **Unblocked** — F8 (#183) and F10 (#184) both merged | Sonnet |
 | **F17** | `chore/store-efficiency` | chore: DLQ replay batching, cached node collections, parallel node loads | **F11** | Partially blocked by: F11 (shares Durability.cs; NodeAgents parts independent) | Sonnet |
 | **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | Blocked by: F5, F6, F7 (merged & packed) | Sonnet |
 | **F19** | `test/remediation-regression` | test: full cross-feature regression (inbox+outbox+saga+entity+solo+multinode) | **F6–F18 merged** | Blocked by: F6–F18 | Sonnet |
@@ -435,9 +435,9 @@ preference.
 - **Dependencies:** **F4.**
 - **Blocking status:** **Blocked by: F4.**
 
-- [ ] **Step 1:** Write the failing test: configure a store with `IdAndDestination` (via `DurabilitySettings.MessageIdentity`), store the two-destination same-Guid pair with `OwnerId = 0`, call `ReassignIncomingAsync` for the destination-1 envelope → today destination 2's doc gets claimed too (assert its `OwnerId` — FAIL).
-- [ ] **Step 2:** Switch claim + re-read to `_id`-keyed filters; re-run → PASS. Verify the `IdOnly` path byte-equivalence by inspection (in `IdOnly`, `InboxIdentity(e)` == `e.Id.ToString()` per `MongoDbMessageStore.cs:46-48`).
-- [ ] **Step 3:** Full suite + `Category=multinode` green on both TFMs. CHANGELOG entry. Commit (`fix: destination-scoped incoming claims`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test: configure a store with `IdAndDestination` (via `DurabilitySettings.MessageIdentity`), store the two-destination same-Guid pair with `OwnerId = 0`, call `ReassignIncomingAsync` for the destination-1 envelope → today destination 2's doc gets claimed too (assert its `OwnerId` — FAIL). Two facts failed as predicted: destination 2's `OwnerId` `should be 0 but was 7`, and its own recovery page (`LoadPageOfGloballyOwnedIncomingAsync(destinationTwo)`) came back **empty** — the stranding, observed end-to-end. The third fact (`IdOnly` still claims) passed before the fix, pinning the no-regression baseline.
+- [x] **Step 2:** Switch claim + re-read to `_id`-keyed filters; re-run → PASS. `IdOnly` byte-equivalence verified by inspection: `_inboxIdentity` is `e => e.Id.ToString()` when `Durability.MessageIdentity == MessageIdentity.IdOnly` (`MongoDbMessageStore.cs:46-48`), so `Filter.In(x => x.Id, …)` receives exactly the values `Filter.In(x => x.EnvelopeId, …)` did — same as the RDBMS provider, which scopes on `id + received_at` (`MessageDatabase.Incoming.cs:27-30`). The re-read's `ToDictionary(InboxIdentity)` is injective because the page comes from distinct documents.
+- [x] **Step 3:** Full suite + `Category=multinode` green on both TFMs — 204 single-node + 18 multinode on net9.0 **and** net10.0 (recovery claims run in every Balanced tick). `envelopeId` index comment corrected per the contract's scope guard; `RescheduleAsync` untouched. CHANGELOG entry. Commit (`fix: destination-scoped incoming claims (IdAndDestination)`), push, PR [#184](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/184), checks green.
 
 ---
 
@@ -548,7 +548,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Expected output:** No new tests; full suite + multinode green proves equivalence.
 - **Files/areas likely to change:** `Internals/MongoDbMessageStore.Inbox.cs`, `Internals/MongoDbMessageStore.Outbox.cs`, `Internals/MongoDbMessageStore.Admin.cs`, `Internals/MongoConstants.cs`, `FOLLOWUPS.md`.
 - **Dependencies:** **F8, F10** (same files — avoid conflicts).
-- **Blocking status:** **Blocked by: F8, F10.**
+- **Blocking status:** **Unblocked** — F8 ([#183](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/183)) and F10 ([#184](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/184)) are both merged.
 
 - [ ] **Step 1:** Apply refactors 1–4; full suite + multinode green on both TFMs. FOLLOWUPS entry for `AgentUri`. Commit (`chore: deduplicate inbox/outbox definitions + AnyNode sentinel`), push, PR, checks green, update plan doc.
 
