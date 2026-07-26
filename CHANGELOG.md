@@ -9,15 +9,6 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
-- **Bounded NuGet dependency ranges.** `WolverineFx` and `MongoDB.Driver` package dependencies
-  are now bounded to their major version (`[6.21.0,7.0.0)` and `[3.10.0,4.0.0)` respectively,
-  instead of the open-ended `>= x.y.z` NuGet emits by default. A consumer that let its
-  transitive restore drift to `WolverineFx` 7.x or `MongoDB.Driver` 4.x would previously
-  compile and restore cleanly, then fail at runtime against an untested API surface — and
-  `MongoDbSagaStoreDiagnostics`'s reflection bridges into Wolverine internals are
-  non-throwing by design, so a breaking internal rename would degrade silently rather than
-  fail loudly. The bound now makes an incompatible restore fail immediately.
-  `WolverineFx.ComplianceTests` (test-only, never packed) is left unbounded.
 - `MongoDbSagaStoreDiagnostics.ReadSagaAsync` now coerces the caller-supplied identity to the
   saga's native id type (`Guid`/`int`/`long`/`string`) before querying, per the
   `ISagaStoreDiagnostics` contract — mirrors `MartenSagaStoreDiagnostics.coerceIdentity`. A
@@ -50,12 +41,14 @@ The major version tracks Wolverine's major version.
   this provider does not yet satisfy — the upgrade is scoped separately in
   `docs/superpowers/plans/2026-07-26-wolverine-6.22-upgrade.md`.
 - **One version per package across both solutions.** The library and the demo are separate
-  dependabot ecosystems, so their pins had drifted apart. `MongoDB.Driver` was `3.9.0` (range
+  dependabot ecosystems, so their pins had drifted apart. `MongoDB.Driver` was `3.9.0` (a range
   floor) in the library and `3.10.0` in the demo; `Microsoft.NET.Test.Sdk` was 18.8.1 vs 18.6.0
   and `Testcontainers.MongoDb` 4.13.0 vs 4.12.0. Every shared package now names a single
-  version — the latest — in both `Directory.Packages.props` files. The library keeps its
-  major-bounded range syntax so the packed nuspec stays permissive for consumers; the range
-  floor now equals the demo's exact pin.
+  plain version — the latest — in both `Directory.Packages.props` files. The bracketed
+  major-version ranges added during the post-1.0.0 hardening pass (never released) are gone
+  with them: the packed nuspec declares the ordinary open-ended `>= x.y.z` again, matching how
+  Wolverine's own repo pins its store drivers (`Marten`, `Microsoft.Azure.Cosmos`,
+  `RavenDB.Client` are all plain versions).
 - Dropped the explicit `Microsoft.SourceLink.GitHub` `PackageReference`. The .NET SDK has
   bundled SourceLink since 8.0 and imports `Microsoft.SourceLink.GitHub` automatically for a
   GitHub origin; an explicit reference sets `SuppressImplicitGitSourceLink` and shadows the

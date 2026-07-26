@@ -133,6 +133,21 @@ Promote to GitHub issues before the first public release.
   `Admin.MigrateAsync()` step that drops the specific superseded index names before
   `EnsureIndexesAsync` runs — no migration step exists today.
 
+- **Bounded NuGet dependency ranges — reversed by review decision (2026-07-26).** The post-1.0.0
+  hardening pass (F14) had changed `Directory.Packages.props` to bracketed major-version ranges
+  (`WolverineFx [6.x,7.0.0)`, `MongoDB.Driver [3.x,4.0.0)`) so the packed nuspec would refuse an
+  incompatible restore instead of failing at runtime — the argument being that
+  `MongoDbSagaStoreDiagnostics`'s reflection bridges into Wolverine internals are non-throwing by
+  design and would degrade *silently* against an unexpected major. **Decision on PR #177: drop the
+  bounds; plain single versions in both `Directory.Packages.props` files.** The bracketed form never
+  shipped (it sat unreleased after [1.0.0]), and Wolverine's own repo pins its store drivers the
+  same plain way (`Marten`, `Microsoft.Azure.Cosmos`, `RavenDB.Client`). **Do not re-add the
+  brackets as a "fix"** — the open-ended `>= x.y.z` in the nuspec is the intended state. **If
+  revisited:** the range belongs on the two `PackageReference`s in
+  `src/Wolverine.MongoDB/Wolverine.MongoDB.csproj` via `VersionOverride` (verified to produce a
+  bounded nuspec while leaving the version file on single plain versions), not in the shared
+  `Directory.Packages.props`.
+
 ## Deferred from saga persistence (S6–S14)
 
 - **`ISagaStoreDiagnostics` — implemented (T2.1, PR #131), with an upstream-contribution caveat.**
