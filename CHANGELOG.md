@@ -24,6 +24,27 @@ The major version tracks Wolverine's major version.
   - `RescheduleAsync` stays `EnvelopeId`-keyed (its upstream signature takes a bare `Guid`, so
     "every document for this envelope id" follows from the contract), and the `envelopeId` index is
     retained for it and the scheduled-message queries.
+- **Dead-node ownership release can no longer strip a live node's in-flight envelopes.**
+  `ReleaseDeadNodeOwnershipAsync` read the live node numbers, then released everything *not* in that
+  snapshot (`Filter.Nin(liveSnapshot)`). The `Nin` is a blacklist over a stale read: a node that
+  registered and claimed between the read and the write matched it, so its in-flight envelopes were
+  released to `AnyNode` and could be processed a second time by another node. The method's own doc
+  comment asserted the opposite ("a live node always has a node document, so its in-flight work is
+  never touched") — that invariant was false.
+  - The release is now **two-tick-confirmed**: each tick computes the node numbers that are *owned*
+    in the incoming/outgoing collections but have no live node document, and releases only the
+    numbers that were **also** dead on the previous tick. The write names them positively
+    (`Filter.In(confirmed)`), so a number that appeared after the reads cannot be released at all.
+  - The owned set is read **before** the live set, which is load-bearing: "owned but not live" then
+    means the node document existed at the earlier instant and was gone at the later one — a
+    shutdown deletion, never a mid-registration node. Combined with monotonic never-reused node
+    numbers, a confirmed number was dead for the whole interval between the two ticks. The full
+    four-step soundness argument is on the method.
+  - **Behavior-timing change:** a crashed node's envelopes are now rescued one recovery interval
+    (`Durability.ScheduledJobPollingTime`) later than before. Graceful shutdown is unaffected — it
+    releases ownership directly rather than through this path.
+  - Ticks that find nothing confirmed now issue **no** write at all, where the previous
+    implementation ran two unconditional `UpdateMany` calls every tick.
 - **A batch `StoreIncomingAsync` containing a duplicate no longer strands the batch's fresh
   envelopes.** The unordered `InsertManyAsync` committed every non-duplicate document before the
   duplicate-key error surfaced. `DurableReceiver` then re-posted the whole batch through its

@@ -82,6 +82,15 @@ Promote to GitHub issues before the first public release.
   coordination (the leader stops acting before a competitor can legitimately take over); a fencing
   token only earns its complexity once leader-scoped **external** side effects (writes to a
   system outside this store that must reject stale-epoch callers) become common. No code change.
+  **Second motivation recorded (F11, 2026-07-26).** The two-tick dead-node ownership release
+  (`MongoDbMessageStore.Durability.cs`, `ReleaseDeadNodeOwnershipAsync`) has one residual it
+  deliberately does not close: if a **live** node's `wolverine_nodes` document is deleted while the
+  node is still claiming — a reaper removing a partitioned or GC-paused node rather than a dead one —
+  its in-flight envelopes are released after two ticks and can be processed twice. This is the same
+  semantic the RDBMS single-statement release has (it releases the moment the node row is gone), so
+  it is not a regression and was explicitly out of F11's scope. Closing it needs an **ownership**
+  fencing token (the epoch stamped on `ownerId` claims, checked on the claim write), which is the
+  same machinery as above applied one layer down. Still deferred.
 
 - **`IListenerStore` still `NullListenerStore` — non-goal for now, cheap optional follow-up shape recorded.**
   `MongoDbMessageStore.Listeners` returns `NullListenerStore.Instance`, matching Cosmos/RavenDb's

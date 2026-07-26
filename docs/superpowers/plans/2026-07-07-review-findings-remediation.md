@@ -480,8 +480,8 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 }
 ```
 
-- [ ] **Step 1:** Write the failing tests (a)–(c) driving the method directly on the store (two calls = two ticks; deterministic) → (a) FAILS today (released on the *first* tick).
-- [ ] **Step 2:** Implement two-tick confirmation + rewrite the comment with the soundness argument; run → PASS.
+- [x] **Step 1:** Write the failing tests (a)–(c) driving the method directly on the store (two calls = two ticks; deterministic) → (a) FAILS today (released on the *first* tick). Observed: `owner_with_no_node_doc_is_not_released_on_first_tick_only_second` — *"should be 901 but was 0 / a dead owner observed for the FIRST time must not be released yet"*. (b) `owner_that_registers_a_node_between_ticks_is_never_released` also FAILED (*"should be 902 but was 0"*) — the number was already released at tick 1, so registering its node document before tick 2 came too late. (c) `anynode_and_live_owners_never_touched_across_two_ticks` passed today as designed: it is the regression guard folded in from the deleted single-tick fact.
+- [x] **Step 2:** Implement two-tick confirmation + rewrite the comment with the soundness argument; run → PASS (3/3). Per §2g the old single-tick fact was **folded into** `dead_node_release.cs` and `dead_node_ownership_release.cs` deleted (its live-node/`AnyNode` assertions live on in fact (c); its release assertion is now two-tick in fact (a)) — a deliberate strengthening, called out in the PR body.
 - [ ] **Step 3:** Full suite green; `--filter "Category=multinode"` **5× consecutive** per TFM (release latency grew one tick — if a multinode fact times out, widen *observation* timeouts only with written justification, never weaken an assertion). CLAUDE.md bullet + CHANGELOG. Commit (`fix: two-tick-confirmed dead-node ownership release`), push, PR, checks green, update plan doc.
 
 ### Task F12: Durability agent shutdown awaits its loops
