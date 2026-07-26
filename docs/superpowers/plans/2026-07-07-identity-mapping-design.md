@@ -19,8 +19,29 @@
 > full transcript. Had the design been written from source-reading alone, §2.2's element-name
 > normalization would have been an unstated assumption underneath every downstream task.
 
-**Status:** decisions final. **Gates:** F6 (saga identity), F7 (entity identity + LD4 guards), and
-F18's demo shapes.
+> ### AMENDED 2026-07-26 — base-declared identity members
+>
+> F6 (`fix/saga-identity-mapping`, local commit `75b5b9d`, deliberately unpushed) implemented this
+> design faithfully, got its 11 new facts green, and then **broke 40 previously-green compliance
+> facts**. It stopped per the plan's escalation rule instead of improvising.
+>
+> Cause: a `BsonClassMap` semantic neither F1 nor this document's original §2 probe covered — an
+> identity member declared on a **base class**, which is the shape *every* upstream saga compliance
+> type has (`BasicWorkflow<TStart,TCompleteThree,TId>.Id`, inherited by
+> `String`/`Guid`/`Int`/`LongBasicWorkflow`). The original §2 probed identity-on-the-type-itself and
+> identity-on-the-**subclass**, never identity-on-the-**base**.
+>
+> This amendment adds **§2.8** (the base-declared probe battery, 30 new verbatim facts across two
+> rounds plus a ground-truth run against the real `*BasicWorkflow` types) and rewrites **§3.1**,
+> **§3.2**, **§3.3**, **§4.2**, **§4.4**, **§7(c)**, **§8**, **§9**, **§10**, **§11**, **§12**. It also
+> corrects **§2.6**'s side-effect claim. Two decisions are new (**D6**, **D7** in §1); LD1 Option B′
+> and LD4 are unchanged in mechanism.
+>
+> **§10.1 is the F6-facing diff** — precisely what changes relative to `75b5b9d`, file by file and
+> member by member. F6 does not need to re-read the rest of this document.
+
+**Status:** decisions final (amended 2026-07-26). **Gates:** F6 (saga identity), F7 (entity identity
++ LD4 guards), and F18's demo shapes.
 
 ---
 
@@ -28,15 +49,17 @@ F18's demo shapes.
 
 | # | Decision | Resolution |
 |---|---|---|
-| **LD1** | Identity-mapping mechanism | **Option B′ — ensure-or-fail class map, minimal-mutation.** Option B, refined so the helper *never touches the BSON registry for a type the driver already maps correctly* (§3). |
-| **D1a** | Helper contract | `MongoIdentityMapping.EnsureIdMember(Type, MemberInfo)` + `EnsureIdMember(Type)` + `ResolveIdMember(Type)` (§3.2). |
+| **LD1** | Identity-mapping mechanism | **Option B′ — ensure-or-fail class map, minimal-mutation.** Option B, refined so the helper *never touches the BSON registry for a type the driver already maps correctly* (§3). **Unchanged by the amendment** — the mechanism was sound; only the "already maps correctly" *predicate* was wrong. |
+| **D1a** | Helper contract | `MongoIdentityMapping.EnsureIdMember(Type, MemberInfo)` + `EnsureIdMember(Type)` + `ResolveIdMember(Type)` (§3.2), plus the private `driverIdMember(Type)` walk added by the amendment. |
+| **D6** *(new)* | The "driver already agrees" predicate | **Hierarchy walk**, most-derived-first, AutoMapping a throwaway map per level (or reading an already-registered one); first level that resolves an id member wins. Verified exact against the authoritative `LookupClassMap` answer on 8 shapes and on all four real `*BasicWorkflow` types, with **zero registry mutation** (§2.8, §3.1). Replaces the single unfrozen-probe read, which reports `null` for every inherited id member. |
+| **D7** *(new)* | Shapes the mechanism cannot fix | Two **throw** cases, both detected at codegen: **(a)** Wolverine's member is declared on a base class — the driver rejects `MapIdMember` for a foreign `DeclaringType`; **(b)** a *different*, base-declared member already occupies `_id` — mapping ours would produce a type that throws `BsonSerializationException` on its **first write**. Exact messages in §3.4/§3.5. |
 | **D1b** | Invocation points | Codegen time (all 4 saga frame ctors, all 3 entity frame ctors, `DetermineStorageActionFrame`) **and** runtime (via new collection-accessor helpers in `MongoSagaOperations`/`MongoEntityOperations`). The runtime leg is **required**, not belt-and-braces — in `TypeLoadMode.Static` the frame constructors never run (§4.1–§4.2). |
 | **D1c** | Thread safety | Lock-free memo read → `lock` → double-check → align. Not `ConcurrentDictionary.GetOrAdd` (§4.3). |
 | **D2** | CLAUDE.md reconciliation | `CLAUDE.md:156` and `:159` rewritten, one new decision bullet added — exact text in §7. |
 | **D3** | `UpdateSagaFrame`'s `?? "Id"` fallback | Deleted. All identity resolution funnels through `MongoIdentityMapping.ResolveIdMember`, which throws the same `ArgumentException` message `DetermineSagaIdType` throws today; `DetermineSagaIdType` is refactored to delegate to it (§5). |
 | **LD4** | `Delete<TSaga>` / `IStorageAction<TSaga>` from a non-saga handler | **Throw** at codegen. `InvalidOperationException`, exact message text in §6. |
-| **D4** | On-disk compatibility | No migration owed. `Id`-keyed documents are byte-identical; non-`Id` types never round-tripped. One nuance for the both-members shape (§8). |
-| **D5** | Test matrix | 14 rows across F6/F7, §9. Includes the two negative-path rows, the concurrency row, and the Static-mode row. |
+| **D4** | On-disk compatibility | No migration owed. `Id`-keyed documents are byte-identical — **re-derived for the inherited-`Id` case** and proven by a byte-for-byte hex diff against a never-touched twin (§2.8 R2-D2, §8). Non-`Id` types never round-tripped. |
+| **D5** | Test matrix | 24 rows across F6/F7, §9 — the amendment adds rows 18–24 (inherited-`Id` regression, both throw cases, the registry-untouched assertion, `[BsonId]`-on-base, and the entity analogues). |
 
 ---
 
@@ -104,7 +127,7 @@ basis of §8's compatibility statement for that shape.
 
 `[8]`: a plain-`Id` type whose class map was never registered by us serializes exactly as it does
 today. This is the entire regression argument for existing consumers, and it is the reason §3's
-algorithm **declines to register** when the driver's own conventions already agree (§3.1, rule 3).
+algorithm **declines to register** when the driver's own conventions already agree (§3.1 step 4).
 
 ### 2.5 Exception shapes, exactly
 
@@ -116,7 +139,7 @@ algorithm **declines to register** when the driver's own conventions already agr
 - `RegisterClassMap` **after** `LookupClassMap` auto-mapped and froze the type → `ArgumentException`
   (`[14]`). Two consequences: (a) the ordering subtlety of F1 §2.3 is real; (b) any app that
   registers its own class map *after* Wolverine's host build would break if we registered maps
-  unnecessarily — §3.1 rule 3 preserves that app's ability entirely.
+  unnecessarily — §3.1 step 4 preserves that app's ability entirely.
 
 ### 2.6 Derived types (i.e. every real saga) behave identically
 
@@ -124,7 +147,16 @@ algorithm **declines to register** when the driver's own conventions already agr
 serialized, the round-trip recovers both, and **no `_t` discriminator appears** (nominal type ==
 actual type for `IMongoCollection<TSaga>`), so saga documents keep their current shape. `[15]`/`[17]`
 also settle a side-effect question: `AutoMap()` on a derived type does **not** register a class map
-for the base type, so the probe step in §3.1 has no global side effects.
+for the base type.
+
+> **CORRECTED BY THE AMENDMENT.** This subsection originally concluded from `[15]`/`[17]` that "the
+> probe step in §3.1 has no global side effects." That is true of **`AutoMap()` alone** — and stays
+> true of the amended §3.1 predicate, which uses nothing else (proven directly: §2.8 R1-B1, R2-D2,
+> and GT-F5 all show the registry unchanged before and after). It is **false** of the obvious repair
+> to the inherited-member bug: `probe.Freeze()` **does** register the base type's class map globally
+> (§2.8 R1-B3, fact C). §3.1's predicate therefore never freezes a probe. Also note what `[16]`
+> did *not* cover: it put the identity member on the **subclass**. The base-declared case — every
+> upstream compliance saga — behaves differently and is §2.8's subject.
 
 ### 2.7 One thing the probe could *not* settle (and why it doesn't matter)
 
@@ -137,6 +169,165 @@ the repo's Guid-keyed saga compliance suite (`guid_saga_storage_compliance.cs`, 
 in CI today through the identical `Eq("_id", sagaId)` filter path. Filter-value serialization is
 orthogonal to *which member* is the id, so the member-name change introduces no new representation
 risk.
+
+### 2.8 Base-declared identity members (amendment, 2026-07-26)
+
+Three probe runs. **R1**/**R2** are a standalone `net9.0` console app on `MongoDB.Driver 3.9.0`
+(same method as §2), each scenario on its own dedicated POCO because class maps are process-global
+and un-undoable. Shapes are modelled three levels deep to match reality —
+`SagaLike { int Version }` stands in for `Wolverine.Persistence.Sagas.Saga`
+(`external/wolverine/src/Wolverine/Saga.cs:39`). **GT** is the ground-truth run: a throwaway xUnit
+probe *inside `Wolverine.MongoDB.Tests`*, against the real `*BasicWorkflow` types and the real
+`SagaChain.DetermineSagaIdMember` (probe file and `Internal/Generated` deleted afterwards).
+
+Notation: `_W` twins are measured with the candidate **walk**; `_A` twins with the authoritative
+(registering + freezing) `LookupClassMap`. Twins keep the two measurements from contaminating each
+other — a necessity, not neatness: reading the authoritative answer permanently freezes the type.
+
+#### R1 — is the walk exact? (`unfrozen` = what `75b5b9d` reads; `walk` = candidate; `authoritative` = truth)
+
+```
+A1 self Id                    unfrozen=Id      walk=Id   (A1_SelfId_W automap)     authoritative=Id  element='_id'   MATCH
+A2 Id on closed generic base  unfrozen=(null)  walk=Id   (A2_Generic_W`1 automap)  authoritative=Id  element='_id'   MATCH
+A3 Id on non-generic base     unfrozen=(null)  walk=Id   (A3_Base_W automap)       authoritative=Id  element='_id'   MATCH
+A4 [BsonId] self, non-Id name unfrozen=Key     walk=Key  (A4_BsonIdSelf_W automap) authoritative=Key element='_id'   MATCH
+A5 [BsonId] on base           unfrozen=(null)  walk=Key  (A5_Base_W automap)       authoritative=Key element='_id'   MATCH
+A6 non-Id self member         unfrozen=(null)  walk=(null)                         authoritative=(null)              MATCH
+A7 non-Id base member SagaId  unfrozen=(null)  walk=(null)                         authoritative=(null)              MATCH
+A8 base Id + derived {Type}Id unfrozen=(null)  walk=Id   (A8_Base_W automap)       authoritative=Id  element='_id'   MATCH
+```
+
+**8/8 exact.** The `unfrozen` column is the defect: it reads `(null)` for A2/A3/A5/A8 — every shape
+whose id member is inherited — so `75b5b9d` concludes "the driver disagrees" and proceeds to mutate.
+A2 is the compliance shape. A8 is new and important: the driver resolves the **base's** `Id` while
+Wolverine resolves the **derived** `{TypeName}Id` (its tier 2 beats tier 5) — a disagreement in which
+the driver's id member is declared on a *different type* than the member we would map.
+
+#### R1-B — side effects of each candidate for reading the driver's answer
+
+```
+B1 before walk: derived=False base=False        B1 after walk: derived=False base=False
+B2 read probe.BaseClassMap on an unfrozen AutoMap'd probe => (null); base registered=False; IdMemberMap=(null)
+B3 before Freeze: derived=False base=False      B3 after Freeze: derived=False base=True  frozenIdMember=Id
+```
+
+- **B1: the walk registers nothing.** This is what preserves §3.1 step 4's guarantee.
+- **B2 rules out `BaseClassMap` traversal** — on an unfrozen probe the property is simply `null`, so
+  there is nothing to traverse. (It is populated during `Freeze()`, i.e. only once B3's side effect
+  has already happened.)
+- **B3 confirms fact C:** `Freeze()` registers the **base** type's map (not the derived type's) and
+  does resolve the inherited `Id`. Correct answer, unacceptable price.
+
+#### R1-C / R2-E — the write path, and what happens when it cannot work
+
+```
+C1 MapIdMember(base-declared member) -> ArgumentOutOfRangeException:
+     The memberInfo argument must be for class C1_Derived, but was for class C1_Base. (Parameter 'memberInfo')
+
+C2 id mapped on the DECLARING non-generic base, then two sibling subclasses serialized:
+     SiblingOne: { "Version" : 1, "_id" : "S-1", "One" : "a" }
+     SiblingTwo: { "Version" : 2, "_id" : "S-2", "Two" : "b" }
+     both have _id? True/True   _t present? False/False   sibling maps registered afterwards? True/True
+
+C3 same, but the declaring type is a CLOSED GENERIC:
+     ClosedString: { "Version" : 1, "_id" : "G-1", "S" : "s" }
+     C3_Generic<string> registered=True   C3_Generic<int> registered=False
+     ClosedInt (its own closed base NOT mapped): { "Version" : 1, "SagaId" : 7, "I" : "i" }
+```
+
+- **C1 confirms fact B** with the exact message. Mapping an inherited member on the *document* type's
+  map is impossible.
+- **C2** shows the declaring-type alternative works — **and that it propagates to every sibling
+  subclass** (both siblings got `_id` from the base's mapping, and serializing them registered their
+  own maps on top of it). That is the blast radius §11 weighs.
+- **C3** shows it also works for a closed-generic base, and that each closed generic is a **distinct
+  registry entry**: mapping `<string>` leaves `<int>` untouched (`ClosedInt` still writes `SagaId` as
+  an ordinary field with no `_id`).
+
+The A8 shape is worse than "doesn't work" — R2-E1 steps the four calls apart to find out *when* it
+fails:
+
+```
+E1 walk resolves 'Id' declared on E1_Base (document type is E1_Derived)
+   step 1 AutoMap ....... ok
+   step 2 MapIdMember ... ok (no throw)
+   step 3 Register ...... ok (no throw)
+   step 4 serialize ..... BsonSerializationException: The property 'E1_DerivedId' of type 'E1_Derived'
+                          cannot use element name '_id' because it is already being used by property
+                          'Id' of type 'E1_Base'.
+```
+
+**Alignment "succeeds" and the type becomes unserializable.** Nothing throws at codegen; the failure
+lands on the **first saga insert**, at runtime, inside the outbox transaction. §3.5 therefore
+pre-detects it. (A fifth step re-`Freeze()`d the same map and reported a `Version` element conflict —
+an artifact of forcing a second freeze on a map whose first freeze threw. No conclusion is drawn
+from it.)
+
+Candidate remedies, each tested before being written into an error message:
+
+```
+E2 [BsonId] on the derived member instead -> SAME BsonSerializationException (does NOT help)
+E3 [BsonElement("legacyId")] on the base Id -> walk resolves (null); serialize ok:
+      { "Version" : 1, "legacyId" : "legacy-value", "_id" : "d" }
+E4 [BsonIgnore] on the base Id            -> walk resolves (null); serialize ok:
+      { "Version" : 1, "_id" : "d" }
+```
+
+E2 matters most: the intuitive advice (`[BsonId]`) is **wrong** for this shape, so §3.5's message must
+not offer it. E3/E4 work because either annotation disqualifies the base member from being an id
+member, which frees `_id`.
+
+#### R2-D2 — the inherited-`Id` no-op path is byte-identical
+
+```
+D2 before walk: closed=False genericBase=False        D2 walk resolves 'Id' declared on D2_Generic`1
+D2 after  walk: closed=False genericBase=False
+D2 (walked)      bytes: 2B0000001056657273696F6E0004000000025F696400040000006162630002...
+D3 (never walked) bytes: 2B0000001056657273696F6E0004000000025F696400040000006162630002...
+identical? True
+```
+
+Walk first, registry unchanged at every level, then serialize — and the bytes match a structurally
+identical twin the walk never touched. This is §8's load-bearing evidence for the case that actually
+broke.
+
+#### GT — ground truth against the real compliance types
+
+Run inside `Wolverine.MongoDB.Tests`, using the real `SagaChain.DetermineSagaIdMember`:
+
+```
+GT-F1  StringBasicWorkflow  hierarchy: BasicWorkflow`3 -> Saga
+       Wolverine resolves 'Id' declared on BasicWorkflow`3 (self-declared? False)      [same for Guid/Int/Long]
+
+GT-F2  registry BEFORE: self=False genericBase=False Saga=False                        [all four]
+
+GT-F3  StringBasicWorkflow  wolverine='Id'  broken-probe='(null)' [DISAGREES -> would MapIdMember]
+                                            walk='Id' declaredOn=BasicWorkflow`3 [agrees -> no-op]
+       GuidBasicWorkflow / IntBasicWorkflow / LongBasicWorkflow — identical
+
+GT-F4  the broken predicate's next step, reproduced:
+       MapIdMember(w) -> ArgumentOutOfRangeException: The memberInfo argument must be for class
+       StringBasicWorkflow, but was for class BasicWorkflow`3. (Parameter 'memberInfo')
+
+GT-F5  registry AFTER the walk ran for all four: self=False genericBase=False Saga=False   [all four]
+
+GT-F6  StringBasicWorkflow: { "Version" : 3, "_id" : "SBW-1", "OneCompleted" : false, … "Name" : "n" }
+       GuidBasicWorkflow:   { "Version" : 2, "_id" : UuidStandard:0x11111111…, … }
+       IntBasicWorkflow:    { "Version" : 1, "_id" : 42, … }
+       LongBasicWorkflow:   { "Version" : 1, "_id" : 43, … }
+       each keyed on _id? True/True/True/True
+```
+
+GT-F4 is byte-for-byte the 40-regression failure (79 occurrences in F6's run). GT-F3 shows the walk
+returns all four to the no-op path; GT-F5 shows it does so without registering anything, including
+`Saga` itself.
+
+**Incidental observation (not a decision):** GT-F6 serialized `GuidBasicWorkflow.Id` with no
+`[BsonGuidRepresentation]` annotation and no explicit `MongoClient`, whereas §2.7's standalone probe
+threw `GuidRepresentation is Unspecified` for the same shape. So Guid representation depends on
+process-level driver initialization that the test assembly satisfies and a bare console app does not.
+§2.7's guidance is unchanged and, if anything, safer than needed: integration rows need no
+annotation.
 
 **Implementation note for F6/F7 test authors:** the library's own documents annotate Guid properties
 `[BsonGuidRepresentation(GuidRepresentation.Standard)]` (`IncomingMessage.cs:26`, `NodeDocument.cs:9`,
@@ -163,27 +354,79 @@ after Wolverine's host build. The refinement makes the helper a true no-op there
 untouched, `[8]`'s document shape preserved, app rights preserved. Mutation happens **only** for
 types that are otherwise **broken**.
 
-### 3.1 The algorithm
+### 3.1 The algorithm (amended)
 
-Given `documentType` and Wolverine's resolved `idMember`:
+Given `documentType` and Wolverine's resolved `idMember` (`w` below), and writing `d` for what the
+driver resolves via the §3.1a walk:
 
 1. **Memo hit** → return. (Per-process, per-type; alignment is idempotent by construction.)
 2. **A class map is already registered for `documentType`** → do **not** mutate it. Read it and
-   compare: id member name equal to `idMember.Name` → done; otherwise **throw** the §3.3 conflict
-   error. Covers the app-registered case, the `[BsonId]` case, and the F1 §2.3 case where something
-   already `LookupClassMap`'d (and thus froze) the type.
-3. **No class map registered** → build a *probe* map (`new BsonClassMap(documentType)` + `AutoMap()`)
-   and ask what the driver's own conventions produced:
-   - probe's id member == `idMember.Name` → **return without registering anything.** (`Id`/`id`/`_id`
-     members, and `[BsonId]`-annotated members — F1 §2.6.) Registry untouched.
-   - otherwise → `probe.MapIdMember(idMember)` and `RegisterClassMap(probe)`. The probe is a
-     brand-new object nobody else holds a reference to, and is unfrozen — so this can never hit
-     `[12]`'s frozen-mutation error.
-4. **`RegisterClassMap` threw `ArgumentException`** (lost a race with application code registering
-   the same type between steps 3 and 4 — see §4.3) → fall back to step 2's compare-or-throw against
-   the winner's map. The winner decides; we only assert agreement.
-5. Record in the memo. **Failures are not memoized** — a conflicting configuration throws on every
+   compare: id member name equal to `w.Name` → done; otherwise **throw** the §3.3 conflict error.
+   Covers the app-registered case, the `[BsonId]` case, and the F1 §2.3 case where something already
+   `LookupClassMap`'d (and thus froze) the type.
+3. **Compute `d`** — the §3.1a hierarchy walk. Registry untouched (§2.8 R1-B1, R2-D2, GT-F5).
+4. **`d != null && d.MemberName == w.Name`** → **return without registering anything.** Registry
+   untouched. This is the no-op path for every `Id`-named member *whether declared on the type or
+   inherited*, and for every `[BsonId]`-annotated member at any level (§2.8 R1 A1–A5, GT-F3).
+5. **`w.DeclaringType != documentType`** → **throw §3.4.** The driver rejects `MapIdMember` for a
+   member whose `DeclaringType` is not the class map's own type (§2.8 R1-C1, GT-F4), so this
+   mechanism cannot align it. Checked **before** step 6 because when both conditions hold, the
+   inherited-Wolverine-member diagnosis is the actionable one.
+6. **`d != null && d.MemberInfo.DeclaringType != documentType`** → **throw §3.5.** A different,
+   base-declared member already occupies `_id`; mapping ours would register successfully and then
+   throw `BsonSerializationException` on the type's **first write** (§2.8 R2-E1). Note the contrast
+   with `d` declared on `documentType` itself, which is *fine*: `MapIdMember` re-points within one map
+   and the previous id member demotes to an ordinary field (§2 `[7]`, the both-members entity shape).
+7. **Otherwise** (`w` is self-declared, and nothing base-declared holds `_id`) → build a *probe*
+   (`new BsonClassMap(documentType)` + `AutoMap()`), `probe.MapIdMember(w)`, `RegisterClassMap(probe)`.
+   The probe is brand-new, unregistered and unfrozen, so this can never hit `[12]`'s frozen-mutation
+   error.
+8. **`RegisterClassMap` threw `ArgumentException`** (lost a race with application code registering the
+   same type between steps 2 and 7 — see §4.3) → fall back to step 2's compare-or-throw against the
+   winner's map. The winner decides; we only assert agreement.
+9. Record in the memo. **Failures are not memoized** — a conflicting configuration throws on every
    call rather than throwing once and silently passing afterwards.
+
+The five reachable outcomes, and the §2.8 evidence for each:
+
+| `w` (Wolverine) | `d` (driver) | Outcome | Evidence |
+|---|---|---|---|
+| any | same member | no-op, registry untouched | R1 A1–A5, GT-F3, R2-D2 |
+| self-declared | `null` | register `documentType` map + `MapIdMember(w)` | F6's 4 green convention tiers |
+| self-declared | different, on `documentType` | register + `MapIdMember(w)` re-points | §2 `[7]` |
+| **inherited** | anything different | **throw §3.4** | R1-C1, GT-F4 |
+| self-declared | **different, base-declared** | **throw §3.5** | R2-E1, R1-A8 |
+
+### 3.1a The predicate: `driverIdMember(Type)` (D6)
+
+The original design read the id member off a single unfrozen `AutoMap()`'d probe of `documentType`.
+That reports `null` for **every** inherited id member (§2.8 R1 A2/A3/A5/A8, GT-F3) — it maps only
+members *declared* on that class — so the no-op path became unreachable for the shape every
+compliance saga has. The replacement asks the same question one level at a time:
+
+> Walk from `documentType` up the base chain (exclusive of `object`), most-derived-first. At each
+> level, read the id member from the **already-registered** class map if there is one, otherwise from
+> a **throwaway `AutoMap()`'d probe** of that level. The first level that resolves an id member wins;
+> `null` if none does.
+
+This mirrors what the driver itself does when it freezes a map (a frozen map inherits its base map's
+id member when it has none of its own), and it is **verified exact** against the authoritative
+`LookupClassMap` answer on all 8 R1 shapes and all four real `*BasicWorkflow` types — while
+registering nothing (R1-B1, R2-D2, GT-F5).
+
+Two properties worth stating because they are easy to get wrong:
+
+- **Continue past a level whose map resolves no id member.** A registered base map with no id member
+  does not stop the search; the driver keeps inheriting upward, so the walk must too.
+- **`LookupClassMap` is used only for levels that are *already* registered**, never for
+  `documentType` (step 2 has already returned in that case) and never to create a map. Freezing an
+  already-registered base map is the benign case §11 records: its content is unchanged, and the
+  driver freezes it at first use anyway.
+
+The asymmetry that makes this predicate safe: predicting "agrees" wrongly means **skipping** alignment
+and silently corrupting; predicting "disagrees" wrongly means registering a map that names the same
+member the driver would have — same `_id`, no data difference. The walk should therefore only ever
+claim agreement when it can point at the member.
 
 ### 3.2 The exact helper contract
 
@@ -244,13 +487,38 @@ internal static class MongoIdentityMapping
             return;
         }
 
-        var probe = new BsonClassMap(documentType);
-        probe.AutoMap();
-        if (probe.IdMemberMap?.MemberName == idMember.Name)
+        // What WILL the driver serialize as _id? Not "what does an unfrozen AutoMap of this one class
+        // say" — that reports null for every inherited id member, which is the shape of every saga
+        // whose identity member lives on a base class.
+        var driverIdMap = driverIdMember(documentType);
+        if (driverIdMap?.MemberName == idMember.Name)
         {
-            return;     // the driver already agrees — do NOT register; leave the app in control
+            // The driver already agrees. Do NOT register: leave the registry untouched so this type's
+            // documents stay byte-identical and the application keeps its own right to register a
+            // class map for it later.
+            return;
         }
 
+        // The driver refuses to map a member it does not own, and we can only register a map for
+        // documentType itself, so an inherited identity member is beyond this mechanism's reach.
+        if (idMember.DeclaringType != documentType)
+        {
+            throw inheritedIdentityMember(documentType, idMember);
+        }
+
+        // A different, BASE-declared member already claims _id. Mapping ours would register fine and
+        // then throw BsonSerializationException on this type's first write, so refuse now. (A
+        // different member declared on documentType itself is fine: MapIdMember re-points within the
+        // one map and the previous id member demotes to an ordinary field.)
+        if (driverIdMap != null && driverIdMap.MemberInfo.DeclaringType != documentType)
+        {
+            throw conflictingInheritedId(documentType, idMember, driverIdMap);
+        }
+
+        // The probe is brand new and unfrozen, so this can never hit the driver's
+        // "class map has been frozen and no further changes are allowed" error.
+        var probe = new BsonClassMap(documentType);
+        probe.AutoMap();
         probe.MapIdMember(idMember);
         try
         {
@@ -259,9 +527,41 @@ internal static class MongoIdentityMapping
         catch (ArgumentException)
         {
             // Lost a race with application code that registered a map for this type between the
-            // IsClassMapRegistered check above and this call. The winner's map decides.
+            // IsClassMapRegistered check above and this call. The winner's map decides; we only
+            // assert agreement.
             assertRegisteredMapAgrees(documentType, idMember);
         }
+    }
+
+    /// <summary>
+    /// What the MongoDB driver will actually serialize as <c>_id</c> for <paramref name="documentType"/>,
+    /// or <c>null</c> if nothing will. Walks the base chain most-derived-first because
+    /// <c>AutoMap()</c> maps only the members a class itself declares, while the driver's frozen map
+    /// inherits its base map's id member — so a single unfrozen probe of the document type reports
+    /// <c>null</c> for every inherited id member. Registers nothing: already-registered levels are
+    /// read as they are, unregistered levels are auto-mapped on a throwaway map. Never called for
+    /// <paramref name="documentType"/> when a map is already registered for it — <c>align</c> has
+    /// returned by then.
+    /// </summary>
+    private static BsonMemberMap? driverIdMember(Type documentType)
+    {
+        for (var type = documentType; type != null && type != typeof(object); type = type.BaseType)
+        {
+            if (BsonClassMap.IsClassMapRegistered(type))
+            {
+                // A registered map with no id member does not end the search: the driver keeps
+                // inheriting upward, so we do too.
+                var registered = BsonClassMap.LookupClassMap(type);
+                if (registered.IdMemberMap != null) return registered.IdMemberMap;
+                continue;
+            }
+
+            var probe = new BsonClassMap(type);
+            probe.AutoMap();
+            if (probe.IdMemberMap != null) return probe.IdMemberMap;
+        }
+
+        return null;
     }
 
     private static void assertRegisteredMapAgrees(Type documentType, MemberInfo idMember)
@@ -279,9 +579,12 @@ internal static class MongoIdentityMapping
 }
 ```
 
-**Binding details.** Signatures, exception types, and the `align` decision order are contractual.
-The two message texts are contractual (§3.3, §5) because tests assert on them. `_aligned` may be any
-lock-free-read memo; `bool` values are unused — presence is the signal.
+**Binding details.** Signatures, exception types, and the `align` decision order are contractual —
+including that step 5's inherited-member check precedes step 6's conflict check. The four message
+texts are contractual (§3.3, §3.4, §3.5, §5) because tests assert on their prefixes. `_aligned` may be
+any lock-free-read memo; `bool` values are unused — presence is the signal. `driverIdMember` returns
+the driver's `BsonMemberMap` rather than a `MemberInfo` because step 6 needs both its `MemberName` and
+its `MemberInfo.DeclaringType`.
 
 ### 3.3 The conflict error
 
@@ -298,6 +601,73 @@ bad argument to a method). Text as in §3.2. Properties it must keep:
 It deliberately never surfaces `[12]`'s "has been frozen and no further changes are allowed", which
 says nothing about identity. The design's invariant — **only ever `MapIdMember` on a brand-new,
 unregistered map** — is what guarantees that.
+
+### 3.4 New: the inherited-identity-member error (D7a)
+
+Fires when Wolverine's resolved identity member is declared on a base class **and** the driver does
+not already map it (step 5). The driver makes this unfixable by this mechanism: `MapIdMember` rejects
+a member whose `DeclaringType` is not the map's own class (§2.8 R1-C1), and a class map can only be
+registered for one type.
+
+Type: **`InvalidOperationException`**.
+
+```csharp
+private static InvalidOperationException inheritedIdentityMember(Type documentType, MemberInfo idMember)
+    => new(
+        $"Wolverine resolved '{idMember.Name}' as the identity member for " +
+        $"{documentType.FullNameInCode()}, but that member is declared on the base type " +
+        $"{idMember.DeclaringType!.FullNameInCode()}, and the MongoDB driver only lets a class map " +
+        $"declare an id member of its own. Either put [BsonId] on " +
+        $"{idMember.DeclaringType.FullNameInCode()}.{idMember.Name}, or register a class map for " +
+        $"{idMember.DeclaringType.FullNameInCode()} that maps '{idMember.Name}' as the id member " +
+        $"(BsonClassMap.RegisterClassMap<{idMember.DeclaringType.Name}>(cm => {{ cm.AutoMap(); " +
+        $"cm.MapIdMember(x => x.{idMember.Name}); }})). Either way every saga or entity inheriting " +
+        "that member is fixed at once.");
+```
+
+Both remedies are verified, not guessed: `[BsonId]` on a base-declared member is resolved by the
+driver (§2.8 R1-A5) and an app-registered class map on the declaring type works for non-generic and
+closed-generic bases alike (R1-C2, R1-C3). Either one puts the type back on §3.1's no-op path, since
+the walk reads registered base maps and honours `[BsonId]` at any level. A third-party base the app
+cannot annotate is covered by the second remedy.
+
+**Not reachable for the `Id` convention**, which is the only one the compliance suites use: an
+inherited member *named* `Id` is resolved by the driver too, so step 4 returns first. This error is
+specific to a non-`Id` Wolverine convention (`[SagaIdentity]`, `{TypeName}Id`, `{Name-minus-Saga}Id`,
+`SagaId`) on a base class — e.g. a shared `abstract class TenantSagaBase : Saga { public Guid SagaId }`.
+
+### 3.5 New: the conflicting-inherited-`_id` error (D7b)
+
+Fires when Wolverine's member *is* self-declared but a **different**, base-declared member already
+occupies `_id` (step 6) — e.g. a saga base class declaring `Id` while the saga itself declares
+`{TypeName}Id`, which Wolverine's tier 2 prefers over tier 5 (§2.8 R1-A8).
+
+Type: **`InvalidOperationException`**.
+
+```csharp
+private static InvalidOperationException conflictingInheritedId(
+    Type documentType, MemberInfo idMember, BsonMemberMap driverIdMap)
+    => new(
+        $"Wolverine resolved '{idMember.Name}' as the identity member for " +
+        $"{documentType.FullNameInCode()}, but the MongoDB driver already maps " +
+        $"'{driverIdMap.MemberName}' — inherited from " +
+        $"{driverIdMap.MemberInfo.DeclaringType!.FullNameInCode()} — as the document _id, and a " +
+        "document cannot have two. Because the conflicting member belongs to a base type, this " +
+        $"cannot be resolved by mapping '{idMember.Name}': the driver would accept the mapping and " +
+        "then fail on the first write. Either stop the inherited member from being an id member " +
+        $"([BsonIgnore] or [BsonElement(\"...\")] on " +
+        $"{driverIdMap.MemberInfo.DeclaringType.FullNameInCode()}.{driverIdMap.MemberName}), or " +
+        $"rename '{idMember.Name}' so Wolverine resolves the inherited member instead.");
+```
+
+The message deliberately does **not** suggest `[BsonId]` on `{idMember.Name}`: §2.8 R2-E2 shows that
+produces the identical `BsonSerializationException`. `[BsonIgnore]` and `[BsonElement("…")]` on the
+inherited member both work (R2-E3, R2-E4), and renaming puts the type on the no-op path.
+
+Without this guard the failure is far worse than an exception: alignment reports success at codegen
+and the type throws `BsonSerializationException: … cannot use element name '_id' because it is
+already being used by …` on its **first saga insert**, at runtime, inside the outbox transaction
+(R2-E1). Converting a first-write runtime failure into a host-build failure is the whole point.
 
 ---
 
@@ -383,6 +753,16 @@ map is aligned, `LookupClassMap(typeof(T)).IdMemberMap` **is** the Wolverine-res
 read/write disagreement (F1 §3.2) closes without touching `IdOf`. Its `InvalidOperationException` for
 "no mapped `_id` member" becomes unreachable in practice, and stays as a backstop.
 
+> **Amendment — the entity half is unchanged (decision 3).** `IdOf`'s `LookupClassMap` resolves
+> **inherited** id members correctly (§2.8 R1 A2/A3/A5, `authoritative` column), which is precisely
+> why an inherited-`Id` entity needs no alignment: the driver already writes that member as `_id`
+> (step 4 no-op) and the `[Entity]` load filters `_id` with the same member's value, so read and write
+> agree with the registry untouched. The two new throws close the two shapes where they would *not*
+> agree: an inherited non-`Id` member (§3.4) and a base-declared member squatting on `_id` (§3.5) —
+> both of which are broken today, silently. §4.2's entity rows and §4.4's ordering argument stand as
+> written; F7's only delta is the two extra test rows (§9 rows 22–24). No change to `EntityFrames.cs`
+> beyond what the original design already specified, and no change to LD4 (§6).
+
 ### 4.3 Thread safety — resolving F1's open flag
 
 F1 correction 2 flagged that the plan's `ConcurrentDictionary<Type,bool>.GetOrAdd(type, factory)`
@@ -401,7 +781,7 @@ align → memo write. Properties:
    alignment of a type, no operation ever takes the lock.
 3. **A race with *application* code is still possible** — an app thread calling `RegisterClassMap<T>`
    or triggering `LookupClassMap(T)` concurrently with our first alignment. Our lock cannot cover
-   the driver's registry. Step 4 handles it: catch `ArgumentException`, re-read the winner's map,
+   the driver's registry. Step 8 handles it: catch `ArgumentException`, re-read the winner's map,
    assert agreement or throw §3.3's error. Outcome is identical to the app having won by a wider
    margin.
 4. **The driver's own locking** (`BsonSerializer.ConfigLock`, F1 §2.1/§2.2) makes each individual
@@ -418,7 +798,7 @@ confirm. The design's answer:
 
 - **Best effort at ordering:** codegen-time calls run during host build, before any handler executes,
   so for the normal case we are first.
-- **When we are not first, fail loudly, never silently:** §3.1 rule 2 compares and throws §3.3's
+- **When we are not first, fail loudly, never silently:** §3.1 step 2 compares and throws §3.3's
   actionable error. There is deliberately **no** attempt to unregister, replace, or thaw a map — the
   driver forbids all three (`[12]`, and F1 §2.2's "class maps can NOT be replaced" source comment).
 - One in-library ordering hazard is worth naming for F6/F7: `IdOf<T>` calls `LookupClassMap`, so
@@ -426,6 +806,15 @@ confirm. The design's answer:
   first. §4.2's `EntityCollection<T>` accessor removes the hazard structurally — every write path
   obtains its collection (and therefore aligns) before it can reach `IdOf`. F7 must keep that
   ordering when it edits `UpsertAsync`/`DeleteAsync`.
+
+**Amendment — the predicate does not weaken this.** `driverIdMember` (§3.1a) never calls
+`LookupClassMap` for `documentType` (step 2 has already returned when a map exists for it) and never
+creates a map for any level, so **it cannot itself freeze the document type wrong**: the register
+branch stays reachable after the predicate runs. It does call `LookupClassMap` on *already-registered*
+base levels, which freezes those — the benign case (their content is unchanged, and the driver freezes
+them at first use anyway; §11 records `GetRegisteredClassMaps` as the considered non-freezing
+alternative). This is a strictly better ordering position than the original predicate, which read a
+map of `documentType` it then discarded.
 
 ---
 
@@ -566,7 +955,7 @@ with:
 
 **(c) Add this bullet** (in the Key Design Decisions list, adjacent to the two above):
 
-> - **Identity-member alignment (`MongoIdentityMapping`, F6/F7):** Wolverine resolves a document's identity member by *its* convention (`SagaChain.DetermineSagaIdMember`: `[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`); the MongoDB driver resolves `_id` by *its own* (`NamedIdMemberConvention`: only `Id`/`id`/`_id`, plus `[BsonId]`). Before 1.0.1 nothing reconciled the two, so a saga or entity keyed on e.g. `ShipmentId` was written with a **server-generated `ObjectId` `_id`** and could never be loaded back — silent data corruption. `MongoIdentityMapping.EnsureIdMember` bridges them: for a type whose class map is not yet registered **and** whose driver-resolved id member disagrees with Wolverine's, it registers one additive per-type `BsonClassMap` (`AutoMap()` + `MapIdMember(resolvedMember)`); the driver's `Freeze()` then normalizes that member's element name to `_id`, so the frames' `Eq("_id", …)` filters and the written documents agree. It is **a no-op that leaves the BSON registry untouched** whenever the driver already agrees (every `Id`-keyed type — i.e. every consumer that worked before 1.0.1 — and every `[BsonId]`-annotated type), and it **throws a precise `InvalidOperationException`** when a class map is already registered naming a different id member (the app owns its own maps; we only assert agreement). Called at codegen time from every saga/entity frame constructor **and** at runtime from the `MongoSagaOperations`/`MongoEntityOperations` collection accessors — the runtime leg is required because `TypeLoadMode.Static` never constructs frames (`HandlerChain.cs:309-325` attaches pre-generated types without calling `AssembleTypes`). This is **not** the process-global serializer/convention mutation the library forswears: no serializer, no convention, no convention pack, and no behavior change for any type Wolverine does not persist.
+> - **Identity-member alignment (`MongoIdentityMapping`, F6/F7):** Wolverine resolves a document's identity member by *its* convention (`SagaChain.DetermineSagaIdMember`: `[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`); the MongoDB driver resolves `_id` by *its own* (`NamedIdMemberConvention`: only `Id`/`id`/`_id`, plus `[BsonId]`, inherited members included). Before 1.0.1 nothing reconciled the two, so a saga or entity keyed on e.g. `ShipmentId` was written with a **server-generated `ObjectId` `_id`** and could never be loaded back — silent data corruption. `MongoIdentityMapping.EnsureIdMember` bridges them. It first asks what the driver *will* resolve, by walking the type's base chain most-derived-first and reading each level's registered class map, or auto-mapping a throwaway one (**not** a single unfrozen probe of the document type — `AutoMap` maps only a class's own declared members, so that reports nothing for an identity member declared on a base class, which is the shape of every upstream compliance saga). If the driver already resolves the same member, the helper **does nothing at all and leaves the BSON registry untouched** — that covers every `Id`-keyed type whether the member is declared on the type or inherited (i.e. every consumer that worked before 1.0.1, byte-identical) and every `[BsonId]`-annotated type. Only when the driver disagrees does it register one additive per-type `BsonClassMap` (`AutoMap()` + `MapIdMember(resolvedMember)`); the driver's `Freeze()` then normalizes that member's element name to `_id`, so the frames' `Eq("_id", …)` filters and the written documents agree. Three misconfigurations throw a precise `InvalidOperationException` instead of corrupting or deferring: a class map already registered for the type naming a different id member (the app owns its own maps — we only assert agreement); an identity member declared on a **base** type, which the driver refuses to map from the subclass's map (remedy: `[BsonId]` on it, or register a class map for the declaring type — either fixes every subclass at once); and a **different**, base-declared member already occupying `_id`, which would otherwise register cleanly and then fail on the type's first write. Called at codegen time from every saga/entity frame constructor **and** at runtime from the `MongoSagaOperations`/`MongoEntityOperations` collection accessors — the runtime leg is required because `TypeLoadMode.Static` never constructs frames (`HandlerChain.cs:309-325` attaches pre-generated types without calling `AssembleTypes`). This is **not** the process-global serializer/convention mutation the library forswears: no serializer, no convention, no convention pack, and no behavior change for any type Wolverine does not persist.
 
 **(d) Also add**, in the same list, the LD4 decision:
 
@@ -586,8 +975,9 @@ optional, not gating.
 
 | Shape | Before 1.0.1 | After | Compatibility |
 |---|---|---|---|
-| Identity member named `Id`/`id`/`_id` (every saga in every compliance suite; upstream `Todo`; the demo's `OrderNote`, `Order`, `OrderFulfillmentSaga`) | Driver maps `Id` → `_id`; works | Helper is a **no-op, registry untouched** (§3.1 rule 3) | **Byte-identical.** `[8]` shows the unchanged document. This is the whole regression story for working consumers. |
-| Identity member carries `[BsonId]` (any name) | Driver maps it → `_id`; works | Helper is a **no-op** (F1 §2.6, `[BsonId]` applies during `AutoMap`) | **Byte-identical.** |
+| Identity member named `Id`/`id`/`_id` **declared on the type itself** (upstream `Todo`; the demo's `OrderNote`, `Order`, `OrderFulfillmentSaga`) | Driver maps `Id` → `_id`; works | Helper is a **no-op, registry untouched** (§3.1 step 4) | **Byte-identical.** `[8]` shows the unchanged document. |
+| Identity member named `Id` **inherited from a base type** — *every saga in every compliance suite*: `String`/`Guid`/`Int`/`LongBasicWorkflow` inherit `Id` from `BasicWorkflow<TStart,TCompleteThree,TId>` | Driver maps the inherited `Id` → `_id`; works | Helper is a **no-op, registry untouched** — the amended predicate resolves the inherited member (§2.8 GT-F3), where the original read `null` and mutated | **Byte-identical, proven by hex diff** against a structurally identical twin the predicate never touched (§2.8 R2-D2), with the registry unchanged at every level before and after (R2-D2, GT-F5). **This is the row that actually broke** — 40 facts — and it is now the row with the strongest evidence. |
+| Identity member carries `[BsonId]` (any name, **any level** — declared on the type or inherited) | Driver maps it → `_id`; works | Helper is a **no-op** (F1 §2.6; `[BsonId]` on a base member is resolved by the walk — §2.8 R1-A5) | **Byte-identical.** |
 | Non-`Id` member, no `Id` member at all (e.g. `ShipmentSaga.ShipmentId`) | **Never worked.** No `_id` written; server assigns an `ObjectId` (`[9]`); every load returns null and every insert creates a new unfindable document | `_id` = the identity value (`[4]`) | **No migration owed** — no functioning data can exist. Any documents on disk are unreachable orphans that were never readable by the library or the app. Dropping the collection is optional cleanup, not a migration step. |
 | **Both** `{TypeName}Id` **and** `Id` (the review's poisoned entity shape) | Writes keyed `Id` → `_id`; reads filtered on `{TypeName}Id`'s value. Worked **only** while the app kept the two members equal | `_id` = `{TypeName}Id`; `Id` demotes to an ordinary field named `Id` (`[7]`) | **Values equal (the accidentally-working case): existing documents stay loadable** — `_id` holds the same value before and after; re-writes converge to the new shape, which additionally carries an `Id` field. **Values unequal: was already broken**, same as the row above. |
 | Saga documents generally | — | — | `Version` and every other member serialize unchanged; **no `_t` discriminator is introduced** (`[18]`/`[20]`), so saga documents keep their shape. |
@@ -630,6 +1020,23 @@ helper and the codegen guards.
 | 15 | LD4: plain handler returning `Delete<TSaga>` → codegen `InvalidOperationException` with §6.1's `Delete<…>` prefix | — | — | F7 | ″ |
 | 16 | LD4: plain handler returning `IStorageAction<TSaga>` (e.g. `Storage.Delete(saga)`) → codegen `InvalidOperationException` with §6.1's `IStorageAction<…>` prefix | — | — | F7 | ″ |
 | 17 | Runtime-leg / Static-mode net: invoke a `MongoSagaOperations`/`MongoEntityOperations` entry point for a non-`Id`-keyed type **whose frames were never constructed**; alignment still applies and the round-trip succeeds (§4.1) | 2 or 3 | `Guid` | F6 (saga) / F7 (entity) | respective conventions file |
+
+#### Rows added by the amendment (18–24)
+
+| # | Shape / scenario | Assertion | Task | File |
+|---|---|---|---|---|
+| **18** | **`Id` inherited from a closed generic base — the regression** | The four existing `{string,guid,int,long}_saga_storage_compliance.cs` suites (upstream `*BasicWorkflow`, `Id` on `BasicWorkflow<TStart,TCompleteThree,TId>`) stay green **unchanged**, both TFMs. **Zero edited facts** — the bar F6 must restore. This is the oracle; no new integration test is needed for it. | F6 | **existing** compliance suites |
+| **19** | Helper: inherited **`Id`** → no-op **and registry untouched at every level** | On a dedicated POCO hierarchy `Derived : Base<string>` where `Base<TId>` declares `Id`: call `EnsureIdMember`, then assert `IsClassMapRegistered` is `false` for the derived type, the closed generic base, **and** the root base. Directly encodes §2.8 R2-D2/GT-F5 as a permanent guard — this is the fact whose absence let `75b5b9d` regress. | F6 | `identity_mapping_helper.cs` |
+| **20** | Helper: `[BsonId]` on a **base-declared** member → no-op, no registration | Proves the walk honours `[BsonId]` at any level (§2.8 R1-A5), i.e. the §3.4 remedy actually works. | F6 | ″ |
+| **21** | Helper: identity member **inherited and non-`Id`** → `InvalidOperationException` per §3.4 | Dedicated hierarchy, e.g. `abstract class …Base : Saga { public Guid SagaId }` + a concrete subclass. Assert on the message **prefix** and that it names both the member and its declaring type. Registry must be left untouched (nothing registered for either type). | F6 | ″ |
+| **22** | Helper: base declares `Id`, type declares `{TypeName}Id` → `InvalidOperationException` per §3.5 | The §2.8 R1-A8/R2-E1 shape. Assert the message prefix, and that it does **not** recommend `[BsonId]` (R2-E2 proves that remedy fails). Registry untouched. | F6 | ″ |
+| **23** | Saga, identity member inherited and non-`Id`, through **real codegen** | A saga on the row-21 shape wired into a host → host build (codegen) fails with §3.4's `InvalidOperationException`, not at first message. Proves the frame-constructor call site surfaces it at build time. | F6 | `saga_identity_conventions.cs` |
+| **24** | Entity analogues of rows 19/21/22 | (a) entity with an inherited `Id` round-trips through `[Entity]` load + `Insert<T>` + `Delete<T>` with the registry untouched — proving `IdOf`'s `LookupClassMap` and the load filter agree on the inherited member (§4.2 amendment note); (b) entity on the row-21 shape → §3.4 throw at codegen; (c) entity on the row-22 shape → §3.5 throw at codegen. | F7 | `entity_identity_conventions.cs` |
+
+**Not required:** a sibling-subclass row. That row would only be needed if D7 had chosen the
+declaring-type mapping option (§11), which propagates a base's id mapping to every sibling subclass
+(§2.8 R1-C2). Since both inherited cases throw instead, no sibling type is ever mutated and there is
+nothing to assert.
 
 Each saga/entity row also asserts the **lifecycle**, not just the first write: start → update →
 complete for sagas (proving load, insert, version-guarded update, and delete all key the same
@@ -681,7 +1088,7 @@ Explicit, so implementing sessions don't treat these as scope creep or as mistak
 
 | # | Plan said | This design says | Why |
 |---|---|---|---|
-| 1 | `EnsureIdMember` registers the class map unconditionally once built | **Don't register when the driver's own conventions already agree** (§3.1 rule 3) | Keeps every working consumer's registry untouched and preserves their right to register their own map later (`[14]`). Zero-risk for the `Id`-keyed majority. |
+| 1 | `EnsureIdMember` registers the class map unconditionally once built | **Don't register when the driver's own conventions already agree** (§3.1 step 4) | Keeps every working consumer's registry untouched and preserves their right to register their own map later (`[14]`). Zero-risk for the `Id`-keyed majority. |
 | 2 | `ConcurrentDictionary.GetOrAdd(type, factory)` | Lock-free memo read → `lock` → double-check → align (§4.3) | Resolves F1 correction 2: `GetOrAdd`'s factory may run twice, and `RegisterClassMap` is not idempotent (`[10]`). |
 | 3 | Invocation at "every frame constructor — codegen time" | Frame constructors **plus** runtime collection accessors (§4.1, §4.2) | `TypeLoadMode.Static` never constructs frames (`HandlerChain.cs:309-325`), so codegen-only alignment is silently absent in pre-generated/AOT deployments. **This is the most important delta.** |
 | 4 | F6 snippet threw `InvalidOperationException` for an unresolvable identity member | **`ArgumentException`**, message identical to today's `DetermineSagaIdType` (§5) | The plan's own decision text asks for "the same message as `DetermineSagaIdType`"; matching the type too keeps parity with `LightweightSagaPersistenceFrameProvider` and changes nothing consumer-visible. |
@@ -691,6 +1098,31 @@ Explicit, so implementing sessions don't treat these as scope creep or as mistak
 
 Everything else in the plan's F6/F7 sections stands: red-first ordering, the compliance suites as the
 regression oracle, both TFMs, one branch/PR per task, CHANGELOG `### Fixed` entries.
+
+### 10.1 The F6-facing diff — what changes relative to commit `75b5b9d`
+
+F6 implemented the original design correctly; the design was wrong about one predicate. **Everything
+in `75b5b9d` stays except the items below.** Nothing here touches `EnsureIdMember`, `ResolveIdMember`,
+the memo/`lock` structure, `assertRegisteredMapAgrees`, the four saga frame constructors,
+`sagaCollection<TSaga>()`, `DetermineSagaIdType`'s delegation, or the `UpdateSagaFrame` fallback
+removal — all of those are confirmed correct by F6's own 11 green facts.
+
+| # | File · member | Change | Reference |
+|---|---|---|---|
+| 1 | `MongoIdentityMapping.align` | **Replace** the `var probe = new BsonClassMap(documentType); probe.AutoMap(); if (probe.IdMemberMap?.MemberName == idMember.Name) return;` block with `var driverIdMap = driverIdMember(documentType); if (driverIdMap?.MemberName == idMember.Name) return;`. The probe is then built **after** the two new guards, immediately before `MapIdMember`. | §3.1 steps 3–7, §3.2 |
+| 2 | `MongoIdentityMapping.driverIdMember` | **New** private static method — the base-chain walk, verbatim from §3.2 (including the XML doc, which records *why* a single unfrozen probe is wrong). | §3.1a, §3.2 |
+| 3 | `MongoIdentityMapping.inheritedIdentityMember` | **New** private static factory returning the §3.4 `InvalidOperationException`; thrown from `align` when `idMember.DeclaringType != documentType`. | §3.4 |
+| 4 | `MongoIdentityMapping.conflictingInheritedId` | **New** private static factory returning the §3.5 `InvalidOperationException`; thrown from `align` when `driverIdMap != null && driverIdMap.MemberInfo.DeclaringType != documentType`. Guard order: after #3. | §3.5 |
+| 5 | `MongoIdentityMapping` XML doc (`<summary>`, "Minimal mutation" para) | Amend to state that agreement is decided by the base-chain walk and that inherited `Id` members take the no-op path; keep the "Element naming" paragraph as committed. | §7(c) |
+| 6 | `identity_mapping_helper.cs` | **Add** rows 19–22 (inherited-`Id` no-op + registry-untouched-at-every-level; `[BsonId]`-on-base no-op; §3.4 throw; §3.5 throw). Existing rows 6–11 unchanged. | §9 rows 19–22 |
+| 7 | `saga_identity_conventions.cs` | **Add** row 23 (inherited non-`Id` saga → codegen throw). Existing 5 facts unchanged. | §9 row 23 |
+| 8 | `CLAUDE.md` | Land §7(a)/(b)/(d) as already specified, and §7(c) in its **amended** wording. | §7 |
+| 9 | *(nothing)* | `EntityFrames.cs`, `MongoDbPersistenceFrameProvider.cs`, and LD4 are unaffected; F7's only delta is §9 row 24. | §4.2 amendment note |
+
+**Verification bar, unchanged:** 40 regressions → **0**, with **zero edited compliance facts**, on
+net9.0 **and** net10.0. Row 18 is the oracle. Expect the four `*BasicWorkflow` suites to pass without
+any test-side change — if any compliance file needs editing, stop and report: that means the predicate
+is still moving working consumers' data.
 
 ---
 
@@ -707,12 +1139,38 @@ regression oracle, both TFMs, one branch/PR per task, CHANGELOG `### Fixed` entr
 | **LD4 — route `Delete<TSaga>`/`IStorageAction<TSaga>` to the saga frames** | Rejected, §6 reasons 1–4: no `SagaChain`, therefore no captured `oldVersion`, therefore unguarded writes into saga collections — silent OCC corruption in place of a visible bug. |
 | **Mutating/unregistering a conflicting frozen class map** | Impossible, not merely rejected: the driver forbids replacement ("class maps can NOT be replaced", F1 §2.2) and mutation after freeze (`[12]`). Hence "assert agreement or throw" is the only available contract. |
 
+### 11.1 Rejected at the amendment (2026-07-26)
+
+| Option | Verdict |
+|---|---|
+| **Freeze the throwaway probe to read the driver's answer** (`probe.AutoMap(); probe.Freeze(); probe.IdMemberMap`) | Rejected. It *is* authoritative — §2.8 R1-B3 shows a frozen probe resolves the inherited `Id` correctly — but `Freeze()` **registers the base type's class map globally** (R1-B3, fact C). That would silently register maps for `Saga`, `BasicWorkflow<…>`, and every app saga base as a side effect of the predicate, weakening the one guarantee that justifies Option B′ ("registry untouched when the driver already agrees") for *every* hierarchy rather than just the broken ones. The walk gets the same answer for zero side effects (R1: 8/8 exact; GT-F5: registry unchanged). |
+| **Traverse `probe.BaseClassMap`** | Rejected — it does not work. On an unfrozen `AutoMap()`'d probe the property is simply `null` (§2.8 R1-B2); it is only populated *during* `Freeze()`, i.e. after the side effect above has already happened. |
+| **`LookupClassMap(idMember.DeclaringType)`** to read the base's answer | Rejected. Registers **and freezes** the declaring type's map — fact C's side effect, deliberately, on a type Wolverine may not persist. Also answers a narrower question than the walk (one level, not the chain). |
+| **Decide purely from `MemberInfo` reflection** — "is the member named `Id`/`id`/`_id`, or does it carry `[BsonId]`?" | Rejected, though tempting: it is the simplest side-effect-free predicate and would have fixed the 40 regressions. It hard-codes the *default* `NamedIdMemberConvention` names and `[BsonId]`, so it silently mispredicts for an app that registers a custom convention pack or an app-registered class map on a **base** type — and in the "predicts agreement wrongly" direction, which is the fatal one (skip alignment → silent corruption). The walk runs the driver's *actual* registered conventions at each level (`AutoMap` applies them), so it stays correct under app customization. It is also what makes §3.4's second remedy work: an app that registers a class map on the declaring type is recognized as agreement. |
+| **Map the id member on the declaring type's class map** (the automatic fix for an inherited non-`Id` identity member, instead of §3.4's throw) | Rejected. It works — §2.8 R1-C2 maps `SagaId` on a non-generic base and both sibling subclasses then serialize with the right `_id`; R1-C3 shows it works for closed generics too, per closed generic. But the mapping applies to **every subclass of that base**, including types Wolverine never persists: a sibling the app stores in its own collection would silently move from a server-assigned `ObjectId` `_id` to that member's value. That directly contradicts the promise in §7 ("no behavior change for any type Wolverine does not persist") — the same blast-radius reasoning that produced Option B′'s minimal-mutation rule in the first place. §3.4's throw names this exact fix as a remedy the **app** can apply deliberately for its own hierarchy, which keeps the choice where the ownership is. |
+| **Skip alignment when the identity member is inherited** (smallest blast radius) | Rejected outright: it leaves precisely the silent corruption F6 exists to close, and does so *only* for a subset of shapes, which is worse than either fixing or refusing — the behavior would depend on where a member happens to be declared, with no diagnostic. |
+| **Let the §3.5 conflict surface naturally** (register the mapping and let the driver throw) | Rejected. The driver accepts `MapIdMember` and `RegisterClassMap` without complaint and throws `BsonSerializationException` on the type's **first write** (§2.8 R2-E1) — at runtime, inside the outbox transaction, on a message that will then retry and fail identically. Pre-detecting at codegen converts that into a host-build failure with an actionable message. |
+| **Recommend `[BsonId]` as the §3.5 remedy** | Rejected on evidence: §2.8 R2-E2 shows `[BsonId]` on the derived member produces the **identical** `BsonSerializationException`, because the inherited member still claims `_id`. The message names `[BsonIgnore]`/`[BsonElement("…")]` on the inherited member instead (R2-E3, R2-E4, both verified working). This is the clearest case in the amendment for testing a remedy before writing it into an error string. |
+
 ---
 
 ## 12. Handed to F6/F7 (implementation-time confirmations, not open questions)
 
 Nothing here changes a decision; each is a one-line check that the design's premises still hold in
 the implementing session:
+
+> **Amendment note.** Items 1–3 below were written for a from-scratch F6. F6 has already done them
+> (`75b5b9d`): the fallback was replaced, the frames wired, and the generated source dumped and
+> compared (identical session-bound operations in identical order; the only delta is the update
+> argument, `shipmentSaga.ShipmentId` vs `dumpIdKeyedSaga.Id`). Treat them as done and start from
+> **§10.1**. Items 4–5 still apply, plus:
+>
+> 6. **Re-run the full suite on both TFMs before anything else** — row 18 (the four compliance suites)
+>    is the acceptance oracle, and the amendment's whole purpose is returning it to green with zero
+>    edited facts.
+> 7. **Do not add a `Freeze()` anywhere in `MongoIdentityMapping`**, including as a "make sure it's
+>    resolved" convenience: §11.1 records why (it registers base maps globally). The driver freezes
+>    every map at first use on its own.
 
 1. **Confirm** `SagaFrames.cs:227-229`'s fallback is still present and that the four frame ctors are
    at the §4.2 line numbers (drift-check only).
