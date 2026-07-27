@@ -111,9 +111,10 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F15** | `docs/truth-sweep` | docs: post-1.0.0 truth sweep (version, versioning rule, collection counts) | — | Can start immediately | Sonnet |
 | **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | **Done** (#187) — 214 single-node + 18 multinode green on net9.0 and net10.0 | Sonnet |
 | **F17** | `chore/store-efficiency` | chore: store efficiency sweep (DLQ replay batching, cached collections, parallel node loads) | **F11** | **Done** ([#188](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/188)) — 430 single-node + 36 multinode green on net9.0 and net10.0; zero edited facts | Sonnet |
-| **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | **Done** ([#194](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/194)) — 45/45 demo integration facts green against a local `0.0.0-ci` pack of the fixed library | Sonnet |
-| **F19** | `test/remediation-regression` | test: full cross-feature regression (inbox+outbox+saga+entity+solo+multinode) | **F6–F18 merged** | Blocked by: F6–F18 | Sonnet |
-| **F20** | *(no branch/PR)* | final verification on `main` (+ release decision) | **F15, F19 merged** | Blocked by: F15, F19 | Sonnet |
+| **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | Blocked by: F5, F6, F7 (merged & packed) | Sonnet |
+| **F19** | `test/remediation-regression` | test: full cross-feature regression (inbox+outbox+saga+entity+solo+multinode) | **F6–F18 merged** | **Done** (report-only close, no PR) — 218 single-node green on both TFMs; multinode 5× consecutive per TFM, 18/18 facts each (10/10 total); pack succeeds; demo suite 45/45 green; CI coverage confirmed adequate. Found F14's bracketed dependency ranges silently reverted by later dependabot bumps — filed, not fixed here (see F21) | Sonnet |
+| **F20** | *(no branch/PR)* | final verification on `main` (+ release decision) | **F15, F19, F21 complete** | Blocked by: F15, F19, F21 | Sonnet |
+| **F21** | `docs/post-remediation-sweep` | docs: post-remediation documentation sweep (F12/F19 status, dependency-range regression note) | **F12, F19 complete** | Not Started | Sonnet |
 
 > **Recommended execution order.** Day one, run **F1, F2, F5, F9, F13, F14, F15** as seven concurrent sessions (four are independent small fixes/docs; three are discovery/design inputs). F3 and F4 (the two design gates) follow their discovery tasks and can run in parallel with each other. The moment F3 merges, **F6** starts (head of the critical path); the moment F4 merges, **F8, F10, F11, F12** fan out in parallel (disjoint primary files — see File Structure). F7 follows F6; F18 follows F6+F7; F16/F17 trail their file-sharing predecessors. F19/F20 close out.
 
@@ -638,20 +639,49 @@ untouched. CI's `library` + `demo` jobs (Analyze, trivy) ran green on the PR bef
 - **Dependencies:** **F6–F18 merged.**
 - **Blocking status:** **Blocked by: F6–F18.**
 
-- [ ] **Step 1:** Run all suites + pack + demo; record results verbatim.
-- [ ] **Step 2:** Confirm CI coverage; fix or file gaps; report. Commit only if CI changed.
+- [x] **Step 1:** Run all suites + pack + demo; record results verbatim.
+- [x] **Step 2:** Confirm CI coverage; fix or file gaps; report. Commit only if CI changed.
+
+**Status: done (report-only close, no PR — no file changed).** Precondition check first found F12
+unmerged (no PR existed despite the table saying otherwise) — it turned out already implemented on
+a separate worktree branch and merged as [PR #196](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/196)
+(squash commit `fbcad16`) before the re-check completed. Branch `test/remediation-regression` cut
+from `origin/main` at `fbcad16`. Results: single-node suite 218/218 green on net9.0 **and** net10.0;
+multinode `--filter "Category=multinode"` 5 consecutive runs per TFM, 18/18 facts each (10/10 total,
+2m29s–2m44s, no widened timeouts); `dotnet pack -p:UseWolverineSource=false` succeeds; demo build +
+full integration suite 45/45 green, including F18's `CustomerFeedbackFlowTests`; CI coverage
+confirmed adequate — the four `Category=multinode`-tagged files are the only ones with that trait,
+so `dead_node_release.cs` and the extended `saga_store_diagnostics.cs` land in the
+`Category!=multinode` step via the test project's default SDK glob (no explicit `<Compile>` list);
+the `demo` job already downloads and exercises the same-commit nupkg. No `ci.yml` change needed.
+**One red finding, filed not fixed (out of F19's verification-only scope):** the packed nuspec shows
+plain pinned versions (`WolverineFx 6.21.0`, `MongoDB.Driver 3.10.0`), not F14's bracketed ranges
+(`[6.16.0,7.0.0)` / `[3.9.0,4.0.0)`) — later dependabot bump PRs (#162, #165, #166, #167) overwrote
+the whole `Version="..."` string instead of only the lower bound. See **F21**.
 
 ### Task F20: Final verification on `main` (+ release decision)
 
 - **Goal:** Confirm the merged result is clean; decide the release.
-- **Scope:** On `main` after F15 + F19 merge: full suite, multinode 5×, pack, demo suite, CI green, history review (one PR per task F1–F19). Then surface **OQ6** to the user: the fixes include user-visible bug fixes (a 1.0.1 patch is defensible) and new loud failures where silence reigned (arguably 1.1.0); recommend and let the user decide. If releasing, invoke the `release` agent per CLAUDE.md "Versioning & Release"; otherwise everything stays under `## [Unreleased]`.
+- **Scope:** On `main` after F15 + F19 + F21 complete: full suite, multinode 5×, pack, demo suite, CI green, history review (one PR per task F1–F19). Then surface **OQ6** to the user: the fixes include user-visible bug fixes (a 1.0.1 patch is defensible) and new loud failures where silence reigned (arguably 1.1.0); recommend and let the user decide. If releasing, invoke the `release` agent per CLAUDE.md "Versioning & Release"; otherwise everything stays under `## [Unreleased]`.
 - **Expected output:** A clean final report; release only on explicit user approval.
 - **Files/areas likely to change:** none (release handled by the `release` agent if invoked).
-- **Dependencies:** **F15, F19 merged.**
-- **Blocking status:** **Blocked by: F15, F19.**
+- **Dependencies:** **F15, F19, F21 complete.**
+- **Blocking status:** **Blocked by: F15, F19, F21.**
 
 - [ ] **Step 1:** Run all verifications on `main`; report. File anything red — do not fix in this session.
 - [ ] **Step 2 (gated):** Present the release recommendation (OQ6); proceed via the `release` agent only on approval.
+
+### Task F21: Post-remediation documentation sweep
+
+- **Goal:** Reconcile this plan doc and `FOLLOWUPS.md` with what F12/F19 actually found, so F20 runs against accurate docs.
+- **Scope:** Docs-only. Add the missing PR link to F12's row/status note (`#196`); add a dated `FOLLOWUPS.md` entry for the F14 dependency-range regression F19 found (dependabot bumps clobbering the bracket syntax). R7's cross-reference and F19/F20's status/dependency updates are already done (part of scaffolding this task). No source, test, or `Directory.Packages.props` changes — restoring the ranges is separate, already-flagged follow-up work, not this task.
+- **Expected output:** Plan doc and `FOLLOWUPS.md` match current reality; PR merged.
+- **Files/areas likely to change:** `docs/superpowers/plans/2026-07-07-review-findings-remediation.md`, `FOLLOWUPS.md`.
+- **Dependencies:** **F12, F19 complete.**
+- **Blocking status:** **Can start immediately** (both dependencies satisfied).
+
+- [ ] **Step 1:** Add `#196` to F12's row and status note; add the FOLLOWUPS.md entry.
+- [ ] **Step 2:** Commit (`docs: post-remediation documentation sweep`), push, PR, checks green, update plan doc.
 
 ---
 
@@ -665,7 +695,7 @@ untouched. CI's `library` + `demo` jobs (Analyze, trivy) ran green on the PR bef
 | R4 | **In-transaction bulk-write failure shape (F8).** Inside a transaction the server fails fast; the driver may surface `MongoCommandException`/`MongoBulkWriteException` differently than the non-transactional path, and the dupe list may be partial. | F2 verifies the actual exception shape before F8 codes to it; the `DurableReceiver` contract only needs "nothing persisted + a duplicate-typed exception" — the F8 test asserts persistence-count, not dupe-list completeness. |
 | R5 | **Two-tick release adds one recovery interval to dead-node rescue latency.** | Documented in F4/F11 and CLAUDE.md; the multinode suite (which exercises real rescue) must stay green 5× — if a fact times out, widen only the observation window with written justification. |
 | R6 | **Soundness precondition drift.** Two-tick correctness leans on monotonic never-reused node numbers (T4.6) and registration-before-claim. A future "reuse freed slots" change would silently break it. | The soundness argument lives in the method comment **and** the CLAUDE.md bullet, cross-referencing the node-number decision so a future change trips over it. |
-| R7 | **Version-range change vs dependabot/demo.** Bracketed ranges in `Directory.Packages.props` must not break dependabot PRs or the demo's separate solution. | F14 verifies a pack + restore locally and states the dependabot behavior in the PR; the demo pins `Wolverine.MongoDB 1.0.0` and has its own packages file — untouched. |
+| R7 | **Version-range change vs dependabot/demo.** Bracketed ranges in `Directory.Packages.props` must not break dependabot PRs or the demo's separate solution. | F14 verifies a pack + restore locally and states the dependabot behavior in the PR; the demo pins `Wolverine.MongoDB 1.0.0` and has its own packages file — untouched. **Materialized post-F14:** dependabot bump PRs replaced the whole bracketed `Version` string with a plain pin instead of only bumping the lower bound; F19 caught it via the nuspec check. See the dated `FOLLOWUPS.md` entry (F21) and the separately flagged restoration task. |
 | R8 | **F8/F17 interaction.** Batch-store becoming all-or-nothing changes `ReplayDeadLettersAsync`'s bulk-replay semantics (one already-present envelope would abort the whole batch). | F17 explicitly adds the per-letter fallback on `DuplicateIncomingEnvelopeException` and a red-first test for it; sequencing (F17 after F8) is enforced in the dependency graph. |
 | R9 | **Multinode flakiness amplification.** F10/F11/F12 all touch code on the Balanced hot path. | Each carries the 5×-consecutive multinode bar; Fable/Opus on F10/F11; the escalation rule (stop and report, never weaken) applies verbatim. |
 | R10 | **Post-1.0 semver.** Several fixes turn silent misbehavior into thrown exceptions (F6 codegen throw, F7 LD4 throw). | Each PR states its semver character; F20 aggregates into the release recommendation (OQ6). |
@@ -711,7 +741,7 @@ untouched. CI's `library` + `demo` jobs (Analyze, trivy) ran green on the PR bef
 - **F18** ← F5, F6, F7 *(demo consumes the packed fixes)*
 
 **Final verification tasks:**
-- **F19** ← F6–F18 merged · **F20** ← F15, F19 merged
+- **F19** ← F6–F18 merged (done — report-only close) · **F21** ← F12, F19 complete · **F20** ← F15, F19, F21 complete
 
 ```
 plan PR ──► F1 ──► F3 ──► F6 ──► F7 ──► F18 ─────────────┐
