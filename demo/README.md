@@ -262,6 +262,15 @@ curl -X POST http://localhost:5000/orders/notes/{noteId} \
 curl -X DELETE http://localhost:5000/orders/notes/{noteId}
 ```
 
+### Non-`Id` identity convention (`CustomerFeedback`)
+
+`CustomerFeedbackHandler.cs` demonstrates the same `[Entity]`/`Insert<T>` surface against an
+entity with **no member named `Id`** — `CustomerFeedback.CustomerFeedbackId` is resolved via the
+`{TypeName}Id` convention instead. `CustomerFeedbackFlowTests.cs` asserts directly against MongoDB
+that the stored document's `_id` is the `CustomerFeedbackId` value in its native `Guid` BSON type,
+proving the identity fix end-to-end through the packaged nupkg rather than only the library's own
+test project.
+
 ## Key patterns demonstrated
 
 | Pattern | Where to look |
@@ -276,6 +285,7 @@ curl -X DELETE http://localhost:5000/orders/notes/{noteId}
 | Saga + projector co-handlers | `Program.cs` — `MultipleHandlerBehavior.Separated` |
 | Saga-cascade read-model consumer | `FulfillmentStatusProjector.cs` |
 | `[Entity]` load + `Insert`/`Update`/`Delete<T>` | `OrderNoteHandler.cs` |
+| Non-`Id` (`{TypeName}Id`) identity convention | `CustomerFeedbackHandler.cs` |
 | `MongoDbUnitOfWork` write surface (no repository) | `RecordOrderAuditHandler.cs` |
 
 ## Session-bound writes
