@@ -21,6 +21,7 @@ demo/
     OrderDemo.Application/      ← Command handlers (PlaceOrder, ShipOrder, CancelOrder, ApplyDiscount)
                                    Sagas/OrderFulfillmentSaga.cs ← saga: Guid id, start/continue/complete
                                    Notes/OrderNoteHandler.cs ← [Entity]/Insert|Update|Delete<OrderNote>
+                                   Feedback/CustomerFeedbackHandler.cs ← [Entity]/Insert<CustomerFeedback>, {TypeName}Id convention
                                    Audit/RecordOrderAuditHandler.cs ← MongoDbUnitOfWork example (no repository)
     OrderDemo.Contracts/        ← Commands + application events + saga trigger/continue/complete messages
     OrderDemo.Domain/           ← Aggregate root (Order), domain events, value objects
@@ -30,6 +31,7 @@ demo/
     OrderDemo.IntegrationTests/ ← Testcontainers-based end-to-end tests
                                    SagaFlowTests.cs ← 8 saga integration flows (incl. cascade projection)
                                    OrderNoteFlowTests.cs ← entity persistence flow tests
+                                   CustomerFeedbackFlowTests.cs ← {TypeName}Id-convention identity round-trip (F6/F7)
                                    OrderAuditTests.cs ← MongoDbUnitOfWork atomicity tests
   docker-compose.yml            ← MongoDB replica set + RabbitMQ
   Directory.Packages.props      ← Central package versions (independent from root)
@@ -114,6 +116,10 @@ generated frame handles the session entirely — the handler never sees `IClient
 `MongoDbUnitOfWork`. See the library [README](../README.md#entity-persistence). Entities have
 no built-in optimistic concurrency (unlike sagas' `Version` guard); the repository pattern above
 remains the path for app-controlled OCC.
+
+`CustomerFeedbackHandler.cs` demonstrates the same surface against an entity with **no** member
+named `Id` — `CustomerFeedback.CustomerFeedbackId` (the `{TypeName}Id` convention) — proving the
+non-`Id` identity-convention fix end-to-end through the packaged library.
 
 ---
 
