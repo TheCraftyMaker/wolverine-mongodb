@@ -1,3 +1,4 @@
+using System.Reflection;
 using JasperFx;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -12,13 +13,26 @@ namespace Wolverine.MongoDB.Tests;
 /// <see cref="MongoDbDurabilityAgent.StopAsync"/> must await its recovery/scheduled-job loops
 /// (bounded) before returning, so a caller that treats StopAsync's completion as "safe to tear
 /// down the node" (NodeAgentController.stopAllAgentsAsync -> node-document delete) is not racing
-/// a loop iteration that is still mid-flight.
+/// a loop iteration that is still mid-flight. Reflection reaches the private fields instead of
+/// adding test-only accessors to the production type.
 /// </summary>
 [Collection("mongodb")]
 public class durability_agent_shutdown
 {
     private readonly AppFixture _fixture;
     public durability_agent_shutdown(AppFixture fixture) => _fixture = fixture;
+
+    private static Task? PrivateTask(MongoDbDurabilityAgent agent, string fieldName)
+    {
+        var field = typeof(MongoDbDurabilityAgent).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance)!;
+        return (Task?)field.GetValue(agent);
+    }
+
+    private static CancellationTokenSource PrivateCancellationSource(MongoDbDurabilityAgent agent)
+    {
+        var field = typeof(MongoDbDurabilityAgent).GetField("_cancellation", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        return (CancellationTokenSource)field.GetValue(agent)!;
+    }
 
     private async Task<(IHost Host, MongoDbDurabilityAgent Agent)> StartAgent()
     {
@@ -48,11 +62,13 @@ public class durability_agent_shutdown
 
         await agent.StopAsync(CancellationToken.None);
 
-        Assert.NotNull(agent.RecoveryTask);
-        Assert.NotNull(agent.ScheduledJobTask);
-        agent.RecoveryTask!.IsCompleted.ShouldBeTrue(
+        var recoveryTask = PrivateTask(agent, "_recoveryTask");
+        var scheduledJobTask = PrivateTask(agent, "_scheduledJob");
+        Assert.NotNull(recoveryTask);
+        Assert.NotNull(scheduledJobTask);
+        recoveryTask!.IsCompleted.ShouldBeTrue(
             "StopAsync must not return while the recovery loop is still running");
-        agent.ScheduledJobTask!.IsCompleted.ShouldBeTrue(
+        scheduledJobTask!.IsCompleted.ShouldBeTrue(
             "StopAsync must not return while the scheduled-job loop is still running");
         agent.Status.ShouldBe(AgentStatus.Stopped);
     }
@@ -70,7 +86,8 @@ public class durability_agent_shutdown
 
         await agent.StopAsync(CancellationToken.None);
 
-        Should.Throw<ObjectDisposedException>(() => agent.CancellationSource.Cancel());
+        var cancellation = PrivateCancellationSource(agent);
+        Should.Throw<ObjectDisposedException>(() => cancellation.Cancel());
     }
 
     [Fact]

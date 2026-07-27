@@ -17,15 +17,8 @@ public class MongoDbDurabilityAgent : IAgent
     private Task? _recoveryTask;
     private Task? _scheduledJob;
 
-    internal Task? RecoveryTask => _recoveryTask;
-    internal Task? ScheduledJobTask => _scheduledJob;
-
     private readonly CancellationTokenSource _cancellation = new();
     private readonly CancellationTokenSource _combined;
-
-    // Exposed only so tests can observe disposal (Token/Cancel throw ObjectDisposedException
-    // once disposed) without racing the loop tasks' own completion timing.
-    internal CancellationTokenSource CancellationSource => _cancellation;
 
     public MongoDbDurabilityAgent(IWolverineRuntime runtime, MongoDbMessageStore parent)
     {
@@ -134,9 +127,7 @@ public class MongoDbDurabilityAgent : IAgent
         }
     }
 
-    // Internal-only knob so the "does not hang" fact can bound the wait deterministically;
-    // not a consumer-facing tuning option.
-    internal TimeSpan StopTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
     private int _stopping;
 
