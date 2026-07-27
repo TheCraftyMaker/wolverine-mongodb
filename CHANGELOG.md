@@ -135,6 +135,20 @@ The major version tracks Wolverine's major version.
   `DeadLetterMessage.ToEnvelope()` — which already guards `Body is { Length: > 0 }` — before
   applying the edited body, instead of calling `EnvelopeSerializer.Deserialize` directly on an
   empty byte array.
+- **`MongoDbDurabilityAgent.StopAsync` now actually awaits its recovery/scheduled-job loops
+  instead of returning immediately.** It called `_recoveryTask?.SafeDispose()` /
+  `_scheduledJob?.SafeDispose()` on tasks that were, in the general case, still running —
+  `SafeDispose` swallows the `InvalidOperationException` `Task.Dispose()` throws for an
+  incomplete task, so this was a no-op — and neither `CancellationTokenSource` was ever disposed.
+  `StopAsync` is now `async`: it cancels, then awaits both loops via
+  `Task.WhenAll(...).WaitAsync(...)` bounded by an internal 5-second timeout, swallowing the
+  expected `OperationCanceledException` and logging a warning (not throwing) if the timeout is
+  hit, then disposes `_combined` before `_cancellation` and only then reports `Stopped`. A second
+  call is a no-op — an interlocked flag guards re-entry, since the CTSes are now disposed after
+  the first call. This shrinks, but per the documented upstream ordering
+  (`WolverineRuntime.HostService.StopAsync` releases ownership before tearing down agents) cannot
+  fully close, the window where a still-running recovery tick issues a claim write after the
+  node's ownership has already been released.
 ### Documentation
 - Post-1.0.0 truth sweep on `CLAUDE.md`: package version reference, the versioning-policy
   wording, the index-migration follow-up's "before 1.0" framing (now a standing post-1.0
