@@ -50,6 +50,11 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         Incoming = _database.GetCollection<IncomingMessage>(MongoConstants.IncomingCollection);
         Outgoing = _database.GetCollection<OutgoingMessage>(MongoConstants.OutgoingCollection);
         DeadLetterDocs = _database.GetCollection<DeadLetterMessage>(MongoConstants.DeadLetterCollection);
+        NodeDocs = _database.GetCollection<NodeDocument>(MongoConstants.NodeCollection);
+        AssignmentDocs = _database.GetCollection<AgentAssignmentDocument>(MongoConstants.NodeAssignmentCollection);
+        RecordDocs = _database.GetCollection<NodeRecordDocument>(MongoConstants.NodeRecordCollection);
+        RestrictionDocs = _database.GetCollection<AgentRestrictionDocument>(MongoConstants.AgentRestrictionCollection);
+        Counters = _database.GetCollection<NodeCounterDocument>(MongoConstants.CounterCollection);
     }
 
     public MessageStoreRole Role { get; set; } = MessageStoreRole.Main;

@@ -5,11 +5,11 @@ namespace Wolverine.MongoDB.Internals;
 
 public partial class MongoDbMessageStore : INodeAgentPersistence
 {
-    private IMongoCollection<NodeDocument> NodeDocs => _database.GetCollection<NodeDocument>(MongoConstants.NodeCollection);
-    private IMongoCollection<AgentAssignmentDocument> AssignmentDocs => _database.GetCollection<AgentAssignmentDocument>(MongoConstants.NodeAssignmentCollection);
-    private IMongoCollection<NodeRecordDocument> RecordDocs => _database.GetCollection<NodeRecordDocument>(MongoConstants.NodeRecordCollection);
-    private IMongoCollection<AgentRestrictionDocument> RestrictionDocs => _database.GetCollection<AgentRestrictionDocument>(MongoConstants.AgentRestrictionCollection);
-    private IMongoCollection<NodeCounterDocument> Counters => _database.GetCollection<NodeCounterDocument>(MongoConstants.CounterCollection);
+    private IMongoCollection<NodeDocument> NodeDocs { get; }
+    private IMongoCollection<AgentAssignmentDocument> AssignmentDocs { get; }
+    private IMongoCollection<NodeRecordDocument> RecordDocs { get; }
+    private IMongoCollection<AgentRestrictionDocument> RestrictionDocs { get; }
+    private IMongoCollection<NodeCounterDocument> Counters { get; }
 
     public async Task<int> PersistAsync(WolverineNode node, CancellationToken cancellationToken)
     {
@@ -35,12 +35,15 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
 
     public async Task<IReadOnlyList<WolverineNode>> LoadAllNodesAsync(CancellationToken cancellationToken)
     {
-        var nodes = await NodeDocs.Find(FilterDefinition<NodeDocument>.Empty).ToListAsync(cancellationToken);
-        var assignments = await AssignmentDocs.Find(FilterDefinition<AgentAssignmentDocument>.Empty).ToListAsync(cancellationToken);
-        return nodes.Select(n =>
+        var nodesTask = NodeDocs.Find(FilterDefinition<NodeDocument>.Empty).ToListAsync(cancellationToken);
+        var assignmentsTask = AssignmentDocs.Find(FilterDefinition<AgentAssignmentDocument>.Empty).ToListAsync(cancellationToken);
+        await Task.WhenAll(nodesTask, assignmentsTask);
+
+        var assignmentsByNode = assignmentsTask.Result.ToLookup(a => a.NodeId);
+        return nodesTask.Result.Select(n =>
         {
             var w = n.ToWolverineNode();
-            w.ActiveAgents = assignments.Where(a => a.NodeId == n.Id).Select(a => new Uri(a.AgentUri)).ToList();
+            w.ActiveAgents = assignmentsByNode[n.Id].Select(a => new Uri(a.AgentUri)).ToList();
             return w;
         }).ToList();
     }
@@ -115,23 +118,25 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
         return new NodeAgentState(nodes, new AgentRestrictions(converted));
     }
 
-    public async Task PersistAgentRestrictionsAsync(IReadOnlyList<AgentRestriction> restrictions, CancellationToken cancellationToken)
+    public Task PersistAgentRestrictionsAsync(IReadOnlyList<AgentRestriction> restrictions, CancellationToken cancellationToken)
     {
-        foreach (var r in restrictions)
+        if (restrictions.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var models = restrictions.Select(r =>
         {
             var id = $"restriction|{r.Id}";
-            if (r.Type == AgentRestrictionType.None)
-            {
-                await RestrictionDocs.DeleteOneAsync(Builders<AgentRestrictionDocument>.Filter.Eq(x => x.Id, id), cancellationToken);
-            }
-            else
-            {
-                await RestrictionDocs.ReplaceOneAsync(
-                    Builders<AgentRestrictionDocument>.Filter.Eq(x => x.Id, id),
-                    new AgentRestrictionDocument { Id = id, AgentUri = r.AgentUri.ToString(), Type = r.Type, NodeNumber = r.NodeNumber },
-                    new ReplaceOptions { IsUpsert = true }, cancellationToken);
-            }
-        }
+            var filter = Builders<AgentRestrictionDocument>.Filter.Eq(x => x.Id, id);
+            return r.Type == AgentRestrictionType.None
+                ? (WriteModel<AgentRestrictionDocument>)new DeleteOneModel<AgentRestrictionDocument>(filter)
+                : new ReplaceOneModel<AgentRestrictionDocument>(filter,
+                    new AgentRestrictionDocument { Id = id, AgentUri = r.AgentUri.ToString(), Type = r.Type, NodeNumber = r.NodeNumber })
+                { IsUpsert = true };
+        }).ToList();
+
+        return RestrictionDocs.BulkWriteAsync(models, cancellationToken: cancellationToken);
     }
 
     public Task LogRecordsAsync(params NodeRecord[] records)

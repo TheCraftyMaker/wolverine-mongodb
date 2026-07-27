@@ -110,7 +110,7 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F14** | `fix/nuget-dependency-ranges` | fix: bounded NuGet dependency ranges for WolverineFx + MongoDB.Driver | — | Can start immediately | Sonnet |
 | **F15** | `docs/truth-sweep` | docs: post-1.0.0 truth sweep (version, versioning rule, collection counts) | — | Can start immediately | Sonnet |
 | **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | **Done** (#187) — 214 single-node + 18 multinode green on net9.0 and net10.0 | Sonnet |
-| **F17** | `chore/store-efficiency` | chore: DLQ replay batching, cached node collections, parallel node loads | **F11** | Partially blocked by: F11 (shares Durability.cs; NodeAgents parts independent) | Sonnet |
+| **F17** | `chore/store-efficiency` | chore: store efficiency sweep (DLQ replay batching, cached collections, parallel node loads) | **F11** | **Done** ([#188](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/188)) — 430 single-node + 36 multinode green on net9.0 and net10.0; zero edited facts | Sonnet |
 | **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | Blocked by: F5, F6, F7 (merged & packed) | Sonnet |
 | **F19** | `test/remediation-regression` | test: full cross-feature regression (inbox+outbox+saga+entity+solo+multinode) | **F6–F18 merged** | Blocked by: F6–F18 | Sonnet |
 | **F20** | *(no branch/PR)* | final verification on `main` (+ release decision) | **F15, F19 merged** | Blocked by: F15, F19 | Sonnet |
@@ -568,8 +568,23 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** **F11** (shares `Durability.cs`); items 2–4 are independent of it.
 - **Blocking status:** **Partially blocked by: F11** (start items 2–4 anytime after F8 merges; item 1 after F8 + F11).
 
-- [ ] **Step 1:** Items 2–4 (NodeAgents); suite green.
-- [ ] **Step 2:** Item 1 (replay batching + dedup fallback test, red-first for the fallback); suite + multinode green. Commit (`chore: store efficiency sweep`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Items 2–4 (NodeAgents); suite green.
+- [x] **Step 2:** Item 1 (replay batching + dedup fallback test, red-first for the fallback); suite + multinode green. Commit (`chore: store efficiency sweep`), push, PR, checks green, update plan doc.
+
+**Status: done.** `MongoDbMessageStore.NodeAgents.cs`: `NodeDocs`/`AssignmentDocs`/`RecordDocs`/
+`RestrictionDocs`/`Counters` are now constructor-cached fields (assigned in
+`MongoDbMessageStore.cs`'s ctor) instead of expression-bodied properties re-resolving
+`_database.GetCollection<T>` on every call; `LoadAllNodesAsync` fetches nodes and assignments
+concurrently via `Task.WhenAll` and joins with `ToLookup(a => a.NodeId)`; `PersistAgentRestrictionsAsync`
+issues one `BulkWriteAsync` mixing `DeleteOneModel`/`ReplaceOneModel`, mirroring `AssignAgentsAsync`.
+`ReplayDeadLettersAsync` caps its `Find` with `.Limit(_options.Durability.RecoveryBatchSize)` and
+replays the fetched batch via one `StoreIncomingAsync(list)` + one `DeadLetterDocs.DeleteManyAsync`;
+on `DuplicateIncomingEnvelopeException` (the F8 all-or-nothing interaction) it falls back to the
+original per-letter `StoreIncomingAsync`/`DeleteOneAsync` loop. Red-first verified: the new test
+`dead_letter_replay.replay_falls_back_to_per_letter_when_batch_has_a_duplicate` fails with the batch
+duplicate exception (confirmed on both net9.0/net10.0) when the fallback catch is disabled, and
+passes once restored. Full suite (430 single-node facts) + multinode (36 facts) green on both TFMs;
+zero edited pre-existing facts.
 
 ---
 

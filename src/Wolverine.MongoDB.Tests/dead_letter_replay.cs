@@ -84,6 +84,54 @@ public class dead_letter_replay
     }
 
     [Fact]
+    public async Task replay_falls_back_to_per_letter_when_batch_has_a_duplicate()
+    {
+        await _fixture.ClearAll();
+        var store = _fixture.BuildMessageStore();
+
+        // "stranded": already redelivered into incoming by a previous (crashed) replay pass,
+        // but its DLQ doc is still present and flagged replayable — the classic duplicate shape
+        // that must abort a naive all-or-nothing batch StoreIncomingAsync.
+        var stranded = ObjectMother.Envelope();
+        stranded.Destination = new Uri("local://replay-batch-fallback");
+        await store.Inbox.StoreIncomingAsync(stranded);
+        await store.Inbox.MoveToDeadLetterStorageAsync(stranded, new InvalidOperationException("boom"));
+        await store.DeadLetters.ReplayAsync(
+            new DeadLetterEnvelopeQuery { MessageIds = [stranded.Id] }, CancellationToken.None);
+        stranded.Status = EnvelopeStatus.Incoming;
+        stranded.OwnerId = 0;
+        await store.Inbox.StoreIncomingAsync(stranded);
+
+        // Two more replayable letters in the SAME batch, neither yet in incoming — proving the
+        // fallback replays every OTHER letter, not just the offending one.
+        var fresh1 = ObjectMother.Envelope();
+        fresh1.Destination = new Uri("local://replay-batch-fallback");
+        await store.Inbox.StoreIncomingAsync(fresh1);
+        await store.Inbox.MoveToDeadLetterStorageAsync(fresh1, new InvalidOperationException("boom1"));
+        await store.DeadLetters.ReplayAsync(
+            new DeadLetterEnvelopeQuery { MessageIds = [fresh1.Id] }, CancellationToken.None);
+
+        var fresh2 = ObjectMother.Envelope();
+        fresh2.Destination = new Uri("local://replay-batch-fallback");
+        await store.Inbox.StoreIncomingAsync(fresh2);
+        await store.Inbox.MoveToDeadLetterStorageAsync(fresh2, new InvalidOperationException("boom2"));
+        await store.DeadLetters.ReplayAsync(
+            new DeadLetterEnvelopeQuery { MessageIds = [fresh2.Id] }, CancellationToken.None);
+
+        await store.ReplayDeadLettersAsync(CancellationToken.None);
+
+        // The batch (all 3) throws internally because `stranded` already exists, but the
+        // per-letter fallback still replays fresh1 and fresh2, and the stranded duplicate's
+        // DLQ doc still converges (deleted) exactly as the non-batched path did.
+        (await store.DeadLetters.QueryAsync(new DeadLetterEnvelopeQuery(), CancellationToken.None))
+            .TotalCount.ShouldBe(0);
+
+        var counts = await store.Admin.FetchCountsAsync();
+        counts.Incoming.ShouldBe(3);
+        counts.DeadLetter.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task replay_skips_and_unflags_bodyless_poison_dead_letters()
     {
         await _fixture.ClearAll();
