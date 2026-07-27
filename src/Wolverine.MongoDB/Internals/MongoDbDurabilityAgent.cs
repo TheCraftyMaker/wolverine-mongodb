@@ -127,16 +127,60 @@ public class MongoDbDurabilityAgent : IAgent
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
+
+    private int _stopping;
+
+    /// <summary>
+    /// Cancels, then awaits both loops (bounded) before disposing their CancellationTokenSources.
+    /// Once this returns, no new recovery-tick claim writes will be issued, so the node document
+    /// delete that follows (NodeAgentController.StopAsync -> stopAllAgentsAsync,
+    /// external/wolverine/src/Wolverine/Runtime/Agents/NodeAgentController.cs:120,136) is safe.
+    ///
+    /// This shrinks but cannot close the shutdown-ordering window: WolverineRuntime.HostService
+    /// releases this node's ownership (ReleaseAllOwnershipAsync,
+    /// external/wolverine/src/Wolverine/Runtime/WolverineRuntime.HostService.cs:390) BEFORE
+    /// tearing down agents (:412), so a tick already in flight at :390 can still re-claim
+    /// envelopes before it observes cancellation here. That ordering belongs to Wolverine core,
+    /// not this provider — document it, don't try to compensate for it.
+    /// </summary>
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _cancellation.Cancel();
+        if (Interlocked.Exchange(ref _stopping, 1) == 1) return;
 
-        _recoveryTask?.SafeDispose();
-        _scheduledJob?.SafeDispose();
+        try
+        {
+            await _cancellation.CancelAsync();
 
-        Status = AgentStatus.Stopped;
-
-        return Task.CompletedTask;
+            var loops = new[] { _recoveryTask, _scheduledJob }.Where(t => t is not null).Select(t => t!).ToArray();
+            if (loops.Length > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(loops).WaitAsync(StopTimeout, cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    _logger.LogWarning(
+                        "MongoDB durability loops did not observe cancellation within {Timeout}; " +
+                        "continuing shutdown. In-flight recovery writes may still be in progress.",
+                        StopTimeout);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected: the loops await PeriodicTimer/Task.Delay on the linked token, so
+                    // they complete in the Canceled state. Also covers an aborting caller's token.
+                }
+            }
+        }
+        finally
+        {
+            // Dispose the linked source before the source it links, and only after the loops
+            // have stopped touching _combined.Token / _combined.IsCancellationRequested.
+            _combined.Dispose();
+            _cancellation.Dispose();
+            Status = AgentStatus.Stopped;
+        }
     }
 
     public Uri Uri { get; set; }

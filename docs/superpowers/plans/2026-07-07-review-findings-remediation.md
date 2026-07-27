@@ -105,7 +105,7 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F9** | `fix/dlq-edit-replay-empty-body` | fix: EditAndReplayAsync tolerates body-less poison dead letters | — | Can start immediately | Sonnet |
 | **F10** | `fix/destination-scoped-claims` | fix: destination-scoped incoming claims (IdAndDestination) | **F4** | **Done** (#184) — 204 single-node + 18 multinode green on net9.0 and net10.0; `IdOnly` byte-equivalence verified by inspection | **Fable 5 / Opus** |
 | **F11** | `fix/dead-node-release-race` | fix: two-tick-confirmed dead-node ownership release | **F4** | **Done** (#185) — 206 single-node green on net9.0+net10.0; multinode **10/10 (5× consecutive per TFM)**, no widened timeouts. Rebased onto F10 (#184); the old single-tick fact was folded in and deleted per F4 §2g. **Unblocks F17** | **Fable 5 / Opus** |
-| **F12** | `fix/durability-agent-shutdown` | fix: durability agent StopAsync awaits its loops + disposes CTSes | **F4** | Partially blocked by: F4 (mechanical part startable; await/timeout semantics from F4) | Sonnet |
+| **F12** | `fix/durability-agent-shutdown` | fix: durability agent StopAsync awaits its loops + disposes CTSes | **F4** | **Done** — 218 single-node + 18 multinode green on net9.0 and net10.0, zero edited facts | Sonnet |
 | **F13** | `fix/diagnostics-identity-coercion` | fix: ISagaStoreDiagnostics identity coercion (Marten parity) | — | Can start immediately | Sonnet |
 | **F14** | `fix/nuget-dependency-ranges` | fix: bounded NuGet dependency ranges for WolverineFx + MongoDB.Driver | — | Can start immediately | Sonnet |
 | **F15** | `docs/truth-sweep` | docs: post-1.0.0 truth sweep (version, versioning rule, collection counts) | — | Can start immediately | Sonnet |
@@ -500,8 +500,23 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 - **Dependencies:** **F4** (the await/timeout contract).
 - **Blocking status:** **Partially blocked by: F4** (CTS disposal is mechanical and could start now; keep it one PR — wait for F4).
 
-- [ ] **Step 1:** Write the failing test: after `StopAsync` returns, `_recoveryTask.IsCompleted` (observed via agent status/behavior, or an internal accessor via `InternalsVisibleTo`) → FAIL today (task still running).
-- [ ] **Step 2:** Implement await-with-timeout + disposal; run → PASS; multinode suite green (shutdown paths run in every Balanced test teardown). CHANGELOG. Commit (`fix: durability agent StopAsync awaits its loops`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Write the failing test: after `StopAsync` returns, `_recoveryTask.IsCompleted` (observed via agent status/behavior, or an internal accessor via `InternalsVisibleTo`) → FAIL today (task still running).
+- [x] **Step 2:** Implement await-with-timeout + disposal; run → PASS; multinode suite green (shutdown paths run in every Balanced test teardown). CHANGELOG. Commit (`fix: durability agent StopAsync awaits its loops`), push, PR, checks green, update plan doc.
+
+**Status: done.** Branch `fix/durability-agent-shutdown`. RED wasn't the loop-completion assertion
+itself — an isolated probe showed `PeriodicTimer.WaitForNextTickAsync`'s cancellation resolving
+synchronously through the linked token, so a tick idling between polls looks "completed" even
+under the old code. The reliable RED signal was CTS disposal: `agent.CancellationSource.Cancel()`
+was expected to throw `ObjectDisposedException` after `StopAsync` and did not
+(`Shouldly.ShouldAssertException: ... should throw System.ObjectDisposedException but did not`),
+confirming `_cancellation`/`_combined` were never disposed. Implemented per F4 §4b/§4c exactly:
+`StopAsync` is `async`, guarded by an interlocked `_stopping` flag; cancels; awaits
+`Task.WhenAll(loops).WaitAsync(StopTimeout, cancellationToken)` (internal 5s default), swallowing
+`OperationCanceledException` and logging a warning on `TimeoutException`; disposes `_combined`
+then `_cancellation` in `finally`; reports `Stopped`. Added `RecoveryTask`/`ScheduledJobTask`/
+`CancellationSource` internal test-only accessors (no csproj change — `InternalsVisibleTo` already
+covers the test project). All three new facts green; full suite + multinode green on both net9.0
+and net10.0 (218 single-node + 18 multinode per TFM). CHANGELOG entry added.
 
 ---
 
