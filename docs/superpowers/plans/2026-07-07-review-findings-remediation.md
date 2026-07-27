@@ -111,7 +111,7 @@ Identical mechanics to the saga plan — see `2026-06-18-saga-persistence.md` �
 | **F15** | `docs/truth-sweep` | docs: post-1.0.0 truth sweep (version, versioning rule, collection counts) | — | Can start immediately | Sonnet |
 | **F16** | `chore/store-dedup-cleanup` | chore: deduplicate inbox/outbox update definitions + AnyNode sentinel | **F8, F10** | **Done** (#187) — 214 single-node + 18 multinode green on net9.0 and net10.0 | Sonnet |
 | **F17** | `chore/store-efficiency` | chore: store efficiency sweep (DLQ replay batching, cached collections, parallel node loads) | **F11** | **Done** ([#188](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/188)) — 430 single-node + 36 multinode green on net9.0 and net10.0; zero edited facts | Sonnet |
-| **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | Blocked by: F5, F6, F7 (merged & packed) | Sonnet |
+| **F18** | `demo/identity-convention-coverage` | demo: non-`Id` identity-convention entity + safety-net tests | **F5, F6, F7** | **Done** ([#194](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/194)) — 45/45 demo integration facts green against a local `0.0.0-ci` pack of the fixed library | Sonnet |
 | **F19** | `test/remediation-regression` | test: full cross-feature regression (inbox+outbox+saga+entity+solo+multinode) | **F6–F18 merged** | Blocked by: F6–F18 | Sonnet |
 | **F20** | *(no branch/PR)* | final verification on `main` (+ release decision) | **F15, F19 merged** | Blocked by: F15, F19 | Sonnet |
 
@@ -614,8 +614,20 @@ zero edited pre-existing facts.
 - **Dependencies:** **F5, F6, F7** (merged, so the CI nupkg carries the fixes).
 - **Blocking status:** **Blocked by: F5, F6, F7.**
 
-- [ ] **Step 1:** Add the entity + handlers per F5; write the safety-net tests (direct Mongo `_id` assertion included).
-- [ ] **Step 2:** Demo suite green against a fresh local pack. Commit (`demo: non-Id identity-convention entity + safety-net tests`), push, PR, checks green, update plan doc.
+- [x] **Step 1:** Add the entity + handlers per F5; write the safety-net tests (direct Mongo `_id` assertion included).
+- [x] **Step 2:** Demo suite green against a fresh local pack. Commit (`demo: non-Id identity-convention entity + safety-net tests`), push, PR, checks green, update plan doc.
+
+**Status: done** ([#194](https://github.com/TheCraftyMaker/wolverine-mongodb/pull/194)). Added `CustomerFeedback`
+(`Guid CustomerFeedbackId`, no member named `Id`) beside `OrderNote`, with `Insert<CustomerFeedback>` +
+`[Entity("FeedbackId")]`-load handlers in `CustomerFeedbackHandler.cs`, following F5's design exactly.
+`CustomerFeedbackFlowTests.cs` (3 facts: submit, acknowledge-via-entity-load, missing-entity-is-skipped)
+asserts directly against MongoDB that the raw `_id` field is a native BSON `Guid` equal to
+`CustomerFeedbackId` — the shape that was silently broken before F6/F7. Verified locally by packing
+`src/Wolverine.MongoDB` at `0.0.0-ci` (mirroring the CI `demo` job) and pointing `demo/nuget.config` +
+`demo/Directory.Packages.props` at it temporarily: demo build green, **45/45 demo integration facts
+green** including the 3 new ones; the local-only package-pointing edits were reverted before committing
+so the demo's committed config is unchanged. `OrderNote` and every other existing demo type are
+untouched. CI's `library` + `demo` jobs (Analyze, trivy) ran green on the PR before merge.
 
 ### Task F19: Full cross-feature regression
 
