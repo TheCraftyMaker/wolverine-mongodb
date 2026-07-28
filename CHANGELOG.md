@@ -8,6 +8,8 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-28
+
 ### Added
 - **`CustomerFeedback` demo entity — non-`Id` identity-convention coverage.** Alongside the
   existing `OrderNote` entity, the demo now has `CustomerFeedback` (keyed by
