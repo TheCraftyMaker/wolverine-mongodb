@@ -11,7 +11,7 @@ MongoDB-backed applications reliable, durable message delivery without EF Core.
 > **Status: `1.0.0`** (released 2026-07-06). The multinode (`DurabilityMode.Balanced`)
 > path is functional and integration-tested; see [Known limitations](#known-limitations).
 
-[![NuGet](https://img.shields.io/nuget/vpre/Wolverine.MongoDB?label=nuget)](https://www.nuget.org/packages/Wolverine.MongoDB)
+[![NuGet](https://img.shields.io/nuget/v/Wolverine.MongoDB?label=nuget)](https://www.nuget.org/packages/Wolverine.MongoDB)
 [![Build](https://github.com/TheCraftyMaker/wolverine-mongodb/actions/workflows/ci.yml/badge.svg)](https://github.com/TheCraftyMaker/wolverine-mongodb/actions/workflows/ci.yml)
 [![Security](https://github.com/TheCraftyMaker/wolverine-mongodb/actions/workflows/security.yml/badge.svg)](https://github.com/TheCraftyMaker/wolverine-mongodb/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -31,7 +31,7 @@ MongoDB-backed applications reliable, durable message delivery without EF Core.
 ## Installation
 
 ```bash
-dotnet add package Wolverine.MongoDB --prerelease
+dotnet add package Wolverine.MongoDB
 ```
 
 ## Quick start
