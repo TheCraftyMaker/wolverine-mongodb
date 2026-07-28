@@ -4,7 +4,7 @@
 
 **Goal:** Make every release produce a GitHub Release with curated notes, driven by a Claude Code release agent that proposes the version, gates on human review of a CHANGELOG/version-bump PR, then tags, monitors, and verifies the publish.
 
-**Architecture:** Bump version + CHANGELOG on `main` *before* tagging (so the tagged commit carries the notes the workflow reads). `publish.yml` gains a step that extracts the tagged version's section from `CHANGELOG.md` and creates a GitHub Release; the old post-tag auto-bump PR steps are removed. A `.claude/agents/release.md` agent orchestrates the human-gated flow. The **git tag is the version source of truth** (`Directory.Build.props` has drifted stale — currently `beta.2` while the latest tag is `beta.5`).
+**Architecture:** Bump version + CHANGELOG on `main` *before* tagging (so the tagged commit carries the notes the workflow reads). `publish.yml` gains a step that extracts the tagged version's section from `CHANGELOG.md` and creates a GitHub Release; the old post-tag auto-bump PR steps are removed. A `.claude/agents/release.md` agent orchestrates the human-gated flow. The **git tag is the version source of truth** (`Directory.Build.props` has drifted stale: currently `beta.2` while the latest tag is `beta.5`).
 
 **Tech Stack:** GitHub Actions, `gh` CLI, bash/awk, Keep a Changelog, Claude Code subagents.
 
@@ -12,11 +12,11 @@
 
 ## File Structure
 
-- **Create** `CHANGELOG.md` — human-maintained release notes (Keep a Changelog format).
-- **Create** `.github/scripts/extract-changelog.sh` — extracts one version's section; the only real logic, independently testable.
-- **Modify** `.github/workflows/publish.yml` — add GitHub Release step, remove auto-bump PR steps.
-- **Create** `.claude/agents/release.md` — the release agent (orchestration prose).
-- **Modify** `CLAUDE.md` — update the "Versioning & Release" section to the new flow.
+- **Create** `CHANGELOG.md`: human-maintained release notes (Keep a Changelog format).
+- **Create** `.github/scripts/extract-changelog.sh`: extracts one version's section; the only real logic, independently testable.
+- **Modify** `.github/workflows/publish.yml`: add GitHub Release step, remove auto-bump PR steps.
+- **Create** `.claude/agents/release.md`: the release agent (orchestration prose).
+- **Modify** `CLAUDE.md`: update the "Versioning & Release" section to the new flow.
 
 Note: `docs/superpowers/*` is gitignored, so this plan and the spec are local-only. The deliverables above are all tracked files.
 
@@ -143,7 +143,7 @@ git commit -m "feat: add CHANGELOG section extraction script for releases"
 
 - [ ] **Step 1: Write the seed CHANGELOG**
 
-Create `CHANGELOG.md`. Seed `Unreleased` with the work in flight (the release automation itself) and backfill the most recent shipped version for shape. Older versions are intentionally summarized — we don't reconstruct full history.
+Create `CHANGELOG.md`. Seed `Unreleased` with the work in flight (the release automation itself) and backfill the most recent shipped version for shape. Older versions are intentionally summarized; we don't reconstruct full history.
 
 ```markdown
 # Changelog
@@ -188,14 +188,14 @@ git commit -m "docs: add CHANGELOG.md (Keep a Changelog format)"
 
 ---
 
-## Task 3: Update publish.yml — add GitHub Release, remove auto-bump
+## Task 3: Update publish.yml: add GitHub Release, remove auto-bump
 
 **Files:**
 - Modify: `.github/workflows/publish.yml`
 
 - [ ] **Step 1: Replace the auto-bump steps with a GitHub Release step**
 
-In `.github/workflows/publish.yml`, delete these three steps (lines 27–37 region):
+In `.github/workflows/publish.yml`, delete these three steps (lines 27-37 region):
 
 ```yaml
       - name: Bump version in Directory.Build.props
@@ -235,7 +235,7 @@ Notes on this step:
 - `bash .github/scripts/extract-changelog.sh` avoids depending on the file's exec bit after checkout.
 - A version containing `-` (e.g. `0.1.0-beta.6`) is a SemVer prerelease → mark the GitHub Release as prerelease.
 - Attaching `./artifacts/*.nupkg` puts the built package on the Release page as a download. The `artifacts/` dir was produced by the earlier `Pack` step.
-- The job already declares `permissions: contents: write`, which `gh release create` requires. `pull-requests: write` is now unused but harmless — leave it for now.
+- The job already declares `permissions: contents: write`, which `gh release create` requires. `pull-requests: write` is now unused but harmless; leave it for now.
 
 - [ ] **Step 2: Sanity-check the YAML parses**
 
@@ -403,7 +403,7 @@ Day-to-day, add notes under `## [Unreleased]` in `CHANGELOG.md` as you merge wor
 that commit must contain the latest workflow file and the matching CHANGELOG section.
 ```
 
-Also update the bullet near the top of that section that currently says the auto-bump PR keeps `Directory.Build.props` in sync — change it to note the version is set in the gate-2 PR before tagging.
+Also update the bullet near the top of that section that currently says the auto-bump PR keeps `Directory.Build.props` in sync; change it to note the version is set in the gate-2 PR before tagging.
 
 - [ ] **Step 2: Verify no stale references to the auto-bump PR remain**
 
@@ -428,7 +428,7 @@ git commit -m "docs: update release flow for release agent + GitHub Releases"
 
 ## Post-implementation notes
 
-- **PR #54** (`base: main` fix for the auto-bump PR) becomes moot — Task 3 deletes
+- **PR #54** (`base: main` fix for the auto-bump PR) becomes moot: Task 3 deletes
   the step it patched. Close #54 referencing this work, or let this branch's PR
   supersede it.
 - **First real release after merge** will be `0.1.0-beta.6`, which also corrects

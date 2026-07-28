@@ -1,12 +1,12 @@
-# Task D1 — Tier 1: Entity/Storage-Action API + Cosmos/Raven Reference
+# Task D1, Tier 1: Entity/Storage-Action API + Cosmos/Raven Reference
 
 **Branch:** `docs/entity-persistence-discovery`  
-**Status:** Complete — all Verified API Facts confirmed against pinned `external/wolverine` submodule (V6.9.0).  
+**Status:** Complete. All Verified API Facts confirmed against pinned `external/wolverine` submodule (V6.9.0).  
 **Produced by:** Task D1 (discovery, read-only). Feeds Task D6 (design gate).
 
 ---
 
-## 1. `IPersistenceFrameProvider` — Full Tier-1 Contract
+## 1. `IPersistenceFrameProvider`: Full Tier-1 Contract
 
 **File:** `external/wolverine/src/Wolverine/Persistence/IPersistenceFrameProvider.cs`
 
@@ -101,12 +101,12 @@ work needed for the "do not execute the handler if the entity is not found" comp
 
 - **`Delete<T>` uses the single-variable overload** (`:48`), NOT the two-variable saga overload (`:30`).
   The saga delete is only reached from `SagaChain` directly (with sagaId + saga variables).
-- **`Insert<T>`/`Update<T>`/`Store<T>` call the TYPED factories** — `DetermineInsertFrame`,
-  `DetermineUpdateFrame`, `DetermineStoreFrame` — NOT `DetermineStorageActionFrame`.
-- **`IStorageAction<T>` and `UnitOfWork<T>` call `DetermineStorageActionFrame`** — the generic path.
+- **`Insert<T>`/`Update<T>`/`Store<T>` call the TYPED factories**: `DetermineInsertFrame`,
+  `DetermineUpdateFrame`, `DetermineStoreFrame`, NOT `DetermineStorageActionFrame`.
+- **`IStorageAction<T>` and `UnitOfWork<T>` call `DetermineStorageActionFrame`**: the generic path.
 - Every path calls `provider.ApplyTransactionSupport(chain, container, typeof(T))` first
   (`Insert.cs:24`, `IStorageAction.cs:25`) before calling the frame factory.
-- `.WrapIfNotNull(variable)` is appended to EVERY frame — core handles the "null → no-op" behavior.
+- `.WrapIfNotNull(variable)` is appended to EVERY frame: core handles the "null → no-op" behavior.
 
 ### 3.3 `StorageAction` enum (`:3-29`, `StorageAction.cs`)
 
@@ -114,11 +114,11 @@ work needed for the "do not execute the handler if the entity is not found" comp
 Store, Delete, Nothing, Update, Insert
 ```
 
-`Nothing` is the no-op case — the applier must handle it without error.
+`Nothing` is the no-op case. The applier must handle it without error.
 
 ---
 
-## 4. `StorageActionCompliance` — Acceptance Oracle
+## 4. `StorageActionCompliance`: Acceptance Oracle
 
 **File:** `external/wolverine/src/Testing/Wolverine.ComplianceTests/StorageActionCompliance.cs`
 
@@ -189,7 +189,7 @@ Confirmed by grep across the submodule:
 | **Polecat** | `Persistence/PolecatTests/using_storage_return_types_and_entity_attributes.cs` | ✅ Yes |
 | **Cosmos** | `Persistence/CosmosDbTests/using_storage_return_types_and_entity_attributes.cs:11` | ❌ **NO** |
 
-**OQ1 RESOLVED — Cosmos does NOT subclass `StorageActionCompliance`.** See §5 for details.
+**OQ1 RESOLVED: Cosmos does NOT subclass `StorageActionCompliance`.** See §5 for details.
 
 ---
 
@@ -239,12 +239,12 @@ public bool CanPersist(Type entityType, IServiceContainer container, out Type pe
 
 | Method | Line | Returns |
 |---|---|---|
-| `DetermineInsertFrame` | `:67-70` | `new CosmosDbUpsertFrame(saga)` — **entity-generic, no OCC** |
-| `DetermineUpdateFrame` | `:78-81` | `new CosmosDbUpsertFrame(saga)` — same as insert |
+| `DetermineInsertFrame` | `:67-70` | `new CosmosDbUpsertFrame(saga)` (**entity-generic, no OCC**) |
+| `DetermineUpdateFrame` | `:78-81` | `new CosmosDbUpsertFrame(saga)`, same as insert |
 | `DetermineStoreFrame` | `:88-91` | delegates to `DetermineUpdateFrame` → `CosmosDbUpsertFrame` |
 | `DetermineLoadFrame` | `:62-65` | `new LoadDocumentFrame(sagaType, sagaId)` |
 | `DetermineDeleteFrame(sagaId, saga, ...)` | `:83-86` | `new CosmosDbDeleteDocumentFrame(sagaId, saga)` |
-| `DetermineDeleteFrame(variable, ...)` | `:93-96` | `new CosmosDbDeleteByVariableFrame(variable)` — generic single-variable |
+| `DetermineDeleteFrame(variable, ...)` | `:93-96` | `new CosmosDbDeleteByVariableFrame(variable)`, generic single-variable |
 | `DetermineStorageActionFrame` | `:98-107` | `MethodCall` to `CosmosDbStorageActionApplier.ApplyAction<T>` |
 | `DetermineFrameToNullOutMaybeSoftDeleted` | `:17` | `[]` |
 
@@ -286,7 +286,7 @@ public static async Task ApplyAction<T>(Container container, IStorageAction<T> a
 }
 ```
 
-Provider sets `call.Arguments[1] = action` — argument slot 0 is `Container` (auto-resolved by codegen).
+Provider sets `call.Arguments[1] = action`; argument slot 0 is `Container` (auto-resolved by codegen).
 
 ### 6.6 `ApplyTransactionSupport` (`:19-35`)
 
@@ -316,11 +316,11 @@ public bool CanPersist(Type entityType, IServiceContainer container, out Type pe
 | Method | Line | Returns |
 |---|---|---|
 | `DetermineInsertFrame` | `:72-77` | `MethodCall` to `IAsyncDocumentSession.StoreAsync(null, default)` with `call.Arguments[0] = saga` |
-| `DetermineUpdateFrame` | `:86-92` | Same `StoreAsync` call — no OCC distinction from insert |
+| `DetermineUpdateFrame` | `:86-92` | Same `StoreAsync` call, no OCC distinction from insert |
 | `DetermineStoreFrame` | `:99-102` | delegates to `DetermineUpdateFrame` |
 | `DetermineLoadFrame` | `:67-70` | `new LoadDocumentFrame(sagaType, sagaId)` |
 | `DetermineDeleteFrame(sagaId, saga, ...)` | `:94-97` | `new DeleteDocumentFrame(saga)` |
-| `DetermineDeleteFrame(variable, ...)` | `:104-107` | `new DeleteDocumentFrame(variable)` — same frame, single variable |
+| `DetermineDeleteFrame(variable, ...)` | `:104-107` | `new DeleteDocumentFrame(variable)`, same frame, single variable |
 | `DetermineStorageActionFrame` | `:115-124` | `MethodCall` to `RavenDbStorageActionApplier.ApplyAction<T>` |
 | `DetermineFrameToNullOutMaybeSoftDeleted` | `:18` | `[]` |
 
@@ -340,7 +340,7 @@ public static async Task ApplyAction<T>(IAsyncDocumentSession session, IStorageA
 }
 ```
 
-Provider sets `call.Arguments[1] = action` — argument slot 0 is `IAsyncDocumentSession` (auto-resolved).
+Provider sets `call.Arguments[1] = action`; argument slot 0 is `IAsyncDocumentSession` (auto-resolved).
 
 ### 7.4 `DeleteDocumentFrame` (`:148-170`)
 
@@ -382,19 +382,19 @@ This is the exact template for `storage_action_compliance : StorageActionComplia
 
 ---
 
-## 8. Local `MongoDbPersistenceFrameProvider` — Current State
+## 8. Local `MongoDbPersistenceFrameProvider`: Current State
 
 **File:** `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs`
 
 | Member | Lines | Current behavior |
 |---|---|---|
 | `ApplyTransactionSupport` | `:19-39` | Adds `TransactionalFrame`; skips `CommitMongoTransactionFrame` for `SagaChain` |
-| `CanPersist` | `:74-83` | Returns `entityType.CanBeCastTo<Saga>()` — **saga-scoped only** |
+| `CanPersist` | `:74-83` | Returns `entityType.CanBeCastTo<Saga>()` (**saga-scoped only**) |
 | `DetermineSagaIdType` | `:93-96` | `SagaChain.DetermineSagaIdMember` (native Guid/int/long/string) |
-| `DetermineLoadFrame` | `:98-99` | Returns `new LoadSagaFrame(sagaType, sagaId)` — saga-specific |
-| `DetermineInsertFrame` | `:107-108` | Returns `new InsertSagaFrame(saga)` — stamps `Version = 1` |
+| `DetermineLoadFrame` | `:98-99` | Returns `new LoadSagaFrame(sagaType, sagaId)`, saga-specific |
+| `DetermineInsertFrame` | `:107-108` | Returns `new InsertSagaFrame(saga)`, stamps `Version = 1` |
 | `CommitUnitOfWorkFrame` | `:110-111` | Returns `new CommitMongoTransactionFrame()` |
-| `DetermineUpdateFrame` | `:113-114` | Returns `new UpdateSagaFrame(saga)` — OCC by version |
+| `DetermineUpdateFrame` | `:113-114` | Returns `new UpdateSagaFrame(saga)`, OCC by version |
 | `DetermineDeleteFrame(sagaId, saga, ...)` | `:116-117` | Returns `new DeleteSagaFrame(sagaId, saga)` |
 | `DetermineStoreFrame` | `:122-123` | Delegates to `DetermineUpdateFrame` |
 | `DetermineDeleteFrame(variable, ...)` | `:125-128` | **`throw new NotSupportedException(...)`** |
@@ -403,7 +403,7 @@ This is the exact template for `storage_action_compliance : StorageActionComplia
 
 ---
 
-## 9. Local `SagaFrames.cs` — Template for Entity Frames
+## 9. Local `SagaFrames.cs`: Template for Entity Frames
 
 **File:** `src/Wolverine.MongoDB/Internals/SagaFrames.cs`
 
@@ -420,13 +420,13 @@ internal class LoadSagaFrame : AsyncFrame
 Static helper `MongoSagaOperations` centralizes driver calls. `MongoEntityOperations` (T1.1) will mirror this.
 
 **Key difference from entity frames:**
-- `InsertSagaFrame`: stamps `saga.Version = 1` via `MongoSagaOperations.InsertSagaAsync` (`:52-59`) — SAGA-SPECIFIC.
-- `UpdateSagaFrame`: OCC via version filter in `MongoSagaOperations.UpdateSagaAsync` (`:74-100`) — SAGA-SPECIFIC.
-- Entity frames will NOT do either of these — upsert replaces both.
+- `InsertSagaFrame`: stamps `saga.Version = 1` via `MongoSagaOperations.InsertSagaAsync` (`:52-59`); SAGA-SPECIFIC.
+- `UpdateSagaFrame`: OCC via version filter in `MongoSagaOperations.UpdateSagaAsync` (`:74-100`); SAGA-SPECIFIC.
+- Entity frames will NOT do either of these; upsert replaces both.
 
 ---
 
-## 10. Local `MongoConstants.cs` — Current State
+## 10. Local `MongoConstants.cs`: Current State
 
 **File:** `src/Wolverine.MongoDB/Internals/MongoConstants.cs`
 
@@ -441,24 +441,24 @@ e.g., `type.Name.ToLowerInvariant()` → `"todo"` for the compliance `Todo` enti
 
 ---
 
-## 11. Design Tension — THE Required Branch Point
+## 11. Design Tension: THE Required Branch Point
 
 > **This is the central design tension for T1.1, flagged as required by D1.**
 
 Mongo's `DetermineInsertFrame` and `DetermineUpdateFrame` are **saga-specific**:
-- `DetermineInsertFrame` → `InsertSagaFrame` — stamps `Saga.Version = 1`
-- `DetermineUpdateFrame` → `UpdateSagaFrame` — OCC by version, throws `SagaConcurrencyException`
+- `DetermineInsertFrame` → `InsertSagaFrame`, stamps `Saga.Version = 1`
+- `DetermineUpdateFrame` → `UpdateSagaFrame`, OCC by version, throws `SagaConcurrencyException`
 
 Cosmos's and RavenDb's equivalents are **entity-generic** (no saga knowledge):
 - Cosmos: all three (`Insert`/`Update`/`Store`) → `CosmosDbUpsertFrame` (a plain `UpsertItemAsync`)
 - RavenDb: all three → `StoreAsync` (no version check)
 
 **Consequence:** When T1.1 broadens `CanPersist` to unconditional `true`, handlers returning
-`Insert<MyEntity>` or `Update<MyEntity>` will route to `DetermineInsertFrame`/`DetermineUpdateFrame` —
+`Insert<MyEntity>` or `Update<MyEntity>` will route to `DetermineInsertFrame`/`DetermineUpdateFrame`,
 which currently emit saga-specific frames. A plain entity has no `Saga.Version`, so this will:
 1. Fail to compile/run (`InsertSagaFrame` calls `MongoSagaOperations.InsertSagaAsync<TSaga>` where
-   `TSaga : Saga` — a plain entity does not satisfy the constraint).
-2. Even if it compiled, it would stamp `Version = 1` and apply OCC on entity writes — wrong behavior.
+   `TSaga : Saga`, a plain entity does not satisfy the constraint).
+2. Even if it compiled, it would stamp `Version = 1` and apply OCC on entity writes: wrong behavior.
 
 **Required fix in T1.1:** Branch on `variable.VariableType.CanBeCastTo<Saga>()` in each factory:
 
@@ -489,7 +489,7 @@ their frame factories (both use last-write-wins upsert for all entity types incl
 
 ---
 
-## 12. `WolverineMongoDbExtensions.cs` — Registration
+## 12. `WolverineMongoDbExtensions.cs`: Registration
 
 **File:** `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs`
 
@@ -502,11 +502,11 @@ their frame factories (both use last-write-wins upsert for all entity types incl
 ```
 
 The `InsertFirstPersistenceStrategy` registration ensures Mongo's provider is consulted first in
-apps that might have multiple providers in the pipeline — exactly like Cosmos/RavenDb apps.
+apps that might have multiple providers in the pipeline, exactly like Cosmos/RavenDb apps.
 
 ---
 
-## 13. Verified API Facts — Drift Report
+## 13. Verified API Facts: Drift Report
 
 All Verified API Facts from `2026-06-21-persistence-suite-completion.md` confirmed against V6.9.0.
 No drift found. Specific confirmations:
@@ -520,7 +520,7 @@ No drift found. Specific confirmations:
 | `Delete.cs:26` → `DetermineDeleteFrame(variable, container)` single-variable | ✅ Exact |
 | `StorageAction.cs:3-29` enum (Store/Delete/Nothing/Update/Insert) | ✅ Exact |
 | `StorageActionCompliance.cs:9` abstract class + `:35` configureWolverine + `:52,:54` Load/Persist | ✅ Exact |
-| 17 compliance facts | ✅ Confirmed — exact names listed in §4.2 |
+| 17 compliance facts | ✅ Confirmed, exact names listed in §4.2 |
 | Cosmos `CanPersist` `:51-55` unconditional | ✅ Exact |
 | Cosmos `DetermineInsertFrame`/`DetermineUpdateFrame`/`DetermineStoreFrame` all → `CosmosDbUpsertFrame` | ✅ Exact |
 | Cosmos `CosmosDbDeleteByVariableFrame` `:193-216` | ✅ Exact (`:193-216`) |
@@ -557,7 +557,7 @@ completeness; no action needed in T1.1.
 
 The Tier-1 implementation requires:
 
-1. **Broaden `CanPersist`** — unconditional `true` (matching Cosmos/RavenDb). Required for `[Entity]` loads.
+1. **Broaden `CanPersist`**: unconditional `true` (matching Cosmos/RavenDb). Required for `[Entity]` loads.
 
 2. **Branch the four typed factories** on `CanBeCastTo<Saga>()`:
    - Saga path: existing frames, untouched.
@@ -569,11 +569,11 @@ The Tier-1 implementation requires:
 4. **Implement `DetermineStorageActionFrame`** → `MethodCall` to `MongoEntityOperations.ApplyStorageActionAsync<T>`
    (mirrors `CosmosDbStorageActionApplier.ApplyAction<T>`). Apply `[UnconditionalSuppressMessage("AOT", "IL3050")]`.
 
-5. **Add `MongoConstants.EntityCollectionName(Type)`** — un-prefixed: `type.Name.ToLowerInvariant()`.
+5. **Add `MongoConstants.EntityCollectionName(Type)`**: un-prefixed, `type.Name.ToLowerInvariant()`.
 
-6. **`DetermineFrameToNullOutMaybeSoftDeleted` stays `[]`** — no change needed.
+6. **`DetermineFrameToNullOutMaybeSoftDeleted` stays `[]`**: no change needed.
 
-7. **`TryBuildFetchSpecificationFrame` stays default `false`** — no change needed.
+7. **`TryBuildFetchSpecificationFrame` stays default `false`**: no change needed.
 
 8. **The compliance subclass** (`storage_action_compliance : StorageActionCompliance`) mirrors
    `RavenDbTests/using_storage_return_types_and_entity_attributes.cs` with:

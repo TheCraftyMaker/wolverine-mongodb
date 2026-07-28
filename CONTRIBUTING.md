@@ -1,7 +1,7 @@
 # Contributing
 
 Thanks for your interest in `Wolverine.MongoDB`! Contributions of all sizes are
-welcome — bug reports, docs fixes, tests, and features.
+welcome: bug reports, docs fixes, tests, and features.
 
 ## Getting started
 
@@ -13,17 +13,17 @@ welcome — bug reports, docs fixes, tests, and features.
 The Wolverine source lives at a fixed in-repo path, `external/wolverine`, as a git submodule
 pinned to the matching `WolverineFx` version (see [Running tests](#running-tests) for why).
 Because the path is the same for everyone, `Wolverine.MongoDB.slnx` lists those source projects
-directly, so IDEs (e.g. Rider) resolve them instead of flagging missing dependencies — no
-per-machine configuration needed.
+directly, so IDEs (e.g. Rider) resolve them instead of flagging missing dependencies, with
+no per-machine configuration needed.
 
 ## Running tests
 
 Tests project-reference the Wolverine source at `external/wolverine` because
-`WolverineFx.ComplianceTests` is not yet published to NuGet — so the submodule
-must be initialised (`git submodule update --init`). They also require **Docker**
-— Testcontainers starts a MongoDB replica set for the run.
+`WolverineFx.ComplianceTests` is not yet published to NuGet, so the submodule
+must be initialised (`git submodule update --init`). They also require **Docker**,
+since Testcontainers starts a MongoDB replica set for the run.
 
-Tests run against a **real MongoDB replica set** — in-memory mocking misses the
+Tests run against a **real MongoDB replica set**: in-memory mocking misses the
 concurrency behaviour this library depends on. The quickest local setup is a
 Docker Compose single-node replica set:
 
@@ -39,12 +39,14 @@ dotnet test
 Wolverine opens an `IClientSessionHandle` for each handler and persists the
 inbox/outbox envelopes on that session inside a multi-document transaction. The
 "domain write + outbox write in one transaction" guarantee therefore only holds
-when the handler enlists its own MongoDB writes in that same session — it must
+when the handler enlists its own MongoDB writes in that same session: it must
 accept the generated `IClientSessionHandle` and pass it to every MongoDB write
 (`collection.InsertOneAsync(session, doc)`). The `IMongoDatabase` registered by
 `UseMongoDbPersistence` does **not** auto-enlist; a write that omits the session
-runs outside the transaction and is not atomic with the outbox. A session-bound
-write helper to make this automatic is a planned follow-up enhancement.
+runs outside the transaction and is not atomic with the outbox. `MongoDbUnitOfWork`
+threads the session automatically for handlers that write directly to a collection
+without a repository layer; see the README's
+[domain-write atomicity](README.md#domain-write-atomicity) section.
 
 ## Pull requests
 

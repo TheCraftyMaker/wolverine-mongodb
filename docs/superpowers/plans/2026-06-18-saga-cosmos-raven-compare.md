@@ -1,6 +1,6 @@
 # Task S3: Cosmos & RavenDb Saga Implementation Comparison
 
-> **Plan reference:** `2026-06-18-saga-persistence.md` — Task S3  
+> **Plan reference:** `2026-06-18-saga-persistence.md`: Task S3  
 > **Scope:** Read-only study of `external/wolverine` (pinned V6.2.2). No production code changed.  
 > **Output:** Side-by-side comparison table + MongoDB implementation recommendation with exact frame snippets to adapt.
 
@@ -12,7 +12,7 @@
 
 | File | What it contributed |
 |------|---------------------|
-| `Internals/CosmosDbPersistenceFrameProvider.cs` | Full `IPersistenceFrameProvider` — all saga methods + `ApplyTransactionSupport` |
+| `Internals/CosmosDbPersistenceFrameProvider.cs` | Full `IPersistenceFrameProvider`, all saga methods + `ApplyTransactionSupport` |
 | `Internals/LoadDocumentFrame.cs` | Cosmos load frame (try/catch `CosmosException(NotFound)`) |
 | `Internals/TransactionalFrame.cs` | Outbox enlistment; no SagaChain special-casing in GenerateCode |
 | `WolverineCosmosDbExtensions.cs` | Registration: `IMessageStore`, `Container`, `InsertFirstPersistenceStrategy`, `ReferenceAssembly` |
@@ -24,7 +24,7 @@
 
 | File | What it contributed |
 |------|---------------------|
-| `Internals/RavenDbPersistenceFrameProvider.cs` | Full `IPersistenceFrameProvider` — all saga methods + `ApplyTransactionSupport` |
+| `Internals/RavenDbPersistenceFrameProvider.cs` | Full `IPersistenceFrameProvider`, all saga methods + `ApplyTransactionSupport` |
 | `Internals/LoadDocumentFrame.cs` | RavenDb load frame (null on miss, no try/catch) |
 | `Internals/TransactionalFrame.cs` | Session open + outbox enlistment; **`SagaChain` branch sets `UseOptimisticConcurrency = true`** |
 | `Internals/RavenDbSagaStoreDiagnostics.cs` | `ISagaStoreDiagnostics` implementation (registered by the extension) |
@@ -37,7 +37,7 @@
 
 | File | What it contributed |
 |------|---------------------|
-| `demo/src/OrderDemo.Infrastructure/Persistence/OrderRepository.cs` | `UpdateAsync`: Version-guarded `ReplaceOneAsync` — the OCC pattern MongoDB saga frames should replicate |
+| `demo/src/OrderDemo.Infrastructure/Persistence/OrderRepository.cs` | `UpdateAsync`: Version-guarded `ReplaceOneAsync`, the OCC pattern MongoDB saga frames should replicate |
 
 ---
 
@@ -45,32 +45,32 @@
 
 | Dimension | CosmosDb | RavenDb | Notes |
 |---|---|---|---|
-| **`CanApply`** | `if (chain is SagaChain) return true;` first, then `Container` dep-scan | Identical (`IAsyncDocumentSession`) | Both put SagaChain first — this is the required shape |
+| **`CanApply`** | `if (chain is SagaChain) return true;` first, then `Container` dep-scan | Identical (`IAsyncDocumentSession`) | Both put SagaChain first. This is the required shape |
 | **`CanPersist`** | `return true;` unconditional | `return true;` unconditional | Both safe because both implement `DetermineStorageActionFrame`; Mongo must scope to `Saga` (see §5 R9) |
 | **`DetermineSagaIdType`** | `return typeof(string);` | `return typeof(string);` | String-only; both ignore the saga's actual `Id` member type; **MongoDB should return the native type** |
-| **Load frame** | `ReadItemAsync<T>(sagaId, PartitionKey.None, ct)` wrapped in `try { … } catch (CosmosException e when NotFound) { saga = default; }` | `session.LoadAsync<T>(sagaId, ct)` — returns `null` on miss natively | RavenDb's load is simpler; MongoDB's `Find(…).FirstOrDefaultAsync()` also returns `null` natively, so no try/catch needed |
-| **Insert frame** | `container.UpsertItemAsync(saga)` — no session, immediate write | `session.StoreAsync(saga, ct)` — batched in unit-of-work | Cosmos writes are immediate (no session); RavenDb defers to `SaveChangesAsync` |
-| **Update frame** | `container.UpsertItemAsync(saga)` — **identical to insert** (last-write-wins upsert) | `session.StoreAsync(saga, ct)` — **identical to insert** (change tracking handles it) | Neither provider uses `Saga.Version`; both are unconditional upserts |
+| **Load frame** | `ReadItemAsync<T>(sagaId, PartitionKey.None, ct)` wrapped in `try { … } catch (CosmosException e when NotFound) { saga = default; }` | `session.LoadAsync<T>(sagaId, ct)`, returns `null` on miss natively | RavenDb's load is simpler; MongoDB's `Find(…).FirstOrDefaultAsync()` also returns `null` natively, so no try/catch needed |
+| **Insert frame** | `container.UpsertItemAsync(saga)`, no session, immediate write | `session.StoreAsync(saga, ct)`, batched in unit-of-work | Cosmos writes are immediate (no session); RavenDb defers to `SaveChangesAsync` |
+| **Update frame** | `container.UpsertItemAsync(saga)`, **identical to insert** (last-write-wins upsert) | `session.StoreAsync(saga, ct)`, **identical to insert** (change tracking handles it) | Neither provider uses `Saga.Version`; both are unconditional upserts |
 | **Store frame** | Delegates to `DetermineUpdateFrame` (same upsert) | Delegates to `DetermineUpdateFrame` (same StoreAsync) | Same in both |
 | **Delete frame** | `container.DeleteItemAsync<TSaga>(sagaId, PartitionKey.None)` | `session.Delete(saga)` (sync; batched in `SaveChangesAsync`) | RavenDb delete is sync; Cosmos delete is async but not in a session |
-| **`CommitUnitOfWorkFrame`** | `new FlushOutgoingMessages()` — no session commit (Cosmos writes are already persisted) | `session.SaveChangesAsync(ct)` — commits all pending session changes | **Critical difference**: Cosmos has no MongoDB-style transaction to commit; RavenDb does commit a session unit-of-work |
-| **`ApplyTransactionSupport`** | Adds `TransactionalFrame`; adds `FlushOutgoingMessages` postprocessor **only if `chain is not SagaChain`** | Adds `TransactionalFrame`; adds `SaveChangesAsync` + `FlushOutgoingMessages` postprocessors **only if `chain is not SagaChain`** | **Both use the same saga-chain guard** — this is the key structural rule to mirror |
-| **`TransactionalFrame` — session** | `Container` resolved from DI (no session opened here) | Opens `IAsyncDocumentSession` with `_store.OpenAsyncSession()` | Mongo: `IClientSessionHandle` is already opened by `TransactionalFrame`; saga frames must use it |
-| **`TransactionalFrame` — outbox** | `context.EnlistInOutbox(new CosmosDbEnvelopeTransaction(container, context))` | `context.EnlistInOutbox(new RavenDbEnvelopeTransaction(session, context))` | Both enlist the outbox in the same generated code block |
-| **`TransactionalFrame` — SagaChain branch** | **None** — identical `GenerateCode` for all chains | **SagaChain branch:** `session.Advanced.UseOptimisticConcurrency = true;` | RavenDb's OCC is e-tag-based; MongoDB does not need a flag (session is already transactional) |
-| **Saga OCC** | **None** — last-write-wins | RavenDb e-tag OCC via `UseOptimisticConcurrency = true` — **but does NOT map to `SagaConcurrencyException`** | Neither maps a concurrency conflict to Wolverine's `SagaConcurrencyException`; MongoDB should |
+| **`CommitUnitOfWorkFrame`** | `new FlushOutgoingMessages()`, no session commit (Cosmos writes are already persisted) | `session.SaveChangesAsync(ct)`, commits all pending session changes | **Critical difference**: Cosmos has no MongoDB-style transaction to commit; RavenDb does commit a session unit-of-work |
+| **`ApplyTransactionSupport`** | Adds `TransactionalFrame`; adds `FlushOutgoingMessages` postprocessor **only if `chain is not SagaChain`** | Adds `TransactionalFrame`; adds `SaveChangesAsync` + `FlushOutgoingMessages` postprocessors **only if `chain is not SagaChain`** | **Both use the same saga-chain guard**. This is the key structural rule to mirror |
+| **`TransactionalFrame`: session** | `Container` resolved from DI (no session opened here) | Opens `IAsyncDocumentSession` with `_store.OpenAsyncSession()` | Mongo: `IClientSessionHandle` is already opened by `TransactionalFrame`; saga frames must use it |
+| **`TransactionalFrame`: outbox** | `context.EnlistInOutbox(new CosmosDbEnvelopeTransaction(container, context))` | `context.EnlistInOutbox(new RavenDbEnvelopeTransaction(session, context))` | Both enlist the outbox in the same generated code block |
+| **`TransactionalFrame`: SagaChain branch** | **None**, identical `GenerateCode` for all chains | **SagaChain branch:** `session.Advanced.UseOptimisticConcurrency = true;` | RavenDb's OCC is e-tag-based; MongoDB does not need a flag (session is already transactional) |
+| **Saga OCC** | **None**, last-write-wins | RavenDb e-tag OCC via `UseOptimisticConcurrency = true`, **but does NOT map to `SagaConcurrencyException`** | Neither maps a concurrency conflict to Wolverine's `SagaConcurrencyException`; MongoDB should |
 | **`ISagaStoreDiagnostics`** | **Not registered** | Registered as `RavenDbSagaStoreDiagnostics` | Optional/deferred for MongoDB |
 | **Collection / container strategy** | Single `wolverine` container for all document types (CosmosDb constraint) | Single database; RavenDb uses type name as document collection prefix | MongoDB should use **one collection per saga type** (idiomatic; avoids cross-type `_id` collision) |
-| **`DetermineStorageActionFrame`** | Implemented via `CosmosDbStorageActionApplier.ApplyAction<T>` | Implemented via `RavenDbStorageActionApplier.ApplyAction<T>` | Mongo does NOT implement this (yet) — scoping `CanPersist` to `Saga` avoids the gap |
-| **`ISagaHost` implementation** | `CosmosDbSagaHost` — `LoadState<T>(string)` reads via `Container.ReadItemAsync`; `Guid/int/long` overloads throw `NotSupportedException` | `RavenDbSagaHost` — `LoadState<T>(string)` reads via `session.LoadAsync<T>`; others throw `NotSupportedException` | Both implement string only; MongoDB should implement all four overloads (Option B) |
-| **`[CollectionDefinition]`** | `"cosmosdb"` — `CosmosDbCollection : ICollectionFixture<AppFixture>` | `"raven"` | MongoDB will use `"mongodb"` (already defined in `AppFixture.cs`) |
+| **`DetermineStorageActionFrame`** | Implemented via `CosmosDbStorageActionApplier.ApplyAction<T>` | Implemented via `RavenDbStorageActionApplier.ApplyAction<T>` | Mongo does NOT implement this (yet); scoping `CanPersist` to `Saga` avoids the gap |
+| **`ISagaHost` implementation** | `CosmosDbSagaHost`: `LoadState<T>(string)` reads via `Container.ReadItemAsync`; `Guid/int/long` overloads throw `NotSupportedException` | `RavenDbSagaHost`: `LoadState<T>(string)` reads via `session.LoadAsync<T>`; others throw `NotSupportedException` | Both implement string only; MongoDB should implement all four overloads (Option B) |
+| **`[CollectionDefinition]`** | `"cosmosdb"`: `CosmosDbCollection : ICollectionFixture<AppFixture>` | `"raven"` | MongoDB will use `"mongodb"` (already defined in `AppFixture.cs`) |
 | **Compliance spec** | `: StringIdentifiedSagaComplianceSpecs<CosmosDbSagaHost>` | `: StringIdentifiedSagaComplianceSpecs<RavenDbSagaHost>` with `[CollectionDefinition("raven")]` | Same base class; MongoDB adds Guid/int/long specs too |
 
 ---
 
 ## 3. Generated Frame Order (Verified from Pre-Generated Code)
 
-### 3a. CosmosDb — Start handler
+### 3a. CosmosDb: Start handler
 
 ```csharp
 // Enlist outbox (TransactionalFrame)
@@ -93,7 +93,7 @@ if (!saga.IsCompleted())
 await context.FlushOutgoingMessagesAsync().ConfigureAwait(false);
 ```
 
-### 3b. CosmosDb — Update/complete handler (StringCompleteThree)
+### 3b. CosmosDb: Update/complete handler (StringCompleteThree)
 
 ```csharp
 // Enlist outbox (TransactionalFrame)
@@ -125,7 +125,7 @@ else
 }
 ```
 
-### 3c. RavenDb — Start handler
+### 3c. RavenDb: Start handler
 
 ```csharp
 // TransactionalFrame: open session + enlist outbox
@@ -149,7 +149,7 @@ if (!saga.IsCompleted())
 await asyncDocumentSession.SaveChangesAsync(cancellation).ConfigureAwait(false);
 ```
 
-### 3d. RavenDb — Update/complete handler
+### 3d. RavenDb: Update/complete handler
 
 ```csharp
 // TransactionalFrame: open session
@@ -186,7 +186,7 @@ else
 
 These are the rules that **must** be carried over verbatim to the MongoDB provider:
 
-### Rule 1 — `CanApply` checks `SagaChain` first
+### Rule 1: `CanApply` checks `SagaChain` first
 
 ```csharp
 public bool CanApply(IChain chain, IServiceContainer container)
@@ -198,7 +198,7 @@ public bool CanApply(IChain chain, IServiceContainer container)
 
 Without this, saga chains are never picked up by `MongoDbPersistenceFrameProvider`.
 
-### Rule 2 — `ApplyTransactionSupport` skips the commit postprocessor for `SagaChain`
+### Rule 2: `ApplyTransactionSupport` skips the commit postprocessor for `SagaChain`
 
 ```csharp
 public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
@@ -214,9 +214,9 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 ```
 
 For saga chains, `CommitUnitOfWorkFrame` (not a postprocessor) provides the commit.
-Without the guard the transaction commits **twice** — once from the postprocessor and once from `CommitUnitOfWorkFrame`. Verified present in both Cosmos and RavenDb.
+Without the guard the transaction commits **twice**: once from the postprocessor and once from `CommitUnitOfWorkFrame`. Verified present in both Cosmos and RavenDb.
 
-### Rule 3 — `CommitUnitOfWorkFrame` is the saga-chain's commit+flush
+### Rule 3: `CommitUnitOfWorkFrame` is the saga-chain's commit+flush
 
 ```csharp
 public Frame CommitUnitOfWorkFrame(Variable saga, IServiceContainer container)
@@ -225,7 +225,7 @@ public Frame CommitUnitOfWorkFrame(Variable saga, IServiceContainer container)
 
 Wolverine core calls this at the end of the saga chain and appends it after the update/delete frame. For MongoDB, `CommitMongoTransactionFrame` must commit the session **and** flush outgoing messages (already its behaviour).
 
-### Rule 4 — `CanPersist` must be saga-scoped for MongoDB
+### Rule 4: `CanPersist` must be saga-scoped for MongoDB
 
 ```csharp
 public bool CanPersist(Type entityType, IServiceContainer container, out Type persistenceService)
@@ -235,7 +235,7 @@ public bool CanPersist(Type entityType, IServiceContainer container, out Type pe
 }
 ```
 
-Cosmos and RavenDb return `true` unconditionally because they implement `DetermineStorageActionFrame`. MongoDB does not — an unconditional `true` would advertise generic `[Entity]`/`Insert<T>`/`IStorageAction<T>` support that then throws at codegen.
+Cosmos and RavenDb return `true` unconditionally because they implement `DetermineStorageActionFrame`. MongoDB does not. An unconditional `true` would advertise generic `[Entity]`/`Insert<T>`/`IStorageAction<T>` support that then throws at codegen.
 
 ---
 
@@ -267,7 +267,7 @@ This enables `GuidIdentifiedSagaComplianceSpecs` and `IntIdentifiedSagaComplianc
 Neither Cosmos nor RavenDb maps concurrency conflicts to `SagaConcurrencyException`:
 
 - **Cosmos:** last-write-wins upsert; no conflict detection.
-- **RavenDb:** sets `UseOptimisticConcurrency = true` (e-tag OCC) in `TransactionalFrame`, so `SaveChangesAsync` may throw RavenDb's own `ConcurrencyException` — but **this is never caught and re-thrown as `SagaConcurrencyException`**. The compliance suite passes because it does not exercise concurrent updates.
+- **RavenDb:** sets `UseOptimisticConcurrency = true` (e-tag OCC) in `TransactionalFrame`, so `SaveChangesAsync` may throw RavenDb's own `ConcurrencyException`, but **this is never caught and re-thrown as `SagaConcurrencyException`**. The compliance suite passes because it does not exercise concurrent updates.
 
 MongoDB should implement proper `Saga.Version`-guarded OCC, matching Wolverine's lightweight SQL providers (`DatabaseSagaSchema.cs:99-110`) and the demo's `OrderRepository.UpdateAsync`:
 
@@ -310,7 +310,7 @@ if (result.ModifiedCount == 0)
 
 ### 5c. Per-saga-type collections (beyond both providers' single-container model)
 
-Cosmos uses one container for all documents (forced by the CosmosDB model); RavenDb uses a single session with type-prefix conventions. MongoDB should use **one collection per saga type** — idiomatic, no cross-type `_id` collisions, independently scalable:
+Cosmos uses one container for all documents (forced by the CosmosDB model); RavenDb uses a single session with type-prefix conventions. MongoDB should use **one collection per saga type**: idiomatic, no cross-type `_id` collisions, independently scalable:
 
 ```csharp
 // MongoConstants.cs helper
@@ -330,7 +330,7 @@ The snippets below are the concrete codegen frames MongoDB should produce. They 
 - `ct` = `CancellationToken` (already a codegen variable)
 - `coll` = `MongoConstants.SagaCollectionName(typeof(TSaga))`
 
-### Load frame (mirrors RavenDb simplicity — no try/catch)
+### Load frame (mirrors RavenDb simplicity, no try/catch)
 
 ```csharp
 // Generated by LoadSagaFrame
@@ -352,7 +352,7 @@ await db.GetCollection<TSaga>(coll)
     .ConfigureAwait(false);
 ```
 
-*Baseline (S6 — Cosmos-parity upsert, no Version yet):*
+*Baseline (S6: Cosmos-parity upsert, no Version yet):*
 
 ```csharp
 await db.GetCollection<TSaga>(coll)
@@ -384,7 +384,7 @@ if (_replaceResult.ModifiedCount == 0)
     throw new SagaConcurrencyException(typeof(TSaga), sagaId);
 ```
 
-*Baseline (S6 — upsert, same as insert):* identical to insert upsert above.
+*Baseline (S6: upsert, same as insert):* identical to insert upsert above.
 
 ### Delete frame
 
@@ -408,7 +408,7 @@ await session.CommitTransactionAsync(ct).ConfigureAwait(false);
 await context.FlushOutgoingMessagesAsync().ConfigureAwait(false);
 ```
 
-This is the existing `CommitMongoTransactionFrame` — no new frame needed.
+This is the existing `CommitMongoTransactionFrame`; no new frame needed.
 
 ---
 
@@ -483,26 +483,26 @@ public class MongoDbSagaHost : ISagaHost
 ### Mirror from Cosmos (structural rules)
 
 1. **`CanApply` shape:** `if (chain is SagaChain) return true;` first
-2. **`ApplyTransactionSupport` saga-guard:** skip commit postprocessor for `SagaChain` — `if (chain is not SagaChain)` gates the `CommitMongoTransactionFrame` postprocessor
-3. **`CommitUnitOfWorkFrame` role:** the saga chain's terminal frame (commit + flush) — already `CommitMongoTransactionFrame`
+2. **`ApplyTransactionSupport` saga-guard:** skip commit postprocessor for `SagaChain`: `if (chain is not SagaChain)` gates the `CommitMongoTransactionFrame` postprocessor
+3. **`CommitUnitOfWorkFrame` role:** the saga chain's terminal frame (commit + flush), already `CommitMongoTransactionFrame`
 4. **Load → handler → write/delete → commit ordering:** exactly the order both providers generate
 
 ### Mirror from RavenDb (simplifications)
 
-1. **Load frame:** `Find(session, …).FirstOrDefaultAsync()` — returns `null` on miss natively; no `try/catch` needed (unlike Cosmos)
+1. **Load frame:** `Find(session, …).FirstOrDefaultAsync()`, returns `null` on miss natively; no `try/catch` needed (unlike Cosmos)
 2. **Session-based writes:** all frames accept `session` and `db` variables (analogous to RavenDb's `asyncDocumentSession`)
 
 ### Go beyond both (MongoDB-specific improvements)
 
-1. **`DetermineSagaIdType` → native type:** `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType() ?? typeof(string)` — enables Guid/int/long sagas
-2. **`Saga.Version` OCC on update:** filter `(_id, oldVersion)`, throw `SagaConcurrencyException` on `ModifiedCount == 0` — mirrors `OrderRepository.UpdateAsync` (local precedent), and Wolverine's own lightweight SQL saga providers
-3. **`CanPersist` scoped to `Saga`:** `entityType.CanBeCastTo<Saga>()` — prevents advertising generic document persistence that MongoDB doesn't implement
-4. **Per-saga-type collections:** `wolverine_saga_{name}` naming convention — idiomatic MongoDB, no cross-type `_id` collision
+1. **`DetermineSagaIdType` → native type:** `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType() ?? typeof(string)`, enables Guid/int/long sagas
+2. **`Saga.Version` OCC on update:** filter `(_id, oldVersion)`, throw `SagaConcurrencyException` on `ModifiedCount == 0`, mirrors `OrderRepository.UpdateAsync` (local precedent), and Wolverine's own lightweight SQL saga providers
+3. **`CanPersist` scoped to `Saga`:** `entityType.CanBeCastTo<Saga>()`, prevents advertising generic document persistence that MongoDB doesn't implement
+4. **Per-saga-type collections:** `wolverine_saga_{name}` naming convention, idiomatic MongoDB, no cross-type `_id` collision
 
 ### Decomposition strategy (from the plan)
 
-- **S6** delivers Cosmos-parity (string-id, upsert/last-write-wins, no OCC) — passing `StringIdentifiedSagaComplianceSpecs`
-- **S7** generalizes to native id types — passing `GuidIdentifiedSagaComplianceSpecs`
-- **S8** adds `Saga.Version` OCC — proven by custom S11 concurrency tests
+- **S6** delivers Cosmos-parity (string-id, upsert/last-write-wins, no OCC), passing `StringIdentifiedSagaComplianceSpecs`
+- **S7** generalizes to native id types, passing `GuidIdentifiedSagaComplianceSpecs`
+- **S8** adds `Saga.Version` OCC, proven by custom S11 concurrency tests
 
 S7 and S8 can each be dropped independently without invalidating S6's contribution, making the Cosmos-parity baseline the guaranteed minimum.

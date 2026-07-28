@@ -1,4 +1,4 @@
-# Tier 2 — ISagaStoreDiagnostics API + Raven Reference
+# Tier 2: ISagaStoreDiagnostics API + Raven Reference
 
 > **Task D2 of** `docs/superpowers/plans/2026-06-21-persistence-suite-completion.md`
 >
@@ -40,7 +40,7 @@ public interface ISagaStoreDiagnostics
   must index both.
 - `count` may be any non-negative integer; implementations are expected to clamp to a
   sensible upper bound (RavenDb uses `[0, 1000]`; MongoDB will do the same).
-- Returns `null` / empty when this storage does not own the requested saga type — never throws.
+- Returns `null` / empty when this storage does not own the requested saga type; never throws.
 - One implementation per storage; the runtime wraps all registrations in
   `AggregateSagaStoreDiagnostics` and exposes a single unified view.
 
@@ -99,7 +99,7 @@ public class SagaInstanceState
 ```
 
 All existing implementations pass `null` for `LastModified` (RavenDb `:136`, RDBMS `:207`,
-Marten `:124`, EF Core `:160`).  MongoDB will do the same — the `State` JSON and
+Marten `:124`, EF Core `:160`).  MongoDB will do the same. The `State` JSON and
 `IsCompleted` flag are what CritterWatch cares about.
 
 `State` is produced by `JsonSerializer.SerializeToElement(saga, sagaType)` (reflection-based
@@ -121,7 +121,7 @@ and fills `Messages` + `SagaIdType`.
 
 ---
 
-## 3. `RavenDbSagaStoreDiagnostics` — Full Reference
+## 3. `RavenDbSagaStoreDiagnostics`: Full Reference
 
 **File:** `external/wolverine/src/Persistence/Wolverine.RavenDb/Internals/RavenDbSagaStoreDiagnostics.cs`  
 **Class:** `internal sealed class RavenDbSagaStoreDiagnostics : ISagaStoreDiagnostics` (`:30`)
@@ -230,7 +230,7 @@ public async Task<SagaInstanceState?> ReadSagaAsync(string sagaTypeName, object 
 ```
 
 **RavenDb specificity:** RavenDb always uses `string` ids (`.ToString()` coercion).
-MongoDB stores native id types (Guid/int/long/string) — the `identity` passed in must be
+MongoDB stores native id types (Guid/int/long/string); the `identity` passed in must be
 coerced to the saga's native id type before issuing the `Find` filter.  See
 §4 mapping for the MongoDB approach.
 
@@ -268,7 +268,7 @@ private async Task<IReadOnlyList<SagaInstanceState>> querySagasAsync<TSaga>(
 the collection query is fully typed.  MongoDB will use the same pattern with
 `IMongoCollection<TSaga>` instead of `IAsyncDocumentSession`.
 
-### 3.6 `buildInstance` (`:132-142`) — AOT annotations
+### 3.6 `buildInstance` (`:132-142`): AOT annotations
 
 ```csharp
 [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "...")]
@@ -286,7 +286,7 @@ private static SagaInstanceState buildInstance(Type sagaType, object identity, o
 }
 ```
 
-### 3.7 `extractIdentity` — fallback id extraction (`:150-159`)
+### 3.7 `extractIdentity`: fallback id extraction (`:150-159`)
 
 ```csharp
 [UnconditionalSuppressMessage("Trimming", "IL2070", Justification = "...")]
@@ -304,7 +304,7 @@ private static object? extractIdentity(object saga, Type sagaType)
 
 This is **RavenDb-specific** (used when `session.Advanced.GetDocumentId` fails).
 MongoDB stores native Bson ids so identity extraction is via
-`BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap?.Getter(saga)` — the same mechanism
+`BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap?.Getter(saga)`, the same mechanism
 `MongoEntityOperations.IdOf<T>` uses for entity frames.
 
 ---
@@ -334,7 +334,7 @@ options.Services.AddSingleton<ISagaStoreDiagnostics>(s =>
 ```
 
 The Mongo implementation takes `IMongoClient` (not `IMongoDatabase`) so it can acquire
-the database handle inside the service factory — matching the pattern the rest of the
+the database handle inside the service factory, matching the pattern the rest of the
 library uses.  The `databaseName` string is the same one passed to
 `client.GetDatabase(databaseName)` throughout the store.
 
@@ -383,16 +383,16 @@ public class raven_saga_store_diagnostics_tests : RavenTestDriver, IAsyncLifetim
 - Wires `opts.Services.AddSingleton(_store); opts.UseRavenDbPersistence();`.
 - Asserts via `_host.GetRuntime().SagaStorage` (the aggregated view).
 - **Five facts:**
-  1. `registered_saga_types_includes_raven_owned_saga` — `StorageProvider == "RavenDb"`,
+  1. `registered_saga_types_includes_raven_owned_saga`: `StorageProvider == "RavenDb"`,
      `StartRavenDiagSaga` appears in `Messages` with `SagaRole.Start`.
-  2. `read_saga_returns_state_for_existing_instance` — after invoking the start message,
+  2. `read_saga_returns_state_for_existing_instance`: after invoking the start message,
      `ReadSagaAsync(FullName, id)` returns non-null; `IsCompleted == false`;
      `State.GetProperty("Note").GetString() == "alpha"`.
-  3. `read_saga_returns_null_for_missing_instance` — missing id → `null`.
-  4. `list_saga_instances_returns_recent_sagas` — after two start invocations,
+  3. `read_saga_returns_null_for_missing_instance`: missing id → `null`.
+  4. `list_saga_instances_returns_recent_sagas`: after two start invocations,
      list returns `≥ 2`; all have `SagaTypeName == typeof(RavenDiagSaga).FullName`.
-  5. `unknown_saga_type_returns_null_and_empty` — unknown name → null read + empty list.
-- **No unified compliance spec** — `StorageActionCompliance` exists for entity persistence
+  5. `unknown_saga_type_returns_null_and_empty`: unknown name → null read + empty list.
+- **No unified compliance spec**: `StorageActionCompliance` exists for entity persistence
   but there is no analogue for diagnostics.  Cosmos does NOT register `ISagaStoreDiagnostics`
   (confirmed: no `AddSingleton<ISagaStoreDiagnostics>` in `CosmosDbExtensions`).
 
@@ -416,7 +416,7 @@ compliance saga type rather than a new in-test saga.
 | Provider tag passed to `SagaDescriptorBuilder.Build` | `"MongoDb"` |
 | `providers.OfType<RavenDbPersistenceFrameProvider>()` | `providers.OfType<MongoDbPersistenceFrameProvider>()` |
 
-### 7.1 `ReadSagaAsync` — MongoDB implementation sketch
+### 7.1 `ReadSagaAsync`: MongoDB implementation sketch
 
 ```csharp
 public async Task<SagaInstanceState?> ReadSagaAsync(string sagaTypeName, object identity, CancellationToken ct)
@@ -449,10 +449,10 @@ private async Task<SagaInstanceState?> readSagaAsync<TSaga>(Type sagaType, objec
 
 > **Note:** `Builders<TSaga>.Filter.Eq("_id", identity)` matches MongoDB's `_id` field.
 > The driver handles type coercion (e.g. `identity` as `object` containing a `Guid`).
-> This is idiomatic and does not require class-map lookup for the filter — only for
+> This is idiomatic and does not require class-map lookup for the filter; only for
 > identity extraction from a saga POCO (the `querySagasAsync` helper, below).
 
-### 7.2 `ListSagaInstancesAsync` — MongoDB implementation sketch
+### 7.2 `ListSagaInstancesAsync`: MongoDB implementation sketch
 
 ```csharp
 [UnconditionalSuppressMessage("Trimming", "IL2060", ...)]
@@ -487,12 +487,12 @@ private async Task<IReadOnlyList<SagaInstanceState>> querySagasAsync<TSaga>(
 | Dimension | RavenDb | MongoDB |
 |---|---|---|
 | Session model | `IAsyncDocumentSession` (disposable per-call) | No session for reads; use `IMongoDatabase` / `IMongoCollection<T>` directly |
-| Identity coercion | Always `identity.ToString()` (Raven stores all saga ids as strings) | Native type (Guid/int/long/string) — driver matches directly |
+| Identity coercion | Always `identity.ToString()` (Raven stores all saga ids as strings) | Native type (Guid/int/long/string), driver matches directly |
 | Identity extraction from POCO | `session.Advanced.GetDocumentId` → fallback property/field reflection | `BsonClassMap.LookupClassMap(sagaType).IdMemberMap?.Getter(saga)` |
 | Collection naming | Raven's implicit document-type collection | `MongoConstants.SagaCollectionName(sagaType)` = `"wolverine_saga_<lowercased>"` |
 | List query | `session.Query<TSaga>().Take(n).ToListAsync(ct)` | `collection.Find(Empty).Limit(n).ToListAsync(ct)` |
 | Provider locator | `providers.OfType<RavenDbPersistenceFrameProvider>()` | `providers.OfType<MongoDbPersistenceFrameProvider>()` |
-| AOT annotations needed | `IL2060`, `IL3050`, `IL2075`, `IL2026`, `IL2070` | Same set — apply to `readSagaAsync`, `querySagasAsync`, `buildInstance` |
+| AOT annotations needed | `IL2060`, `IL3050`, `IL2075`, `IL2026`, `IL2070` | Same set, apply to `readSagaAsync`, `querySagasAsync`, `buildInstance` |
 
 ---
 
@@ -500,7 +500,7 @@ private async Task<IReadOnlyList<SagaInstanceState>> querySagasAsync<TSaga>(
 
 | File | Change |
 |---|---|
-| `src/Wolverine.MongoDB/Internals/MongoDbSagaStoreDiagnostics.cs` | **New** — `internal sealed class MongoDbSagaStoreDiagnostics : ISagaStoreDiagnostics` mirroring `RavenDbSagaStoreDiagnostics` |
+| `src/Wolverine.MongoDB/Internals/MongoDbSagaStoreDiagnostics.cs` | **New**: `internal sealed class MongoDbSagaStoreDiagnostics : ISagaStoreDiagnostics` mirroring `RavenDbSagaStoreDiagnostics` |
 | `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs` | Add `options.Services.AddSingleton<ISagaStoreDiagnostics>(s => new MongoDbSagaStoreDiagnostics(...))` inside `UseMongoDbPersistence` |
 
 No other library files need to change for T2.1.

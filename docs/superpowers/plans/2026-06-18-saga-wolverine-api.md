@@ -6,7 +6,7 @@
 
 ---
 
-## 1. `Saga.cs` — Base Class and Exceptions
+## 1. `Saga.cs`: Base Class and Exceptions
 
 **File:** `src/Wolverine/Saga.cs`
 
@@ -40,12 +40,12 @@ public abstract class ResequencerSaga<T> : Saga where T : SequencedMessage { ...
 **Key facts:**
 - `Version` is `int`, aligning with `JasperFx.IRevisioned.Version`. The XML doc says "typed as int to align with IRevisioned … (JasperFx 2.0 rc split versioning into IRevisioned = int and ILongVersioned = long; sagas use the int revision)."
 - `IsCompleted()` is a public method (not a property). Generated code calls it as `saga.IsCompleted()`.
-- `MarkCompleted()` is `protected` — only callable from within a `Saga` subclass handler.
+- `MarkCompleted()` is `protected`, only callable from within a `Saga` subclass handler.
 - `SagaConcurrencyException` is defined in the same file as `Saga`, namespace `Wolverine`.
 
 ---
 
-## 2. `IPersistenceFrameProvider.cs` — Full Interface
+## 2. `IPersistenceFrameProvider.cs`: Full Interface
 
 **File:** `src/Wolverine/Persistence/IPersistenceFrameProvider.cs`
 
@@ -109,20 +109,20 @@ public interface IPersistenceFrameProvider
 
 | Member | Called for saga chains? | Notes |
 |--------|------------------------|-------|
-| `CanApply` | Yes — gate | Must return `true` for `SagaChain` |
-| `ApplyTransactionSupport` | Yes — setup | Called first in `DetermineFrames`; adds transaction middleware |
-| `CanPersist` | Yes — saga creation | Scope to `entityType.CanBeCastTo<Saga>()` (see §6) |
+| `CanApply` | Yes (gate) | Must return `true` for `SagaChain` |
+| `ApplyTransactionSupport` | Yes (setup) | Called first in `DetermineFrames`; adds transaction middleware |
+| `CanPersist` | Yes (saga creation) | Scope to `entityType.CanBeCastTo<Saga>()` (see §6) |
 | `DetermineSagaIdType` | Conditionally | Only when message has no saga-id member (envelope-only path) |
 | `DetermineLoadFrame` | Yes | Load the saga by `sagaId` variable |
 | `DetermineInsertFrame` | Yes | New saga: insert if not completed |
 | `DetermineUpdateFrame` | Yes | Existing saga: update unless completed |
 | `DetermineDeleteFrame(sagaId, saga, container)` | Yes | Existing saga: delete if completed |
 | `CommitUnitOfWorkFrame` | Yes | Commit + flush; called in two positions (see §5) |
-| `DetermineStoreFrame` | **No** | Not called by `SagaChain` — may throw `NotSupportedException` |
+| `DetermineStoreFrame` | **No** | Not called by `SagaChain`; may throw `NotSupportedException` |
 
 ---
 
-## 3. `SagaChain.cs` — Constants, Identity Resolution, Frame Ordering
+## 3. `SagaChain.cs`: Constants, Identity Resolution, Frame Ordering
 
 **File:** `src/Wolverine/Persistence/Sagas/SagaChain.cs`
 
@@ -147,7 +147,7 @@ public static readonly Type[] ValidSagaIdTypes =
 
 Strong-typed identifier structs (e.g. `OrderId` wrapping `Guid`) are also accepted by `IsValidSagaIdType` (lines 36–44): the check is `type is { IsPrimitive: false, IsEnum: false }`.
 
-### 3.2 Identity Resolution — `DetermineSagaIdMember` (lines 208–225)
+### 3.2 Identity Resolution: `DetermineSagaIdMember` (lines 208–225)
 
 Wolverine scans the **message type** (not the saga type) for the saga identity member in this exact precedence:
 
@@ -183,7 +183,7 @@ var findSagaId = SagaIdMember == null
     : new PullSagaIdFromMessageFrame(MessageType, SagaIdMember);   // uses member's type directly
 ```
 
-**Rule:** `DetermineSagaIdType` is **only called when the message has no saga-id member** (i.e. the saga ID comes purely from the envelope `SagaId` header). When the message has an id member, the member's own runtime type governs the `sagaId` variable — `DetermineSagaIdType` is not consulted.
+**Rule:** `DetermineSagaIdType` is **only called when the message has no saga-id member** (i.e. the saga ID comes purely from the envelope `SagaId` header). When the message has an id member, the member's own runtime type governs the `sagaId` variable. `DetermineSagaIdType` is not consulted.
 
 In `LightweightSagaPersistenceFrameProvider` (line 80–82):
 ```csharp
@@ -197,14 +197,14 @@ For document-store providers (Cosmos, MongoDB), `DetermineSagaIdType → typeof(
 
 ## 4. Identity Attribute Types
 
-**`SagaIdentityAttribute`** — `src/Wolverine/Persistence/Sagas/SagaIdentityAttribute.cs`
+**`SagaIdentityAttribute`**: `src/Wolverine/Persistence/Sagas/SagaIdentityAttribute.cs`
 ```csharp
 /// Marks a public property on a message type as the saga state identity
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
 public class SagaIdentityAttribute : Attribute;
 ```
 
-**`SagaIdentityFromAttribute`** — `src/Wolverine/Persistence/Sagas/SagaIdentityFromAttribute.cs`
+**`SagaIdentityFromAttribute`**: `src/Wolverine/Persistence/Sagas/SagaIdentityFromAttribute.cs`
 Used on a **handler method parameter** to specify which message property holds the saga id. Scanned across ALL handler methods (fixed in V6 to avoid declaration-order bugs).
 
 ---
@@ -221,7 +221,7 @@ public class IndeterminateSagaStateIdException : Exception
         $"Could not determine a valid saga state id for Envelope {envelope}") { }
 }
 ```
-**When thrown:** During id extraction — `PullSagaIdFromMessageFrame` or `PullSagaIdFromEnvelopeFrame` — when the id is default/empty and cannot be parsed from the envelope header. Covers:
+**When thrown:** During id extraction (`PullSagaIdFromMessageFrame` or `PullSagaIdFromEnvelopeFrame`), when the id is default/empty and cannot be parsed from the envelope header. Covers:
 - String id is null/empty (both message and envelope header)
 - Guid id is `Guid.Empty` (both message and envelope header)
 - int/long id is `0` (both message and envelope header)
@@ -237,9 +237,9 @@ public class UnknownSagaException : Exception
         $"Could not find an expected saga document of type {sagaStateType.FullNameInCode()} for id '{stateId}'. Note: new Sagas will not be available in storage until the first message succeeds.") { }
 }
 ```
-**When thrown:** By `AssertSagaStateExistsFrame` (`src/Wolverine/Persistence/Sagas/AssertSagaStateExistsFrame.cs`) — emitted in the "saga does not exist" branch when there are no `Start`/`NotFound` handlers. The load frame returns `null`, the if-else guard hits the null branch, and `AssertSagaStateExistsFrame` throws.
+**When thrown:** By `AssertSagaStateExistsFrame` (`src/Wolverine/Persistence/Sagas/AssertSagaStateExistsFrame.cs`), emitted in the "saga does not exist" branch when there are no `Start`/`NotFound` handlers. The load frame returns `null`, the if-else guard hits the null branch, and `AssertSagaStateExistsFrame` throws.
 
-**Compliance facts that exercise this:** `unknown_state` (sends `StringCompleteThree{SagaId = "unknown"}` — saga doesn't exist, no Start handler on that message).
+**Compliance facts that exercise this:** `unknown_state` (sends `StringCompleteThree{SagaId = "unknown"}`, saga doesn't exist, no Start handler on that message).
 
 ### `SagaConcurrencyException` (Saga.cs, line 47)
 ```csharp
@@ -248,13 +248,13 @@ public class SagaConcurrencyException : Exception
     public SagaConcurrencyException(string message) : base(message) { }
 }
 ```
-**When thrown:** By the persistence provider's `DetermineUpdateFrame` implementation when a version-guarded update finds the stored document has been modified (i.e. `ModifiedCount == 0` after `ReplaceOneAsync` filtered on `(_id, Version)`). **Wolverine core never throws this** — it is the provider's responsibility. Neither Cosmos nor RavenDb throw it; the lightweight SQL provider does (see `DatabaseSagaSchema.cs:99-110`).
+**When thrown:** By the persistence provider's `DetermineUpdateFrame` implementation when a version-guarded update finds the stored document has been modified (i.e. `ModifiedCount == 0` after `ReplaceOneAsync` filtered on `(_id, Version)`). **Wolverine core never throws this**. It is the provider's responsibility. Neither Cosmos nor RavenDb throw it; the lightweight SQL provider does (see `DatabaseSagaSchema.cs:99-110`).
 
-**No compliance fact tests this** — must be covered by custom test (S11).
+**No compliance fact tests this**; it must be covered by custom test (S11).
 
 ---
 
-## 6. `CanPersist` — Scope Constraint
+## 6. `CanPersist`: Scope Constraint
 
 The plan's `🔎 review` note on R9 is confirmed by reading `LightweightSagaPersistenceFrameProvider.CanPersist` (lines 61–78):
 
@@ -273,11 +273,11 @@ public bool CanPersist(Type entityType, IServiceContainer container, out Type pe
 }
 ```
 
-For a document-store provider (MongoDB), `CanPersist` must be scoped to `entityType.CanBeCastTo<Saga>()`. Returning `true` unconditionally would advertise generic `[Entity]`/`Insert<T>`/`Update<T>`/`IStorageAction<T>` persistence which calls `DetermineStorageActionFrame` — and that method throws `NotSupportedException` in the current stub. The correct `persistenceService` for MongoDB is `typeof(IMongoDatabase)`.
+For a document-store provider (MongoDB), `CanPersist` must be scoped to `entityType.CanBeCastTo<Saga>()`. Returning `true` unconditionally would advertise generic `[Entity]`/`Insert<T>`/`Update<T>`/`IStorageAction<T>` persistence which calls `DetermineStorageActionFrame`, and that method throws `NotSupportedException` in the current stub. The correct `persistenceService` for MongoDB is `typeof(IMongoDatabase)`.
 
 ---
 
-## 7. Frame Invocation Order — Complete Trace
+## 7. Frame Invocation Order: Complete Trace
 
 ### 7.1 Call Site: `DetermineFrames` (SagaChain.cs, line 242)
 
@@ -305,7 +305,7 @@ internal override List<Frame> DetermineFrames(...) {
 }
 ```
 
-**Key:** `ApplyTransactionSupport` is called **before** any saga frame generation. For `SagaChain`, the MongoDB provider must add `TransactionalFrame` to `Middleware` but **must NOT** add `CommitMongoTransactionFrame` to `Postprocessors` (that would double-commit — once via the postprocessor and once via `CommitUnitOfWorkFrame` which is emitted inline).
+**Key:** `ApplyTransactionSupport` is called **before** any saga frame generation. For `SagaChain`, the MongoDB provider must add `TransactionalFrame` to `Middleware` but **must NOT** add `CommitMongoTransactionFrame` to `Postprocessors` (that would double-commit: once via the postprocessor and once via `CommitUnitOfWorkFrame` which is emitted inline).
 
 ### 7.2 Path A: Start-only (no `ExistingCalls`)
 
@@ -392,7 +392,7 @@ CommitUnitOfWorkFrame(saga, container)      → commit transaction + flush outgo
 
 ---
 
-## 8. `ApplyTransactionSupport` — Saga-Chain Handling Pattern
+## 8. `ApplyTransactionSupport`: Saga-Chain Handling Pattern
 
 The canonical pattern (from `CosmosDbPersistenceFrameProvider`):
 
@@ -415,15 +415,15 @@ This matches what `SagaChain.DetermineFrames` expects: the postprocessors list i
 
 ---
 
-## 9. `CommitUnitOfWorkFrame` — Role in Saga Chains
+## 9. `CommitUnitOfWorkFrame`: Role in Saga Chains
 
-`CommitUnitOfWorkFrame` returns a frame that is **inlined** into the generated method body — not added to postprocessors. For the MongoDB provider, it should return a `CommitMongoTransactionFrame` (which commits the session transaction and then flushes outgoing envelopes).
+`CommitUnitOfWorkFrame` returns a frame that is **inlined** into the generated method body, not added to postprocessors. For the MongoDB provider, it should return a `CommitMongoTransactionFrame` (which commits the session transaction and then flushes outgoing envelopes).
 
 It is called in **two positions** within the saga body:
-1. **Start path (Path A + Path B1):** inside `ConditionalSagaInsertFrame` — always executed after the conditional insert (even if skipped due to `IsCompleted()`)
+1. **Start path (Path A + Path B1):** inside `ConditionalSagaInsertFrame`, always executed after the conditional insert (even if skipped due to `IsCompleted()`)
 2. **Handle path (Path B, existing saga):** last step of `DetermineSagaExistsSteps`, after `SagaStoreOrDeleteFrame`
 
-For non-saga chains, the commit is in `Postprocessors`, not inlined — this is the key difference.
+For non-saga chains, the commit is in `Postprocessors`, not inlined. This is the key difference.
 
 ---
 
@@ -490,7 +490,7 @@ Concrete types: `StringBasicWorkflow`, `GuidBasicWorkflow`, `IntBasicWorkflow`, 
 
 1. **`DetermineStoreFrame` is never called for saga chains.** `SagaChain` only calls `DetermineInsertFrame`, `DetermineUpdateFrame`, and `DetermineDeleteFrame(sagaId, saga, container)`. The upsert-only S6 baseline uses the same frame for insert and update; S8 must diverge them for OCC.
 
-2. **Insert and update are separate provider calls.** Do not conflate them — `ConditionalSagaInsertFrame` calls `DetermineInsertFrame` (start path); `SagaStoreOrDeleteFrame` calls `DetermineUpdateFrame` and `DetermineDeleteFrame` (handle path). S8's version guard only goes on the update frame; insert sets initial `Version`.
+2. **Insert and update are separate provider calls.** Do not conflate them: `ConditionalSagaInsertFrame` calls `DetermineInsertFrame` (start path); `SagaStoreOrDeleteFrame` calls `DetermineUpdateFrame` and `DetermineDeleteFrame` (handle path). S8's version guard only goes on the update frame; insert sets initial `Version`.
 
 3. **`CanApply` must check `chain is SagaChain` first.** Without it, saga chains are skipped silently (the provider is never selected, frames are never injected).
 
@@ -498,6 +498,6 @@ Concrete types: `StringBasicWorkflow`, `GuidBasicWorkflow`, `IntBasicWorkflow`, 
 
 5. **`ApplyTransactionSupport` must skip the postprocessor for `SagaChain`.** The `if (chain is not SagaChain)` guard prevents double-commit. This is the Cosmos pattern and is required for correct atomicity.
 
-6. **`DetermineSagaIdType` only matters for the envelope-only case.** When the message type has a member matching the saga identity resolution rules, `PullSagaIdFromMessageFrame` is used and the member's type governs `sagaId` — `DetermineSagaIdType` is bypassed. The S6 baseline returning `typeof(string)` only affects messages that carry the saga id purely in `Envelope.SagaId`.
+6. **`DetermineSagaIdType` only matters for the envelope-only case.** When the message type has a member matching the saga identity resolution rules, `PullSagaIdFromMessageFrame` is used and the member's type governs `sagaId`; `DetermineSagaIdType` is bypassed. The S6 baseline returning `typeof(string)` only affects messages that carry the saga id purely in `Envelope.SagaId`.
 
 7. **Saga atomicity with outbox is automatic.** Because the saga frames run inside `TransactionalFrame`, and `CommitUnitOfWorkFrame` commits the same `IClientSessionHandle` session that the outbox enrolled in, saga state changes + outgoing envelopes are committed together in one MongoDB transaction.

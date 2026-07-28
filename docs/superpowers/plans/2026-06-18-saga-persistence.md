@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. The companion prompts file is `docs/superpowers/plans/2026-06-18-saga-task-prompts.md`.
 
-> **Independent review (2026-06-18, Codex / gpt-5.5, read-only against source):** No critical contradiction; the commit/frame-ordering mitigation was *positively verified* — `SagaChain` calls `ApplyTransactionSupport()` **before** appending saga frames (`external/wolverine/src/Wolverine/Persistence/Sagas/SagaChain.cs:252,:284`), so skipping the postprocessor for `SagaChain` and committing via `CommitUnitOfWorkFrame` yields exactly one commit. Seven refinements were folded in below (search "🔎 review"): `CanPersist` must be saga-scoped (S6); per-saga-type collection cleanup is **mandatory**, not optional (S4/S6/S9); `DetermineSagaIdType` only governs envelope-header-only messages (S7); precise old/new-version OCC semantics + delete-guard decision (S8); **S8 now depends on S7** (false parallelism removed); a `SagaConcurrencyException` retry policy is required before S14; and id/OCC rationale should reference Wolverine's Marten/EF/lightweight-SQL providers, not Cosmos/Raven (which are string-only, no OCC).
+> **Independent review (2026-06-18, Codex / gpt-5.5, read-only against source):** No critical contradiction; the commit/frame-ordering mitigation was *positively verified*. `SagaChain` calls `ApplyTransactionSupport()` **before** appending saga frames (`external/wolverine/src/Wolverine/Persistence/Sagas/SagaChain.cs:252,:284`), so skipping the postprocessor for `SagaChain` and committing via `CommitUnitOfWorkFrame` yields exactly one commit. Seven refinements were folded in below (search "🔎 review"): `CanPersist` must be saga-scoped (S6); per-saga-type collection cleanup is **mandatory**, not optional (S4/S6/S9); `DetermineSagaIdType` only governs envelope-header-only messages (S7); precise old/new-version OCC semantics + delete-guard decision (S8); **S8 now depends on S7** (false parallelism removed); a `SagaConcurrencyException` retry policy is required before S14; and id/OCC rationale should reference Wolverine's Marten/EF/lightweight-SQL providers, not Cosmos/Raven (which are string-only, no OCC).
 
-**Goal:** Add native MongoDB **saga persistence** to `Wolverine.MongoDB` so that stateful, message-correlated workflows (`Wolverine.Saga` subclasses) load, insert, update, complete (delete), and version through the MongoDB persistence provider — exercising the same Wolverine code-generation contracts the Cosmos and RavenDb providers use. Deliver it with the upstream saga compliance suite passing, custom atomicity/concurrency/idempotency tests, a full set of demo saga flows acting as a regression safety net, and verification that inbox, outbox, single-node, multi-node, and saga persistence all keep working together. The end state must be a clean candidate for a future upstream contribution to Wolverine (a `Wolverine.MongoDb` persistence provider).
+**Goal:** Add native MongoDB **saga persistence** to `Wolverine.MongoDB` so that stateful, message-correlated workflows (`Wolverine.Saga` subclasses) load, insert, update, complete (delete), and version through the MongoDB persistence provider, exercising the same Wolverine code-generation contracts the Cosmos and RavenDb providers use. Deliver it with the upstream saga compliance suite passing, custom atomicity/concurrency/idempotency tests, a full set of demo saga flows acting as a regression safety net, and verification that inbox, outbox, single-node, multi-node, and saga persistence all keep working together. The end state must be a clean candidate for a future upstream contribution to Wolverine (a `Wolverine.MongoDb` persistence provider).
 
-**Architecture:** Saga support in a Wolverine document-store provider is **entirely code-generation**, not a separate storage service. Wolverine core owns saga identity resolution, the `SagaChain`, and the load→handle→store/delete→commit lifecycle; the provider supplies an `IPersistenceFrameProvider` that emits the MongoDB read/write frames woven into the generated handler. `Wolverine.MongoDB` **already** has `MongoDbPersistenceFrameProvider : IPersistenceFrameProvider`, but its saga members throw `NotSupportedException`, `CanPersist` returns `false`, and `CanApply` does not match `chain is SagaChain`. This plan turns those stubs into real frames that persist the saga POCO directly as a MongoDB document keyed by `_id`, run inside the **existing** Wolverine-managed session/transaction (so saga state and the outbox commit atomically), and — going one step beyond Cosmos/Raven — support the saga's **native id type** (Guid/string/int/long) and **`Saga.Version` optimistic concurrency**. 🔎 review: mirror **Cosmos/Raven** for the *codegen frame shape and saga-chain postprocessor handling*, but mirror Wolverine's **Marten / EF Core / lightweight-SQL** providers for the *native-id and OCC rationale* — Cosmos/Raven are string-only and do not use `Saga.Version`, whereas lightweight SQL already does `Version`-guarded updates throwing `SagaConcurrencyException` (`external/wolverine/.../DatabaseSagaSchema.cs:99-110`), and Marten/EF resolve the native id type. The demo's `OrderRepository.UpdateAsync` is the local precedent for the guarded-`ReplaceOneAsync` pattern.
+**Architecture:** Saga support in a Wolverine document-store provider is **entirely code-generation**, not a separate storage service. Wolverine core owns saga identity resolution, the `SagaChain`, and the load→handle→store/delete→commit lifecycle; the provider supplies an `IPersistenceFrameProvider` that emits the MongoDB read/write frames woven into the generated handler. `Wolverine.MongoDB` **already** has `MongoDbPersistenceFrameProvider : IPersistenceFrameProvider`, but its saga members throw `NotSupportedException`, `CanPersist` returns `false`, and `CanApply` does not match `chain is SagaChain`. This plan turns those stubs into real frames that persist the saga POCO directly as a MongoDB document keyed by `_id`, run inside the **existing** Wolverine-managed session/transaction (so saga state and the outbox commit atomically), and (going one step beyond Cosmos/Raven) support the saga's **native id type** (Guid/string/int/long) and **`Saga.Version` optimistic concurrency**. 🔎 review: mirror **Cosmos/Raven** for the *codegen frame shape and saga-chain postprocessor handling*, but mirror Wolverine's **Marten / EF Core / lightweight-SQL** providers for the *native-id and OCC rationale*: Cosmos/Raven are string-only and do not use `Saga.Version`, whereas lightweight SQL already does `Version`-guarded updates throwing `SagaConcurrencyException` (`external/wolverine/.../DatabaseSagaSchema.cs:99-110`), and Marten/EF resolve the native id type. The demo's `OrderRepository.UpdateAsync` is the local precedent for the guarded-`ReplaceOneAsync` pattern.
 
 **Tech Stack:** .NET 9/10, MongoDB.Driver 3.x, WolverineFx 6.2.2 (pinned `external/wolverine` submodule), JasperFx.CodeGeneration (frames), xUnit + Shouldly (library) / FluentAssertions (demo), Testcontainers.MongoDb (replica set).
 
@@ -14,17 +14,17 @@
 
 ---
 
-## Verified Saga API Facts (established by discovery — do NOT re-derive or invent)
+## Verified Saga API Facts (established by discovery, do NOT re-derive or invent)
 
 These were read directly from the pinned `external/wolverine` submodule (V6.2.2) and the local source during planning. Tasks below reference them; an implementing session should *confirm* them against the submodule (a one-line grep), not reinvent them.
 
-**Saga base class** — `external/wolverine/src/Wolverine/Saga.cs`:
+**Saga base class** (`external/wolverine/src/Wolverine/Saga.cs`):
 - `public abstract class Saga` with `public int Version { get; set; }`, `public bool IsCompleted()`, `protected void MarkCompleted()`.
 - `public class SagaConcurrencyException : Exception` lives in the same file. `Version` is an `int` (aligns with `JasperFx.IRevisioned`).
 
-**The only provider contract** — `external/wolverine/src/Wolverine/Persistence/IPersistenceFrameProvider.cs`. Saga-relevant members:
-- `bool CanApply(IChain chain, IServiceContainer container)` — must return `true` for saga chains.
-- `bool CanPersist(Type entityType, IServiceContainer container, out Type persistenceService)` — saga creation support.
+**The only provider contract** (`external/wolverine/src/Wolverine/Persistence/IPersistenceFrameProvider.cs`). Saga-relevant members:
+- `bool CanApply(IChain chain, IServiceContainer container)`: must return `true` for saga chains.
+- `bool CanPersist(Type entityType, IServiceContainer container, out Type persistenceService)`: saga creation support.
 - `Type DetermineSagaIdType(Type sagaType, IServiceContainer container)`
 - `Frame DetermineLoadFrame(IServiceContainer container, Type sagaType, Variable sagaId)`
 - `Frame DetermineInsertFrame(Variable saga, IServiceContainer container)`
@@ -34,7 +34,7 @@ These were read directly from the pinned `external/wolverine` submodule (V6.2.2)
 - `Frame CommitUnitOfWorkFrame(Variable saga, IServiceContainer container)`
 - Plus `ApplyTransactionSupport(...)` (already implemented for the outbox).
 
-**Closest template** — `external/wolverine/src/Persistence/Wolverine.CosmosDb/Internals/CosmosDbPersistenceFrameProvider.cs`. Its pattern, verbatim-relevant:
+**Closest template** (`external/wolverine/src/Persistence/Wolverine.CosmosDb/Internals/CosmosDbPersistenceFrameProvider.cs`). Its pattern, verbatim-relevant:
 - `ApplyTransactionSupport`: adds the provider's `TransactionalFrame`; adds a flush postprocessor **only** `if (chain is not SagaChain)`.
 - `CanApply`: `if (chain is SagaChain) return true;` first.
 - `CanPersist`: `persistenceService = typeof(Container); return true;`
@@ -46,30 +46,30 @@ These were read directly from the pinned `external/wolverine` submodule (V6.2.2)
 - RavenDb is analogous but sets `session.Advanced.UseOptimisticConcurrency = true` for `SagaChain` in its `TransactionalFrame`; it implements `ISagaStoreDiagnostics` (Cosmos does not). **Neither maps a concurrency conflict to `SagaConcurrencyException` for sagas.**
 
 **Existing Mongo integration points** (local):
-- `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs` — the file to change. Saga members currently throw `const string SagaNotSupported`. `CanApply` matches `IClientSessionHandle`/`MongoDbUnitOfWork` params and `IMongoDatabase`/`IMongoClient`/`IMongoCollection<>` dependencies but **not** `chain is SagaChain`.
-- `src/Wolverine.MongoDB/Internals/TransactionalFrame.cs` — `TransactionalFrame` opens `IClientSessionHandle` (`mongoSession`), builds `MongoDbUnitOfWork`, enlists the outbox, wraps the chain in `try/catch`. `CommitMongoTransactionFrame` commits the transaction then flushes outgoing. Both `IClientSessionHandle` and `IMongoDatabase` are resolvable codegen variables inside a chain.
-- `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs` — registers `IMessageStore`, `IMongoDatabase`, `InsertFirstPersistenceStrategy<MongoDbPersistenceFrameProvider>()`, `ReferenceAssembly`.
-- `src/Wolverine.MongoDB/Internals/MongoConstants.cs` — collection-name constants live here.
-- `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Admin.cs` — collection/index creation; `RebuildAsync()` (used by `AppFixture.ClearAll()`).
+- `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs`: the file to change. Saga members currently throw `const string SagaNotSupported`. `CanApply` matches `IClientSessionHandle`/`MongoDbUnitOfWork` params and `IMongoDatabase`/`IMongoClient`/`IMongoCollection<>` dependencies but **not** `chain is SagaChain`.
+- `src/Wolverine.MongoDB/Internals/TransactionalFrame.cs`: `TransactionalFrame` opens `IClientSessionHandle` (`mongoSession`), builds `MongoDbUnitOfWork`, enlists the outbox, wraps the chain in `try/catch`. `CommitMongoTransactionFrame` commits the transaction then flushes outgoing. Both `IClientSessionHandle` and `IMongoDatabase` are resolvable codegen variables inside a chain.
+- `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs`: registers `IMessageStore`, `IMongoDatabase`, `InsertFirstPersistenceStrategy<MongoDbPersistenceFrameProvider>()`, `ReferenceAssembly`.
+- `src/Wolverine.MongoDB/Internals/MongoConstants.cs`: collection-name constants live here.
+- `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Admin.cs`: collection/index creation; `RebuildAsync()` (used by `AppFixture.ClearAll()`).
 
-**Acceptance oracle** — `external/wolverine/src/Testing/Wolverine.ComplianceTests/Sagas/`:
+**Acceptance oracle** (`external/wolverine/src/Testing/Wolverine.ComplianceTests/Sagas/`):
 - `StringIdentifiedSagaComplianceSpecs<T>` and `GuidIdentifiedSagaComplianceSpecs<T>` (also `Int`/`Long` variants) are concrete `[Fact]` classes parameterized by `T : ISagaHost, new()`. Sample sagas: `StringBasicWorkflow` / `GuidBasicWorkflow : BasicWorkflow<TStart,TCompleteThree,TId> : Saga` (member named `Id`, plus `Name`, bool flags; `FinishItAll → MarkCompleted()`).
-- Scenarios covered: `start_1`, `start_2` (wildcard start), `complete` (verifies the doc is **deleted**), cascading messages (`CompleteOne → CompleteTwo`), `straight_up_update_with_the_saga_id_on_the_message`, `unknown_state` (throws `UnknownSagaException`), update via envelope header, update via `[SagaIdentity]` attribute, and two indeterminate-id cases (throw `IndeterminateSagaStateIdException`). **No concurrency scenario** — OCC must be proven by custom tests.
+- Scenarios covered: `start_1`, `start_2` (wildcard start), `complete` (verifies the doc is **deleted**), cascading messages (`CompleteOne → CompleteTwo`), `straight_up_update_with_the_saga_id_on_the_message`, `unknown_state` (throws `UnknownSagaException`), update via envelope header, update via `[SagaIdentity]` attribute, and two indeterminate-id cases (throw `IndeterminateSagaStateIdException`). **No concurrency scenario:** OCC must be proven by custom tests.
 - `ISagaHost` requires `Task<IHost> BuildHostAsync<TSaga>()` and four `LoadState<T>(id)` overloads (Guid/int/long/string). Cosmos/Raven implement only the `string` overload (others throw `NotSupportedException`). `LoadState` reads the saga **directly from the store**, not via Wolverine, to independently verify persistence.
-- Reference host: `external/wolverine/src/Persistence/CosmosDbTests/saga_storage_compliance.cs` (`CosmosDbSagaHost`) — sets `CodeGeneration.GeneratedCodeOutputPath`, `TypeLoadMode.Auto`, `Discovery.IncludeType<…Workflow>()` + `IncludeAssembly`, registers the client, `UseCosmosDbPersistence`, `DurabilityMode.Solo`.
+- Reference host: `external/wolverine/src/Persistence/CosmosDbTests/saga_storage_compliance.cs` (`CosmosDbSagaHost`): sets `CodeGeneration.GeneratedCodeOutputPath`, `TypeLoadMode.Auto`, `Discovery.IncludeType<…Workflow>()` + `IncludeAssembly`, registers the client, `UseCosmosDbPersistence`, `DurabilityMode.Solo`.
 
 **Existing local harness** (from the prior plans):
-- `src/Wolverine.MongoDB.Tests/AppFixture.cs` — `[CollectionDefinition("mongodb")]`, `const DatabaseName = "wolverine_tests"`, `IMongoClient Client`, `ClearAll()` (→ `Admin.RebuildAsync()`), `BuildMessageStore()`; `mongo:7` replica-set Testcontainer; `net9.0;net10.0`; `UseWolverineSource` switch.
-- Demo (`demo/`): `OrderDemo.{Api,Application,Contracts,Domain,Infrastructure}` + `OrderDemo.IntegrationTests`. `Program.cs` wires `UseMongoDbPersistence`, config-driven durability, RabbitMQ, `AutoApplyTransactions()`. Handlers take `IClientSessionHandle` + repositories. `OrderRepository.UpdateAsync` already does a **Version-guarded `ReplaceOneAsync`** that throws on `ModifiedCount == 0` — the precedent for saga OCC. `OrdersFixture` (Testcontainers, per-test DB name via `CreateDatabaseName()`, Solo) drives flows with `host.TrackActivity().Timeout(...).InvokeMessageAndWaitAsync(...)` and asserts with FluentAssertions.
+- `src/Wolverine.MongoDB.Tests/AppFixture.cs`: `[CollectionDefinition("mongodb")]`, `const DatabaseName = "wolverine_tests"`, `IMongoClient Client`, `ClearAll()` (→ `Admin.RebuildAsync()`), `BuildMessageStore()`; `mongo:7` replica-set Testcontainer; `net9.0;net10.0`; `UseWolverineSource` switch.
+- Demo (`demo/`): `OrderDemo.{Api,Application,Contracts,Domain,Infrastructure}` + `OrderDemo.IntegrationTests`. `Program.cs` wires `UseMongoDbPersistence`, config-driven durability, RabbitMQ, `AutoApplyTransactions()`. Handlers take `IClientSessionHandle` + repositories. `OrderRepository.UpdateAsync` already does a **Version-guarded `ReplaceOneAsync`** that throws on `ModifiedCount == 0`: the precedent for saga OCC. `OrdersFixture` (Testcontainers, per-test DB name via `CreateDatabaseName()`, Solo) drives flows with `host.TrackActivity().Timeout(...).InvokeMessageAndWaitAsync(...)` and asserts with FluentAssertions.
 
 ---
 
-## Lead Open Design Decision (resolve in S4 — affects scope & critical path)
+## Lead Open Design Decision (resolve in S4, affects scope & critical path)
 
 **How rich should id-type and concurrency support be?** Two coherent options:
 
-- **Option A — Cosmos/Raven parity (minimal, lowest-risk).** `DetermineSagaIdType → typeof(string)`; string-id sagas only; upsert/last-write-wins; ignore `Saga.Version`. Passes `StringIdentifiedSagaComplianceSpecs`. Smallest diff, identical to the two closest providers, trivially upstreamable.
-- **Option B — Native id + optimistic concurrency (recommended).** `DetermineSagaIdType` returns the saga's **actual** identity-member type; support Guid/string (and int/long) `_id` natively (MongoDB handles all idiomatically — the demo already stores Guid `_id`); use `Saga.Version` for a guarded update that throws `SagaConcurrencyException` on conflict. Passes **both** `String`- and `Guid`-identified compliance specs **plus** custom concurrency tests. A strictly better contribution that directly satisfies the user's explicit "optimistic concurrency" + "identity handling" requirements.
+- **Option A: Cosmos/Raven parity (minimal, lowest-risk).** `DetermineSagaIdType → typeof(string)`; string-id sagas only; upsert/last-write-wins; ignore `Saga.Version`. Passes `StringIdentifiedSagaComplianceSpecs`. Smallest diff, identical to the two closest providers, trivially upstreamable.
+- **Option B: Native id + optimistic concurrency (recommended).** `DetermineSagaIdType` returns the saga's **actual** identity-member type; support Guid/string (and int/long) `_id` natively (MongoDB handles all idiomatically, the demo already stores Guid `_id`); use `Saga.Version` for a guarded update that throws `SagaConcurrencyException` on conflict. Passes **both** `String`- and `Guid`-identified compliance specs **plus** custom concurrency tests. A strictly better contribution that directly satisfies the user's explicit "optimistic concurrency" + "identity handling" requirements.
 
 **Recommendation: Option B, decomposed so Option A is a self-contained earlier milestone.** S6 lands the string-id baseline (Cosmos parity, fast green compliance, fallback floor). S7 generalizes to native id types. S8 layers `Version` optimistic concurrency. If S7 or S8 hit an upstream-acceptability or codegen wall, they can be dropped without invalidating S6's contribution. **The plan is written for Option B; S4 formally records the choice (and an implementing team may downscope to A there).**
 
@@ -77,7 +77,7 @@ These were read directly from the pinned `external/wolverine` submodule (V6.2.2)
 
 ## Git & PR Workflow (one branch + one PR per task)
 
-Identical mechanics to the multinode plan — see `2026-06-09-multinode-support.md` → "Git & PR Workflow" for the full rationale. Summary:
+Identical mechanics to the multinode plan, see `2026-06-09-multinode-support.md` → "Git & PR Workflow" for the full rationale. Summary:
 
 - **One git worktree per task** (safe for parallel agents); `.worktrees/` is gitignored. If you were dispatched with worktree isolation already, confirm with `git branch --show-current` and skip straight to the task steps.
 
@@ -111,21 +111,21 @@ rtk git worktree remove .worktrees/<branch-name>
 
 | Task | Branch | PR title | Depends on | Blocking status | Model |
 |---|---|---|---|---|---|
-| **S1** | `docs/saga-repo-analysis` | docs: saga — repository & convention analysis | Prereqs merged | ✅ Done | Sonnet |
-| **S2** | `docs/saga-wolverine-api` | docs: saga — Wolverine saga API discovery | Prereqs merged | ✅ Done | Sonnet |
-| **S3** | `docs/saga-cosmos-raven-compare` | docs: saga — Cosmos/RavenDb implementation comparison | Prereqs merged | ✅ Done (PR #87 merged) | Sonnet |
-| **S4** | `docs/saga-document-model-design` | docs: saga — MongoDB document model + identity + concurrency design | **S1, S2, S3** | ✅ Done | **Opus / Fable 5** |
-| **S5** | `docs/saga-demo-and-test-inventory` | docs: saga — demo flow design + test inventory | Prereqs merged | ✅ **Done** — merged #89 | Sonnet |
+| **S1** | `docs/saga-repo-analysis` | docs: saga, repository & convention analysis | Prereqs merged | ✅ Done | Sonnet |
+| **S2** | `docs/saga-wolverine-api` | docs: saga, Wolverine saga API discovery | Prereqs merged | ✅ Done | Sonnet |
+| **S3** | `docs/saga-cosmos-raven-compare` | docs: saga, Cosmos/RavenDb implementation comparison | Prereqs merged | ✅ Done (PR #87 merged) | Sonnet |
+| **S4** | `docs/saga-document-model-design` | docs: saga, MongoDB document model + identity + concurrency design | **S1, S2, S3** | ✅ Done | **Opus / Fable 5** |
+| **S5** | `docs/saga-demo-and-test-inventory` | docs: saga, demo flow design + test inventory | Prereqs merged | ✅ **Done** (merged #89) | Sonnet |
 | **S6** | `feat/saga-codegen-string` | feat: MongoDB saga persistence (string-id baseline) | **S4** | ✅ Done | **Fable 5 / Opus** |
 | **S7** | `feat/saga-native-id-types` | feat: native Guid/int/long saga id support | **S6** | ✅ Done | **Fable 5 / Opus** |
 | **S8** | `feat/saga-optimistic-concurrency` | feat: saga optimistic concurrency via Saga.Version | **S6, S7** | ✅ Done | **Fable 5 / Opus** |
-| **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | ✅ Done (no-op — S6 shipped host + string spec; S7 added all LoadState overloads; verified 10/10 string facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
-| **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | ✅ Done (no-op — S7 shipped all three compliance subclasses + all four `LoadState` overloads on `MongoDbSagaHost`; verified 27/27 Guid+int+long facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
-| **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | ✅ Done (new `saga_atomicity.cs`: 5 tests on a purpose-built in-test saga — atomicity success+failure, completion delete, OCC no-clobber, same-envelope idempotency; each verified red-for-the-right-reason before green; 150/150 non-multinode + 2/2 multinode on net9.0 + net10.0) | **Fable 5 / Opus** |
+| **S9** | `test/saga-string-compliance` | test: string-identified saga storage compliance | **S6** (host skeleton needs only S2/S3) | ✅ Done (no-op: S6 shipped host + string spec; S7 added all LoadState overloads; verified 10/10 string facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
+| **S10** | `test/saga-guid-compliance` | test: Guid/int/long-identified saga storage compliance | **S7, S9** | ✅ Done (no-op: S7 shipped all three compliance subclasses + all four `LoadState` overloads on `MongoDbSagaHost`; verified 27/27 Guid+int+long facts + 145/145 full suite on net9.0 + net10.0) | Sonnet |
+| **S11** | `test/saga-atomicity-concurrency` | test: saga atomicity, OCC, completion & idempotency | **S6, S8** (skeleton earlier) | ✅ Done (new `saga_atomicity.cs`: 5 tests on a purpose-built in-test saga: atomicity success+failure, completion delete, OCC no-clobber, same-envelope idempotency; each verified red-for-the-right-reason before green; 150/150 non-multinode + 2/2 multinode on net9.0 + net10.0) | **Fable 5 / Opus** |
 | **S12** | `demo/saga-order-fulfillment` | demo: OrderFulfillmentSaga contracts, saga & handlers | **S6, S7 merged** (contracts/skeleton need only S5) | ✅ Done | Sonnet |
-| **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | ✅ Done (7 flows green; surfaced + fixed two real defects — see notes) | Sonnet |
+| **S13** | `demo/saga-safety-net-tests` | demo: saga safety-net integration tests (Solo) | **S12** | ✅ Done (7 flows green; surfaced + fixed two real defects, see notes) | Sonnet |
 | **S14** | `test/saga-multinode` | test: cross-node exactly-once saga progression (Balanced) | **S12, S13** (+ multinode infra, merged) | ✅ Done | **Opus 4.8** |
-| **S15** | *(no branch — runs on a verification branch)* | test: full cross-feature regression (inbox+outbox+solo+multinode+saga) | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
+| **S15** | *(no branch, runs on a verification branch)* | test: full cross-feature regression (inbox+outbox+solo+multinode+saga) | **S6–S14 merged** | Blocked by: S6–S14 | Sonnet |
 | **S16** | `docs/saga-sweep` | docs: saga support documentation + upstream-contribution notes | **S6–S14 merged** | ✅ Done (PR #103) | Sonnet |
 | **S17** | *(no branch/PR)* | final verification on `main` (+ optional release) | **S15, S16 merged** | Blocked by: S15, S16 | Sonnet |
 
@@ -135,13 +135,13 @@ rtk git worktree remove .worktrees/<branch-name>
 
 The risk here is **code-generation correctness and frame ordering**, not transcription (Agent `model`: `sonnet`, `opus`, `fable`):
 
-- **Fable 5 / Opus mandatory** for **S6, S7, S8**: emitting `Frame`s and getting the generated load→handle→store→commit ordering right (so saga state and the outbox commit atomically, and the completed saga is deleted) is iterative work that requires reading the generated handler source (`codeFor<T>()` / `GeneratedCodeOutputPath`). A subtly wrong frame still compiles and can pass *some* compliance facts while corrupting atomicity. **S4** (the design gate) is also Opus/Fable — the id/concurrency decision shapes every downstream task.
-- **Opus 4.8** for **S14**: cross-node saga exactly-once is the same class of flaky-timing diagnosis as multinode Task 7 — reason about *why* before turning a knob; no skips, no retries, no assertion-weakening.
+- **Fable 5 / Opus mandatory** for **S6, S7, S8**: emitting `Frame`s and getting the generated load→handle→store→commit ordering right (so saga state and the outbox commit atomically, and the completed saga is deleted) is iterative work that requires reading the generated handler source (`codeFor<T>()` / `GeneratedCodeOutputPath`). A subtly wrong frame still compiles and can pass *some* compliance facts while corrupting atomicity. **S4** (the design gate) is also Opus/Fable: the id/concurrency decision shapes every downstream task.
+- **Opus 4.8** for **S14**: cross-node saga exactly-once is the same class of flaky-timing diagnosis as multinode Task 7: reason about *why* before turning a knob; no skips, no retries, no assertion-weakening.
 - **Fable 5 / Opus** for **S11**: atomicity/rollback and concurrency-conflict tests simulate races; a wrong test passes most runs.
 - **Sonnet** for S1, S2, S3, S5 (research/writing), S9, S10, S12, S13, S15, S16 (fully specified against a green oracle), S17 (verification).
 - **Do not use Haiku** anywhere in this plan.
-- **Escalation rule:** two non-obvious verification failures, or a broken plan assumption (an API that differs from the Verified Facts above), means **stop and report** — re-dispatch on Fable 5 with the failure context rather than improvising a different Wolverine API. For S6/S7/S8/S14 specifically, if green cannot be reached after the listed levers, write up the generated code + failing facts and stop.
-- **Code review between tasks:** Fable 5/Opus, with extra scrutiny on S6/S7/S8 — atomicity bugs that pass a green suite are exactly what review must catch.
+- **Escalation rule:** two non-obvious verification failures, or a broken plan assumption (an API that differs from the Verified Facts above), means **stop and report**: re-dispatch on Fable 5 with the failure context rather than improvising a different Wolverine API. For S6/S7/S8/S14 specifically, if green cannot be reached after the listed levers, write up the generated code + failing facts and stop.
+- **Code review between tasks:** Fable 5/Opus, with extra scrutiny on S6/S7/S8: atomicity bugs that pass a green suite are exactly what review must catch.
 
 ---
 
@@ -150,26 +150,26 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 | File | Change |
 |---|---|
 | `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs` | Flip `CanApply`/`CanPersist`/`DetermineSagaIdType`; implement Load/Insert/Update/Store/Delete/Commit saga frames; saga-aware `ApplyTransactionSupport` (S6, S7, S8) |
-| `src/Wolverine.MongoDB/Internals/SagaFrames.cs` | **New** — `LoadSagaFrame`, `StoreSagaFrame` (insert/upsert/OCC), `DeleteSagaFrame` (S6, S8) |
+| `src/Wolverine.MongoDB/Internals/SagaFrames.cs` | **New:** `LoadSagaFrame`, `StoreSagaFrame` (insert/upsert/OCC), `DeleteSagaFrame` (S6, S8) |
 | `src/Wolverine.MongoDB/Internals/MongoConstants.cs` | Saga collection-naming helper / convention (S6) |
-| `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Admin.cs` | **Required** — `ClearAllAsync`/`RebuildAsync` only clear the known Wolverine system collections today (`:67-78`); they MUST also drop the per-saga-type collections (e.g. every `wolverine_saga_*` collection) or compliance facts leak between tests on the shared fixture DB (S6) |
+| `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Admin.cs` | **Required:** `ClearAllAsync`/`RebuildAsync` only clear the known Wolverine system collections today (`:67-78`); they MUST also drop the per-saga-type collections (e.g. every `wolverine_saga_*` collection) or compliance facts leak between tests on the shared fixture DB (S6) |
 | `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs` | (Optional) register `ISagaStoreDiagnostics` for parity with RavenDb (S6/S16) |
-| `src/Wolverine.MongoDB.Tests/MongoDbSagaHost.cs` | **New** — `ISagaHost` implementation (S9) |
-| `src/Wolverine.MongoDB.Tests/string_saga_storage_compliance.cs` | **New** — `: StringIdentifiedSagaComplianceSpecs<MongoDbSagaHost>` (S9) |
-| `src/Wolverine.MongoDB.Tests/guid_saga_storage_compliance.cs` | **New** — Guid (+ int/long) compliance (S10) |
-| `src/Wolverine.MongoDB.Tests/saga_atomicity.cs` | **New** — saga+outbox atomicity, completion delete, OCC conflict, duplicate-message idempotency (S11) |
-| `src/Wolverine.MongoDB.Tests/saga_multinode.cs` | **New** — `[Category=multinode]` cross-node exactly-once saga progression (S14) |
-| `demo/src/OrderDemo.Contracts/...` | **New** — saga trigger/continue/complete messages (S12) |
-| `demo/src/OrderDemo.Application/Sagas/OrderFulfillmentSaga.cs` | **New** — the demo saga (S12) |
+| `src/Wolverine.MongoDB.Tests/MongoDbSagaHost.cs` | **New:** `ISagaHost` implementation (S9) |
+| `src/Wolverine.MongoDB.Tests/string_saga_storage_compliance.cs` | **New:** `: StringIdentifiedSagaComplianceSpecs<MongoDbSagaHost>` (S9) |
+| `src/Wolverine.MongoDB.Tests/guid_saga_storage_compliance.cs` | **New:** Guid (+ int/long) compliance (S10) |
+| `src/Wolverine.MongoDB.Tests/saga_atomicity.cs` | **New:** saga+outbox atomicity, completion delete, OCC conflict, duplicate-message idempotency (S11) |
+| `src/Wolverine.MongoDB.Tests/saga_multinode.cs` | **New:** `[Category=multinode]` cross-node exactly-once saga progression (S14) |
+| `demo/src/OrderDemo.Contracts/...` | **New:** saga trigger/continue/complete messages (S12) |
+| `demo/src/OrderDemo.Application/Sagas/OrderFulfillmentSaga.cs` | **New:** the demo saga (S12) |
 | `demo/src/OrderDemo.Api/Program.cs` | Discovery + routing for saga messages (S12) |
-| `demo/tests/OrderDemo.IntegrationTests/SagaFlowTests.cs` | **New** — all saga flows as safety-net tests (S13) |
+| `demo/tests/OrderDemo.IntegrationTests/SagaFlowTests.cs` | **New:** all saga flows as safety-net tests (S13) |
 | `docs/superpowers/plans/2026-06-18-saga-*.md` | This plan, the prompts, and the S1–S5 discovery/design notes |
 | `README.md`, `CLAUDE.md`, `FOLLOWUPS.md`, `CHANGELOG.md`, `demo/README.md`, `demo/CLAUDE.md` | Documentation (S16) |
-| `.github/workflows/ci.yml` | Verify saga compliance runs in `library` job and demo saga tests in `demo` job (likely **no change** — confirm in S15) |
+| `.github/workflows/ci.yml` | Verify saga compliance runs in `library` job and demo saga tests in `demo` job (likely **no change**, confirm in S15) |
 
 ---
 
-## Phase 0 — Discovery & Design (parallelizable)
+## Phase 0: Discovery & Design (parallelizable)
 
 ### Task S1: Repository & convention analysis
 
@@ -189,7 +189,7 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 
 - **Goal:** Pin the exact Wolverine core saga contracts the implementation must satisfy, from the pinned submodule.
 - **Scope:** Read-only study of `external/wolverine`: `Saga.cs`, `IPersistenceFrameProvider.cs`, `SagaChain` + saga identity resolution (`SagaIdentityAttribute`, `[SagaIdentity]`, `{Saga}Id`/`Id`/`SagaId` precedence, `ValidSagaIdTypes`), the exception types (`UnknownSagaException`, `IndeterminateSagaStateIdException`, `SagaConcurrencyException`), and how `CommitUnitOfWorkFrame`/`DetermineStoreFrame` participate in the generated chain.
-- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-wolverine-api.md` — signatures + file paths for every saga member; the identity-resolution precedence; the supported id types; which exception each failure mode expects.
+- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-wolverine-api.md`: signatures + file paths for every saga member; the identity-resolution precedence; the supported id types; which exception each failure mode expects.
 - **Files/areas likely to change:** docs only.
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
@@ -202,7 +202,7 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 
 - **Goal:** Extract the concrete document-store template (and the deltas a MongoDB provider should make).
 - **Scope:** Read-only study of `Wolverine.CosmosDb` and `Wolverine.RavenDb` saga code: their `IPersistenceFrameProvider` saga methods, the load/upsert/delete frames, `ApplyTransactionSupport`'s `chain is SagaChain` handling, registration, and their `*SagaHost`/`saga_storage_compliance` subclasses. Note where each ignores `Saga.Version` and that neither maps `SagaConcurrencyException`.
-- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-cosmos-raven-compare.md` — a side-by-side table and an explicit "MongoDB should mirror Cosmos for structure, add native-id + Version OCC like the demo's `OrderRepository`" recommendation, with the exact frame snippets to adapt.
+- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-cosmos-raven-compare.md`: a side-by-side table and an explicit "MongoDB should mirror Cosmos for structure, add native-id + Version OCC like the demo's `OrderRepository`" recommendation, with the exact frame snippets to adapt.
 - **Files/areas likely to change:** docs only.
 - **Dependencies:** none.
 - **Blocking status:** **Can start immediately.**
@@ -216,13 +216,13 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 - **Goal:** Make and record the binding design decisions every implementation task depends on: document shape, collection strategy, `_id` mapping, supported id types, and the concurrency model. Resolve the **Lead Open Design Decision** (Option A vs B).
 - **Scope:** Design-only synthesis of S1–S3. Decide and justify:
   1. **Document shape:** store the saga POCO **directly** (no envelope wrapper), matching Cosmos/Raven; the member named `Id` maps to `_id` via the driver's default convention (verify against the demo's Guid `_id`).
-  2. **Collection strategy:** **one collection per saga type** (recommended — idiomatic Mongo, no cross-type `_id` collision; Cosmos crams all into one container only because it has one). Define the naming helper (e.g. sanitized saga type name, or `wolverine_saga_{name}`). 🔎 review: cleanup is **mandatory, not optional** — `AppFixture` uses a fixed DB and `ClearAll()`→`RebuildAsync()`→`ClearAllAsync()` only clears the known system collections (`MongoDbMessageStore.Admin.cs:67-78`), so per-saga collections would leak between compliance facts. Decide the mechanism now: either drop all `wolverine_saga_*`-prefixed collections in `ClearAllAsync`, **or** use a per-test database for saga compliance.
-  3. **Id types:** Option B — `DetermineSagaIdType` returns the saga's native identity-member type; support Guid + string (+ int/long). Document the Option A fallback (string-only) explicitly.
-  4. **Concurrency:** use `Saga.Version` — guarded `ReplaceOneAsync` on `(_id, Version)`, increment on write, throw `SagaConcurrencyException` on `ModifiedCount == 0` (mirror `OrderRepository.UpdateAsync`). Insert sets the initial version.
-  5. **Frame ordering / atomicity:** saga reads/writes run on the **`TransactionalFrame` session**; saga writes must be emitted **before** the commit so saga state + outbox commit atomically. Prescribe the Cosmos-style rule: in `ApplyTransactionSupport`, add the commit postprocessor **only** `if (chain is not SagaChain)`, and let `CommitUnitOfWorkFrame` emit commit+flush for saga chains — to be confirmed against generated code in S6.
+  2. **Collection strategy:** **one collection per saga type** (recommended: idiomatic Mongo, no cross-type `_id` collision; Cosmos crams all into one container only because it has one). Define the naming helper (e.g. sanitized saga type name, or `wolverine_saga_{name}`). 🔎 review: cleanup is **mandatory, not optional**: `AppFixture` uses a fixed DB and `ClearAll()`→`RebuildAsync()`→`ClearAllAsync()` only clears the known system collections (`MongoDbMessageStore.Admin.cs:67-78`), so per-saga collections would leak between compliance facts. Decide the mechanism now: either drop all `wolverine_saga_*`-prefixed collections in `ClearAllAsync`, **or** use a per-test database for saga compliance.
+  3. **Id types:** Option B: `DetermineSagaIdType` returns the saga's native identity-member type; support Guid + string (+ int/long). Document the Option A fallback (string-only) explicitly.
+  4. **Concurrency:** use `Saga.Version`: guarded `ReplaceOneAsync` on `(_id, Version)`, increment on write, throw `SagaConcurrencyException` on `ModifiedCount == 0` (mirror `OrderRepository.UpdateAsync`). Insert sets the initial version.
+  5. **Frame ordering / atomicity:** saga reads/writes run on the **`TransactionalFrame` session**; saga writes must be emitted **before** the commit so saga state + outbox commit atomically. Prescribe the Cosmos-style rule: in `ApplyTransactionSupport`, add the commit postprocessor **only** `if (chain is not SagaChain)`, and let `CommitUnitOfWorkFrame` emit commit+flush for saga chains, to be confirmed against generated code in S6.
   6. **No global serializer mutation** (consistent with the per-property BSON-date decision): rely on default `_id` conventions; add `[BsonId]`/`[BsonRepresentation]` only if a compliance fact proves it necessary, and only on test/demo saga types (never the host registry).
   7. **Upstream-readiness:** note the target namespace/folder if contributed (`Wolverine.MongoDb`), and that native-id + OCC are deliberate improvements over Cosmos/Raven to call out in the PR.
-- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-document-model-design.md` — the decisions above with rationale, the chosen Option (A or B) stated unambiguously, and the exact frame/collection contracts S6–S8 will implement.
+- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-document-model-design.md`: the decisions above with rationale, the chosen Option (A or B) stated unambiguously, and the exact frame/collection contracts S6–S8 will implement.
 - **Files/areas likely to change:** docs only.
 - **Dependencies:** **S1, S2, S3.**
 - **Blocking status:** **Blocked by: S1, S2, S3.**
@@ -243,7 +243,7 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
   - **Inbox/outbox interaction:** saga handlers cascade events through the durable outbox; the projector/inbox stays consistent.
   - **Single vs multi-node:** Solo for the safety-net suite; a Balanced two-instance scenario validates exactly-once saga progression (S14).
   - Also specify a **scheduled timeout** option (e.g. `FulfillmentTimedOut`) to exercise saga + scheduled-message + multi-node together (optional/stretch).
-- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-demo-and-test-inventory.md` — the saga state shape, the message contracts, the handler signatures, and a table mapping each flow → library test and/or demo test (file + assertion). Confirms the library compliance subclasses to add (String + Guid) and the custom test list.
+- **Expected output:** `docs/superpowers/plans/2026-06-18-saga-demo-and-test-inventory.md`: the saga state shape, the message contracts, the handler signatures, and a table mapping each flow → library test and/or demo test (file + assertion). Confirms the library compliance subclasses to add (String + Guid) and the custom test list.
 - **Files/areas likely to change:** docs only.
 - **Dependencies:** none to start; **refine after S4** (id type + collection decisions feed the saga state shape).
 - **Blocking status:** **Can start immediately** (finalize the saga state/id shape once S4 lands).
@@ -253,14 +253,14 @@ The risk here is **code-generation correctness and frame ordering**, not transcr
 
 ---
 
-## Phase 1 — Persistence Implementation
+## Phase 1: Persistence Implementation
 
-### Task S6: MongoDB saga persistence — string-id baseline (Cosmos parity)
+### Task S6: MongoDB saga persistence (string-id baseline, Cosmos parity)
 
 - **Goal:** Turn the throwing saga stubs into working frames so string-identified sagas load/insert/update/complete through MongoDB inside the existing transaction. Pass `StringIdentifiedSagaComplianceSpecs`.
-- **Scope:** `MongoDbPersistenceFrameProvider` saga members + a new `SagaFrames.cs`. **Preserve all inbox/outbox/transaction behavior** — the only `ApplyTransactionSupport` change is the saga-chain branch. No id-type generalization yet (string only), no OCC yet.
+- **Scope:** `MongoDbPersistenceFrameProvider` saga members + a new `SagaFrames.cs`. **Preserve all inbox/outbox/transaction behavior**: the only `ApplyTransactionSupport` change is the saga-chain branch. No id-type generalization yet (string only), no OCC yet.
 - **Expected output:** Saga chains generate code that, inside the `TransactionalFrame` session: loads the saga (null if absent), runs the handler, upserts on insert/update / deletes on completion, then commits+flushes. `string_saga_storage_compliance` (delivered in S9) is green. Full library suite green.
-- **Files/areas likely to change:** `MongoDbPersistenceFrameProvider.cs`, new `Internals/SagaFrames.cs`, `MongoConstants.cs` (collection-name helper), **and `MongoDbMessageStore.Admin.cs` (REQUIRED — `ClearAllAsync`/`RebuildAsync` must drop the per-saga-type collections, see S4 #2)**.
+- **Files/areas likely to change:** `MongoDbPersistenceFrameProvider.cs`, new `Internals/SagaFrames.cs`, `MongoConstants.cs` (collection-name helper), **and `MongoDbMessageStore.Admin.cs` (REQUIRED: `ClearAllAsync`/`RebuildAsync` must drop the per-saga-type collections, see S4 #2)**.
 - **Dependencies:** **S4.**
 - **Blocking status:** **Blocked by: S4.**
 
@@ -326,7 +326,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - [x] **Step 3:** Stand up the `MongoDbSagaHost` + `string_saga_storage_compliance` from S9 **in this branch** as the oracle (or land S9's host file here and the spec in S9) and make them green.
 - [x] **Step 4:** Run the full suite. Commit (`feat: MongoDB saga persistence (string-id baseline)`).
 
-> **Coordination note:** S6 and S9 are tightly coupled (impl needs the oracle). Recommended: author `MongoDbSagaHost.cs` + `string_saga_storage_compliance.cs` **in the S6 branch** so S6 ships green, and let S9 be a thin "host hardening + int/long stubs" follow-up — OR run them as one combined session. The table keeps them separate for the dependency graph; collapse if a single agent owns both.
+> **Coordination note:** S6 and S9 are tightly coupled (impl needs the oracle). Recommended: author `MongoDbSagaHost.cs` + `string_saga_storage_compliance.cs` **in the S6 branch** so S6 ships green, and let S9 be a thin "host hardening + int/long stubs" follow-up, or run them as one combined session. The table keeps them separate for the dependency graph; collapse if a single agent owns both.
 
 ### Task S7: Native Guid/int/long saga id support
 
@@ -337,19 +337,19 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S6.**
 - **Blocking status:** **Blocked by: S6.**
 
-- [x] **Step 1:** Implement `DetermineSagaIdType` exactly like Wolverine's own lightweight provider: `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType()` (`external/wolverine/.../LightweightSagaPersistenceFrameProvider.cs:80-82`) — do **not** hand-roll reflection. 🔎 review: scope-check — core only calls `DetermineSagaIdType` for the **envelope-header-only** identity path (`SagaChain.cs:290-292`); when the message *has* a saga-id member, `PullSagaIdFromMessageFrame` uses that member's type directly. So the load/delete frames must key `_id` off whatever typed `sagaId` variable they're handed (Guid/int/long/string), and `DetermineSagaIdType` mainly governs the header-only case. Confirm against S2 notes.
+- [x] **Step 1:** Implement `DetermineSagaIdType` exactly like Wolverine's own lightweight provider: `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType()` (`external/wolverine/.../LightweightSagaPersistenceFrameProvider.cs:80-82`). Do **not** hand-roll reflection. 🔎 review: scope-check: core only calls `DetermineSagaIdType` for the **envelope-header-only** identity path (`SagaChain.cs:290-292`); when the message *has* a saga-id member, `PullSagaIdFromMessageFrame` uses that member's type directly. So the load/delete frames must key `_id` off whatever typed `sagaId` variable they're handed (Guid/int/long/string), and `DetermineSagaIdType` mainly governs the header-only case. Confirm against S2 notes.
 - [x] **Step 2:** Ensure frames build `_id` filters from the typed variable; verify Guid `_id` round-trips (add a focused assertion). _(The S6 frames already keyed `_id` off the typed variable; added `guid_saga_id_roundtrip` proving the `_id` round-trips as a native BSON Guid, not a string.)_
-- [x] **Step 3:** Make S10's Guid (+ int/long) compliance green; re-run string compliance + full suite. Commit (`feat: native Guid/int/long saga id support`). _(Landed the Guid/int/long compliance subclasses + typed `LoadState` overloads — S10's mechanical deliverable — here as S7's oracle. 145 tests green on net9.0 + net10.0.)_
+- [x] **Step 3:** Make S10's Guid (+ int/long) compliance green; re-run string compliance + full suite. Commit (`feat: native Guid/int/long saga id support`). _(Landed the Guid/int/long compliance subclasses + typed `LoadState` overloads (S10's mechanical deliverable) here as S7's oracle. 145 tests green on net9.0 + net10.0.)_
 
-> **Implementation notes (S7):** the only production change was `DetermineSagaIdType` (the S6 `LoadSagaFrame`/`StoreSagaFrame`/`DeleteSagaFrame` already resolved `_id`'s type from the typed variable). Two test-harness changes were needed for the multi-id-type oracle: (1) the compliance host's codegen switched from `TypeLoadMode.Auto` + a shared `GeneratedCodeOutputPath` to `TypeLoadMode.Dynamic` — under Auto, the message-keyed generated handler type name (e.g. `CompleteOneHandler<hash>`) is shared across the String/Guid/int/long workflows and the first-compiled handler gets reused in-memory for every later host, so non-string specs loaded a `StringBasicWorkflow` saga (this mirrors Wolverine's own `SqlServerSagaHost`, which uses Dynamic); (2) a `[ModuleInitializer]` registers the process-wide Standard Guid representation in the **test** process — the upstream `GuidBasicWorkflow.Id` is an un-annotated raw `Guid` that cannot serialize under driver-3.x's `Unspecified` default, and `Standard` matches every `[BsonGuidRepresentation]` the library already uses (the demo's `InfrastructureBootstrap` sets the same). The library's BSON registry is untouched.
+> **Implementation notes (S7):** the only production change was `DetermineSagaIdType` (the S6 `LoadSagaFrame`/`StoreSagaFrame`/`DeleteSagaFrame` already resolved `_id`'s type from the typed variable). Two test-harness changes were needed for the multi-id-type oracle: (1) the compliance host's codegen switched from `TypeLoadMode.Auto` + a shared `GeneratedCodeOutputPath` to `TypeLoadMode.Dynamic`: under Auto, the message-keyed generated handler type name (e.g. `CompleteOneHandler<hash>`) is shared across the String/Guid/int/long workflows and the first-compiled handler gets reused in-memory for every later host, so non-string specs loaded a `StringBasicWorkflow` saga (this mirrors Wolverine's own `SqlServerSagaHost`, which uses Dynamic); (2) a `[ModuleInitializer]` registers the process-wide Standard Guid representation in the **test** process: the upstream `GuidBasicWorkflow.Id` is an un-annotated raw `Guid` that cannot serialize under driver-3.x's `Unspecified` default, and `Standard` matches every `[BsonGuidRepresentation]` the library already uses (the demo's `InfrastructureBootstrap` sets the same). The library's BSON registry is untouched.
 
 ### Task S8: Saga optimistic concurrency via `Saga.Version`
 
 - **Goal:** Detect concurrent saga updates and surface `SagaConcurrencyException`, going beyond Cosmos/Raven (which last-write-wins).
-- **Scope:** Make `StoreSagaFrame`'s **update** path version-guarded with **precise old/new-version semantics** (🔎 review — "filter on `(_id, Version)` and increment" is ambiguous and a naive reading fails every update). The exact contract: capture `oldVersion = saga.Version`; set `saga.Version = oldVersion + 1`; `ReplaceOneAsync` with filter `(_id == sagaId && Version == oldVersion)` and `IsUpsert = false`; throw `SagaConcurrencyException` when `ModifiedCount == 0`. **Insert** is unguarded and sets the initial `Version` (e.g. `1`). This forces insert and update frames to **diverge** (the S6 baseline used upsert for both — revisit that here). **Delete (completion):** decide and document whether the delete is version-guarded — recommended **not** guarded, matching Wolverine's lightweight SQL provider (`DatabaseSagaSchema.cs:113-119`); state the choice explicitly.
+- **Scope:** Make `StoreSagaFrame`'s **update** path version-guarded with **precise old/new-version semantics** (🔎 review: "filter on `(_id, Version)` and increment" is ambiguous and a naive reading fails every update). The exact contract: capture `oldVersion = saga.Version`; set `saga.Version = oldVersion + 1`; `ReplaceOneAsync` with filter `(_id == sagaId && Version == oldVersion)` and `IsUpsert = false`; throw `SagaConcurrencyException` when `ModifiedCount == 0`. **Insert** is unguarded and sets the initial `Version` (e.g. `1`). This forces insert and update frames to **diverge** (the S6 baseline used upsert for both, revisit that here). **Delete (completion):** decide and document whether the delete is version-guarded: recommended **not** guarded, matching Wolverine's lightweight SQL provider (`DatabaseSagaSchema.cs:113-119`); state the choice explicitly.
 - **Expected output:** A custom concurrency test (in S11) proves a stale-version update throws `SagaConcurrencyException`; all compliance specs still green (they don't exercise concurrency, so must not regress).
 - **Files/areas likely to change:** `SagaFrames.cs`, `MongoDbPersistenceFrameProvider.cs` (insert vs update frame distinction).
-- **Dependencies:** **S6, S7.** 🔎 review: S8 and S7 both edit `MongoDbPersistenceFrameProvider.cs` **and** `SagaFrames.cs`, and the version guard must work for every id type — so S8 depends on S7 (not just S6). If you must run S8 before S7, scope OCC to string ids and add an explicit follow-up merge task.
+- **Dependencies:** **S6, S7.** 🔎 review: S8 and S7 both edit `MongoDbPersistenceFrameProvider.cs` **and** `SagaFrames.cs`, and the version guard must work for every id type, so S8 depends on S7 (not just S6). If you must run S8 before S7, scope OCC to string ids and add an explicit follow-up merge task.
 - **Blocking status:** ✅ **Done.**
 
 - [x] **Step 1:** Split insert (unguarded; set initial `Version`) from update (capture `oldVersion`, set `Version = oldVersion + 1`, guarded `ReplaceOneAsync` filter `(_id, oldVersion)`, throw `SagaConcurrencyException` on `ModifiedCount == 0`). Decide+document the completion-delete guard (recommended: unguarded).
@@ -369,14 +369,14 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 >   when `ModifiedCount == 0`. The new version is written into the POCO **before** the replace because
 >   Mongo stores the saga document directly (unlike the RDBMS providers, which keep `version` in a
 >   separate column and bump it in SQL). `ModifiedCount` (not `MatchedCount`) is correct precisely
->   because the version bump always changes the document — there is no matched-but-unchanged case.
-> - **Completion delete:** left **UNGUARDED** by version (matches `DatabaseSagaSchema.DeleteAsync`) —
+>   because the version bump always changes the document: there is no matched-but-unchanged case.
+> - **Completion delete:** left **UNGUARDED** by version (matches `DatabaseSagaSchema.DeleteAsync`),
 >   completion is terminal, so a version throw there would only obstruct cleanup.
 >
 > **Atomicity verified in generated code** (`codeFor` dump of the `GuidBasicWorkflow` chains): the
 > guarded update runs inside the `TransactionalFrame` try-block, *before* the single
 > `IsInTransaction`-guarded commit. A `SagaConcurrencyException` skips the commit, hits
-> `catch (Exception) → RollbackAsync() → throw`, and the `using` session disposes — so the saga write
+> `catch (Exception) → RollbackAsync() → throw`, and the `using` session disposes, so the saga write
 > and the outbox roll back together. The exception then propagates to Wolverine's error handling (the
 > `SagaConcurrencyException` retry policy under multinode contention is R11 / S14's concern).
 >
@@ -384,7 +384,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 > Delete, never Store) and is routed to the guarded update for consistency.
 >
 > **Oracle (`saga_optimistic_concurrency.cs`):** the compliance specs do not exercise concurrency, so
-> the OCC contract is proven here — (1) version is stamped to 1 on insert and increments to 2 through
+> the OCC contract is proven here: (1) version is stamped to 1 on insert and increments to 2 through
 > the *real generated update frame* on a normal update (no spurious throw); (2) a stale-version update
 > throws `SagaConcurrencyException` and does not clobber the winning write. Deterministic (no timing
 > race); full cross-node contention coverage is S14. **145 non-multinode + 2 multinode tests green on
@@ -392,19 +392,19 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 
 ---
 
-## Phase 2 — Library Tests
+## Phase 2: Library Tests
 
 ### Task S9: `MongoDbSagaHost` + string-identified compliance
 
-- **Goal:** Provide the reusable `ISagaHost` and the string compliance subclass — the primary acceptance oracle.
+- **Goal:** Provide the reusable `ISagaHost` and the string compliance subclass: the primary acceptance oracle.
 - **Scope:** New `MongoDbSagaHost.cs` (mirror `CosmosDbSagaHost`: Solo, `GeneratedCodeOutputPath`, `TypeLoadMode.Auto`, `Discovery.IncludeType<StringBasicWorkflow>()` + assembly, register `_fixture.Client`, `UseMongoDbPersistence(AppFixture.DatabaseName)`; `LoadState<T>(string)` reads the saga directly from Mongo; other overloads throw `NotSupportedException` until S10). New `string_saga_storage_compliance : StringIdentifiedSagaComplianceSpecs<MongoDbSagaHost>`, `[Collection("mongodb")]`.
 - **Expected output:** All `StringIdentified…` facts green.
 - **Files/areas likely to change:** `src/Wolverine.MongoDB.Tests/MongoDbSagaHost.cs`, `string_saga_storage_compliance.cs`.
 - **Dependencies:** host skeleton needs only S2/S3 facts; **green requires S6**.
 - **Blocking status:** **Partially blocked by: S6** (skeleton authorable earlier; see the S6 coordination note).
 
-- [x] **Step 1:** Write `MongoDbSagaHost` (clear the fixture DB before build; `LoadState` via `Client.GetDatabase(DatabaseName).GetCollection<T>(coll).Find(Eq("_id", id)).FirstOrDefaultAsync()`). _(Shipped in S6 PR #93; all four LoadState overloads fully implemented by S7 PR #94 — no NotSupportedException stubs needed.)_
-- [x] **Step 2:** Add the compliance subclass; run `--filter "FullyQualifiedName~string_saga_storage_compliance"` → green. Full suite green. Commit. _(Verified: 10/10 string facts on net9.0 + net10.0; 145/145 full suite on both TFMs. No code changes needed — S6+S7+S8 delivered all S9 scope.)_
+- [x] **Step 1:** Write `MongoDbSagaHost` (clear the fixture DB before build; `LoadState` via `Client.GetDatabase(DatabaseName).GetCollection<T>(coll).Find(Eq("_id", id)).FirstOrDefaultAsync()`). _(Shipped in S6 PR #93; all four LoadState overloads fully implemented by S7 PR #94, no NotSupportedException stubs needed.)_
+- [x] **Step 2:** Add the compliance subclass; run `--filter "FullyQualifiedName~string_saga_storage_compliance"` → green. Full suite green. Commit. _(Verified: 10/10 string facts on net9.0 + net10.0; 145/145 full suite on both TFMs. No code changes needed: S6+S7+S8 delivered all S9 scope.)_
 
 ### Task S10: Guid/int/long-identified compliance
 
@@ -415,7 +415,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S7, S9.**
 - **Blocking status:** **Blocked by: S7, S9.**
 
-- [x] **Step 1:** Implement the typed `LoadState` overloads. _(Delivered in S7 — all four overloads are on `MongoDbSagaHost`: `LoadState<T>(Guid)`, `LoadState<T>(int)`, `LoadState<T>(long)`, `LoadState<T>(string)` — each calling the strongly-typed `LoadById<T,TId>` helper.)_
+- [x] **Step 1:** Implement the typed `LoadState` overloads. _(Delivered in S7: all four overloads are on `MongoDbSagaHost`: `LoadState<T>(Guid)`, `LoadState<T>(int)`, `LoadState<T>(long)`, `LoadState<T>(string)`, each calling the strongly-typed `LoadById<T,TId>` helper.)_
 - [x] **Step 2:** Add the Guid (and int/long) compliance subclasses; run them green + full suite. Commit. _(S7 shipped `guid_saga_storage_compliance`, `int_saga_storage_compliance`, `long_saga_storage_compliance`; 27/27 Guid+int+long facts + 145/145 full suite green on net9.0 + net10.0.)_
 
 ### Task S11: Saga atomicity, concurrency, completion & idempotency tests
@@ -425,7 +425,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
   1. **Atomicity:** a saga handler that writes saga state **and** cascades an outgoing message; force a post-handler failure and assert **neither** the saga doc **nor** the outgoing envelope persisted (rolled back together); success path persists both.
   2. **Completion:** `MarkCompleted()` deletes the saga doc.
   3. **OCC (after S8):** two stores load the same saga; one updates; the other's stale-version update throws `SagaConcurrencyException` and does not clobber.
-  4. **Idempotency:** redeliver the **same envelope** (same envelope id, via the durable inbox) → saga state correct, not double-applied. 🔎 review: inbox idempotency keys on envelope identity, *not* business payload — a brand-new message with an identical payload legitimately re-runs saga logic. Test "same-envelope redelivery" here; only add a semantic-duplicate test if the saga itself carries a guard.
+  4. **Idempotency:** redeliver the **same envelope** (same envelope id, via the durable inbox) → saga state correct, not double-applied. 🔎 review: inbox idempotency keys on envelope identity, *not* business payload: a brand-new message with an identical payload legitimately re-runs saga logic. Test "same-envelope redelivery" here; only add a semantic-duplicate test if the saga itself carries a guard.
 - **Expected output:** All four green; no regression to compliance or the full suite.
 - **Files/areas likely to change:** `src/Wolverine.MongoDB.Tests/saga_atomicity.cs` (+ a small in-test saga type).
 - **Dependencies:** **S6** (atomicity/completion/idempotency), **S8** (OCC).
@@ -441,21 +441,21 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 > MarkCompleted()`). The upstream compliance sagas cannot throw/cascade on demand, so a local saga
 > was required. Five tests across the four concerns:
 > - **Atomicity** (success + failure): modelled on the demo's `OutboxAtomicityTests`. Proven by the
->   observable downstream *effect* of the cascade rather than racing the outbox relay — a message
+>   observable downstream *effect* of the cascade rather than racing the outbox relay: a message
 >   published to a durable **local** queue persists to the *incoming* store atomically with the saga
 >   write (Wolverine's `DurableLocalQueue.storeAndEnqueueAsync`), so "the cascade was handled" is an
 >   exact proxy for "the outgoing message committed". On the forced post-cascade throw, neither the
 >   saga doc nor the cascade survives; the failure path also asserts directly that no `ReserveStock`
 >   envelope leaked into either durable store.
 > - **Completion:** `MarkCompleted()` → the doc is gone (`LoadState` null).
-> - **OCC:** complements `saga_optimistic_concurrency.cs` (S8's frame-level proof) — here the
+> - **OCC:** complements `saga_optimistic_concurrency.cs` (S8's frame-level proof): here the
 >   *winning* update runs through the **real generated update frame** (a `ContinueWork` message) and
 >   only the losing writer is simulated via `MongoSagaOperations.UpdateSagaAsync`; the stale-version
 >   write throws `SagaConcurrencyException` without clobbering.
 > - **Idempotency:** the durable inbox keys dedup on `envelope.Id` (`InboxIdentity`, IdOnly) and keeps
 >   a handled marker for `KeepAfterMessageHandling` (5 min). A redelivery's first action in the durable
 >   receiver is `StoreIncomingAsync`, so the test proves dedup **synchronously** by re-storing the very
->   same envelope and asserting `DuplicateIncomingEnvelopeException` — deterministic, with none of the
+>   same envelope and asserting `DuplicateIncomingEnvelopeException`, deterministic, with none of the
 >   async-receiver timing that initially let a redelivery race the marker (a flaky `EnqueueDirectlyAsync`
 >   first cut was discarded for exactly this reason).
 >
@@ -466,12 +466,12 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 
 ---
 
-## Phase 3 — Demo
+## Phase 3: Demo
 
 ### Task S12: Demo `OrderFulfillmentSaga` (contracts, saga, handlers, wiring)
 
 - **Goal:** Add a realistic saga to the demo that exercises every required flow, acting as a living reference and a regression safety net.
-- **Scope:** Per S5's design. New contracts (e.g. `ConfirmDeliveryCommand`, `FulfillmentCompleted`/timeout messages); `OrderFulfillmentSaga` (Guid id = OrderId; starts on `OrderPlacedApplicationEvent`, continues on `OrderShippedApplicationEvent` + `ConfirmDeliveryCommand`, completes via `MarkCompleted()`); `Program.cs` discovery/routing. Keep saga writes inside the Wolverine transaction (no manual session needed — the generated saga frames handle it). Preserve all existing order flows.
+- **Scope:** Per S5's design. New contracts (e.g. `ConfirmDeliveryCommand`, `FulfillmentCompleted`/timeout messages); `OrderFulfillmentSaga` (Guid id = OrderId; starts on `OrderPlacedApplicationEvent`, continues on `OrderShippedApplicationEvent` + `ConfirmDeliveryCommand`, completes via `MarkCompleted()`); `Program.cs` discovery/routing. Keep saga writes inside the Wolverine transaction (no manual session needed: the generated saga frames handle it). Preserve all existing order flows.
 - **Expected output:** Demo builds against the saga-enabled package (a fresh local/CI nupkg from S6/S7) and runs; the saga progresses start→continue→complete.
 - **Files/areas likely to change:** `demo/src/OrderDemo.Contracts/...`, `demo/src/OrderDemo.Application/Sagas/OrderFulfillmentSaga.cs`, `demo/src/OrderDemo.Api/Program.cs`.
 - **Dependencies:** contracts/saga/handler **skeletons** need only S5; **building/running requires S6 (+S7 for Guid id) merged and packed** (the demo consumes the package, per CI's `0.0.0-ci` nupkg; for local dev, pack the library first).
@@ -500,7 +500,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 > (`OrderShipped` advanced), **complete** (`MarkCompleted()` deletes the saga doc, read model
 > untouched), **missing-state** (`ConfirmDeliveryCommand` for an unknown id throws
 > `UnknownSagaException`), **duplicate/repeated** (re-storing the start envelope through the durable
-> inbox throws `DuplicateIncomingEnvelopeException` — deterministic, no second saga), **across-restart**
+> inbox throws `DuplicateIncomingEnvelopeException`, deterministic, no second saga), **across-restart**
 > (dispose the host, rebuild on the SAME DB, continue → state survives), and **inbox/outbox interaction**
 > (a single shipped event drives both the saga and the `OrderSummaryProjector` consistently). 34/34
 > demo tests green (7 new + 27 existing).
@@ -509,7 +509,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 > 1. **Demo saga/projector coexistence (S12 defect).** `OrderFulfillmentSaga` and `OrderSummaryProjector`
 >    both handle `OrderPlacedApplicationEvent`/`OrderShippedApplicationEvent`. Wolverine builds one chain
 >    per message type and a `SagaChain` clears co-registered non-saga handlers, so the saga silently
->    dropped the projector — the read model would stop updating in the real app. `OrdersFixture`'s
+>    dropped the projector: the read model would stop updating in the real app. `OrdersFixture`'s
 >    earlier "exclude the saga from discovery" hack hid this. Fixed by setting
 >    `opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated` in `Program.cs` and
 >    `OrdersFixture` (each handler runs independently) and **removing the exclusion**, so the demo now
@@ -524,8 +524,8 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 
 ### Task S14: Cross-node exactly-once saga progression (Balanced)
 
-- **Goal:** Validate saga correctness under multi-node coordination — the saga advances exactly once across two nodes, and in-flight saga messages owned by a crashed node are rescued.
-- **Scope:** A library `[Category=multinode]` test (`saga_multinode.cs`) using two in-proc Balanced hosts (mirror `multinode_end_to_end.cs`): drive a saga start + several continue messages across both nodes; assert exactly-once application (no double-advance) and that completion deletes the doc. Optionally a dead-node rescue variant. 🔎 review: if S8 OCC is in, two nodes racing the same saga will legitimately throw `SagaConcurrencyException` — the **retry policy from R11 must be wired** so the loser retries rather than failing the test (this is *not* an assertion to weaken; it is the correct production behavior). Same hard rules as multinode Task 7: **no skips, no retries-as-a-bandaid, no assertion-weakening**; five consecutive green runs on net9.0 + net10.0.
+- **Goal:** Validate saga correctness under multi-node coordination: the saga advances exactly once across two nodes, and in-flight saga messages owned by a crashed node are rescued.
+- **Scope:** A library `[Category=multinode]` test (`saga_multinode.cs`) using two in-proc Balanced hosts (mirror `multinode_end_to_end.cs`): drive a saga start + several continue messages across both nodes; assert exactly-once application (no double-advance) and that completion deletes the doc. Optionally a dead-node rescue variant. 🔎 review: if S8 OCC is in, two nodes racing the same saga will legitimately throw `SagaConcurrencyException`: the **retry policy from R11 must be wired** so the loser retries rather than failing the test (this is *not* an assertion to weaken; it is the correct production behavior). Same hard rules as multinode Task 7: **no skips, no retries-as-a-bandaid, no assertion-weakening**; five consecutive green runs on net9.0 + net10.0.
 - **Expected output:** Five-in-a-row green; full suite green.
 - **Files/areas likely to change:** `src/Wolverine.MongoDB.Tests/saga_multinode.cs`.
 - **Dependencies:** **S12, S13** conceptually (shares the saga + flow understanding) and the merged multinode infra; the test itself only needs S6/S7 + the multinode harness, so it **may run in parallel with S13** if the saga design is settled.
@@ -534,7 +534,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - [x] **Step 1:** Write the two-Balanced-node saga test (short `LockLeaseDuration`, durable inbox, shared static counter to observe process-wide application count).
 - [x] **Step 2:** Stabilize to five-in-a-row per TFM; full suite green. Commit.
 
-> **Implementation notes (S14):** `src/Wolverine.MongoDB.Tests/saga_multinode.cs` — one
+> **Implementation notes (S14):** `src/Wolverine.MongoDB.Tests/saga_multinode.cs`: one
 > `[Category=multinode]` test driving a purpose-built saga (`S14FulfillmentSaga`, Guid id `Id`,
 > `int Applied`, `List<int> AppliedSteps`) across two in-proc Balanced hosts (TCP control endpoint,
 > 5 s `LockLeaseDuration`, `TypeLoadMode.Dynamic`, durable local queues), mirroring
@@ -545,7 +545,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 > stamped `OwnerId = AssignedNodeNumber` and enqueued on the *sending* node's own receiver
 > (`DurableLocalQueue.storeAndEnqueueAsync`); a live node's owned envelopes are never stolen by
 > recovery. So alternating the bus per advance and firing them concurrently provably makes *both*
-> nodes update the same saga document at the same instant — genuine contention, and both nodes always
+> nodes update the same saga document at the same instant: genuine contention, and both nodes always
 > participate (asserted via a shared static observer). Scheduled-message distribution was rejected: one
 > node can claim the whole due batch in a single poll tick, so it does not reliably exercise two nodes.
 > Advances are processed `.Sequential()` per node to keep contention pairwise and OCC retries bounded.
@@ -554,30 +554,30 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 > concurrent MongoDB transactions cannot both win. The `TransactionalFrame` uses an explicit
 > start/commit (not Mongo's auto-retrying `WithTransaction`), so the conflict surfaces unhandled in one
 > of two ways: usually a server `WriteConflict` carrying the `"TransientTransactionError"` label (the
-> transaction aborts before commit), or — when the winner commits before the loser's guarded
-> `ReplaceOneAsync` runs — a `SagaConcurrencyException` from the version guard. The policy
+> transaction aborts before commit), or (when the winner commits before the loser's guarded
+> `ReplaceOneAsync` runs) a `SagaConcurrencyException` from the version guard. The policy
 > `OnException<SagaConcurrencyException>().Or<MongoException>(e => e.HasErrorLabel("TransientTransactionError")).RetryWithCooldown(...)`
 > retries **both**. Each is a guaranteed *no-commit* abort, so the loser safely reloads the
-> now-advanced saga and re-applies its own step — correct production behaviour, not an
+> now-advanced saga and re-applies its own step: correct production behaviour, not an
 > assertion-weakening bandaid. `UnknownTransactionCommitResult` is deliberately *not* retried (it could
 > double-apply; it does not occur on a stable local replica set).
 >
 > **Exactly-once oracle = committed document, not a static counter.** A handler-body counter
 > over-counts because a retried message runs the handler on every attempt but commits once. The saga
 > records each applied `Step` in its persisted `AppliedSteps`; the committed list sorted must equal
-> {1..6} — every step present (no drop) exactly once (no double-advance). The static observer is used
+> {1..6}: every step present (no drop) exactly once (no double-advance). The static observer is used
 > only to prove both nodes did work.
 >
 > **Verified load-bearing (red for the right reason).** With the retry policy disabled, the test fails
-> with a *dropped* step (`[2,3,4,5,6]` vs `[1..6]`) — proving the contention is real and the retry is
-> necessary, not decorative — then restored. **Five consecutive green runs on net9.0 + net10.0; full
+> with a *dropped* step (`[2,3,4,5,6]` vs `[1..6]`), proving the contention is real and the retry is
+> necessary, not decorative, then restored. **Five consecutive green runs on net9.0 + net10.0; full
 > library suite 153/153 green on both TFMs.** No skips, no retries-as-a-bandaid, no
-> assertion-weakening. (The optional dead-node saga-rescue variant was left out — generic dead-node
+> assertion-weakening. (The optional dead-node saga-rescue variant was left out: generic dead-node
 > envelope rescue is already covered by `multinode_end_to_end.cs`.)
 
 ---
 
-## Phase 4 — Integration, Documentation & Verification
+## Phase 4: Integration, Documentation & Verification
 
 ### Task S15: Full cross-feature regression
 
@@ -611,7 +611,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **Dependencies:** **S15, S16 merged.**
 - **Blocking status:** **Blocked by: S15, S16.**
 
-- [ ] **Step 1:** Run all verifications on `main`; report. Do not fix in this session — file anything red.
+- [ ] **Step 1:** Run all verifications on `main`; report. Do not fix in this session, file anything red.
 - [ ] **Step 2 (optional):** If releasing, follow CLAUDE.md "Versioning & Release" via the `release` agent.
 
 ---
@@ -622,15 +622,15 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 |---|---|---|
 | R1 | **Frame ordering / atomicity.** The generated saga chain must read/write the saga on the `TransactionalFrame` session and commit *after* the saga write so saga state + outbox are atomic. A wrong order silently breaks atomicity while passing some compliance facts. | S6 Step 2 mandates inspecting generated code via `codeFor<T>()`; the prescribed Cosmos-style rule (`commit postprocessor only if not SagaChain`; `CommitUnitOfWorkFrame` emits commit+flush for sagas) is verified against the real Cosmos provider. S11 atomicity test is the regression oracle. |
 | R2 | **`CommitUnitOfWorkFrame` double-commit.** Mongo's existing `ApplyTransactionSupport` adds the commit postprocessor unconditionally; naively reusing it for sagas could commit twice. | S6 changes `ApplyTransactionSupport` to skip the postprocessor for `SagaChain` (mirrors Cosmos), routing commit through `CommitUnitOfWorkFrame`. Confirm exactly-one commit in generated code. |
-| R3 | **`_id` mapping for non-string ids.** Guid/int/long `Id` must map to `_id` and round-trip. | The demo already stores Guid `_id` on `Order`; S7 adds a focused round-trip assertion. Add `[BsonId]` only if a fact proves it necessary, on test/demo types only (no global registry mutation — consistent with the per-property BSON-date decision). |
+| R3 | **`_id` mapping for non-string ids.** Guid/int/long `Id` must map to `_id` and round-trip. | The demo already stores Guid `_id` on `Order`; S7 adds a focused round-trip assertion. Add `[BsonId]` only if a fact proves it necessary, on test/demo types only (no global registry mutation, consistent with the per-property BSON-date decision). |
 | R4 | **Collection-per-saga-type vs single collection.** Cosmos uses one container; per-type is more idiomatic for Mongo but adds a naming helper and test-cleanup enumeration. | S4 decides and documents the convention; `RebuildAsync`/tests clear the saga collections they use. |
 | R5 | **Upstream may prefer Cosmos/Raven parity** (string-only, no OCC) over the richer Option B. | Decomposition: S6 = exact-parity baseline; S7/S8 are independently droppable. S16 calls out the deltas explicitly so upstream can accept or trim. |
 | R6 | **Multinode saga flakiness (S14).** Cross-node timing, like multinode Task 7. | Opus 4.8; five-in-a-row bar; reason-before-knob; no skips/retries; stop-and-report if unreachable. |
 | R7 | **Demo depends on a packed library.** Saga demo code can't compile until a saga-enabled package exists. | S12 skeletons authored against S5 early; build/run gated on S6/S7 merged (local pack or CI `0.0.0-ci`). |
 | R8 | **Saga identity-member resolution API.** S7 needs Wolverine's id-member determination. | Use `SagaChain.DetermineSagaIdMember(sagaType, sagaType)?.GetRawMemberType()` (mirrors `LightweightSagaPersistenceFrameProvider.cs:80-82`); precedence `[SagaIdentity]` → `{Saga}Id` → `Id` → `SagaId`. Note `DetermineSagaIdType` only governs envelope-header-only messages; member-bearing messages use `PullSagaIdFromMessageFrame` with the member type directly. Confirmed in S2, not invented. |
-| R9 | **🔎 review — `CanPersist` over-broad.** Returning `true` unconditionally advertises Mongo as a generic `[Entity]`/`Insert<T>`/`Update<T>`/`IStorageAction<T>` provider, but `DetermineStorageActionFrame` still throws → codegen blow-ups for non-saga entities. | S6 scopes `CanPersist` to `entityType.CanBeCastTo<Saga>()`. Full generic document persistence is out of scope (separate future work). |
-| R10 | **🔎 review — saga `_id` from envelope-only starts.** Core does not set the saga state's `Id` from the envelope (`SetSagaIdFrame` only sets context/activity tags; `DetermineInsertFrame` gets only the saga var). A start handler that derives its id solely from the envelope (never assigning `state.Id`) could insert a default `_id`. Compliance passes because `BasicWorkflow.Start` assigns `Id` — and Cosmos/Raven share this exact limitation. | S6/S7: add a focused test for an envelope-id-only start, **or** document that start handlers must assign the saga state id (parity with Cosmos/Raven). |
-| R11 | **🔎 review — `SagaConcurrencyException` retry policy.** Under multinode contention (S14) OCC conflicts will throw; without a retry/error policy the multinode saga test flakes. | Decide the policy before S14 (e.g. a Wolverine retry policy on `SagaConcurrencyException`, or accept-and-retry at the handler). Record the decision in S4/S8 and wire it in S14. |
+| R9 | **🔎 review: `CanPersist` over-broad.** Returning `true` unconditionally advertises Mongo as a generic `[Entity]`/`Insert<T>`/`Update<T>`/`IStorageAction<T>` provider, but `DetermineStorageActionFrame` still throws → codegen blow-ups for non-saga entities. | S6 scopes `CanPersist` to `entityType.CanBeCastTo<Saga>()`. Full generic document persistence is out of scope (separate future work). |
+| R10 | **🔎 review: saga `_id` from envelope-only starts.** Core does not set the saga state's `Id` from the envelope (`SetSagaIdFrame` only sets context/activity tags; `DetermineInsertFrame` gets only the saga var). A start handler that derives its id solely from the envelope (never assigning `state.Id`) could insert a default `_id`. Compliance passes because `BasicWorkflow.Start` assigns `Id`, and Cosmos/Raven share this exact limitation. | S6/S7: add a focused test for an envelope-id-only start, **or** document that start handlers must assign the saga state id (parity with Cosmos/Raven). |
+| R11 | **🔎 review: `SagaConcurrencyException` retry policy.** Under multinode contention (S14) OCC conflicts will throw; without a retry/error policy the multinode saga test flakes. | Decide the policy before S14 (e.g. a Wolverine retry policy on `SagaConcurrencyException`, or accept-and-retry at the handler). Record the decision in S4/S8 and wire it in S14. |
 | **OQ1** | **Lead decision: Option A vs B** (string-only vs native-id+OCC). | **Recommended B**; formally recorded in **S4**. Affects S7/S8/S10 existence and the critical path. |
 | **OQ2** | Support int/long ids, or just Guid+string? | Default: include int/long in S7/S10 (cheap once native-id works); drop to FOLLOWUPS if they prove fiddly. |
 | **OQ3** | Register `ISagaStoreDiagnostics` (RavenDb does, Cosmos doesn't)? | Optional; default **defer** to FOLLOWUPS unless the saga-explorer surface is wanted for upstream parity. |
@@ -664,7 +664,7 @@ public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
 - **S12** contracts/saga skeleton ← S5 *(build/run ← S6/S7)*
 
 **Blocked by implementation:**
-- **S7** ← S6 · **S8** ← S6, S7 *(🔎 review: S8↔S7 share files — sequence, don't parallelize)*
+- **S7** ← S6 · **S8** ← S6, S7 *(🔎 review: S8↔S7 share files: sequence, don't parallelize)*
 - **S9** green ← S6 · **S10** ← S7, S9 · **S11** green ← S6 (atomicity/idempotency) + S8 (OCC)
 - **S12** build ← S6, S7 · **S13** ← S12 · **S14** ← S12, S13
 
@@ -690,7 +690,7 @@ plan PR ──► S1 ┐
 This is the irreducible core: discover the contracts (S2/S3), commit the design (S4), implement the frames (S6), and prove them against the upstream oracle (S9). Everything else extends or hardens this.
 
 **Full-scope critical path (Option B, user's required coverage):**
-`… → S6 → S7 → S8 → S11(OCC)` on the library side, with the demo arm `S6/S7 → S12 → S13 → S14` running **in parallel**, converging at `S15 → S16 → S17`. The longest chain is the demo/multinode arm (`S6 → S7 → S12 → S13 → S14 → S15 → S16 → S17`), so **S14 (multinode saga, Opus, five-in-a-row) is the schedule risk** — start its design (S5) and harness reuse early.
+`… → S6 → S7 → S8 → S11(OCC)` on the library side, with the demo arm `S6/S7 → S12 → S13 → S14` running **in parallel**, converging at `S15 → S16 → S17`. The longest chain is the demo/multinode arm (`S6 → S7 → S12 → S13 → S14 → S15 → S16 → S17`), so **S14 (multinode saga, Opus, five-in-a-row) is the schedule risk**: start its design (S5) and harness reuse early.
 
 **Tasks that can be delayed without affecting the critical path:**
 - **S5** can lag until just before S12 (only its *output* gates S12).
@@ -701,6 +701,6 @@ This is the irreducible core: discover the contracts (S2/S3), commit the design 
 **Opportunities to compress wall-clock via parallelism:**
 - Run **S1+S2+S3+S5** as four concurrent sessions on day one.
 - The moment **S6** merges, fan out **S7, S8, S9-green, S11, S12-skeleton** concurrently; **S10** follows S7.
-- Run the **library-test track (S9/S10/S11)** and the **demo track (S12/S13/S14)** as two independent lanes after S6/S7 — they touch disjoint files.
+- Run the **library-test track (S9/S10/S11)** and the **demo track (S12/S13/S14)** as two independent lanes after S6/S7: they touch disjoint files.
 - Fold **S9's host file into S6's branch** (see the S6 coordination note) so S6 ships already-green, removing a serialization point.
-- With full fan-out, the realistic span is roughly: 1 unit (S1–S3,S5) → 1 unit (S4) → 1 unit (S6) → ~2 units (S7→S10, S8→S11, S12→S13→S14 overlapping) → 1 unit (S15/S16) → S17 — i.e. the 17 tasks collapse to about **6–7 sequential “waves,”** dominated by the S6→S7→S12→S13→S14 demo/multinode chain.
+- With full fan-out, the realistic span is roughly: 1 unit (S1–S3,S5) → 1 unit (S4) → 1 unit (S6) → ~2 units (S7→S10, S8→S11, S12→S13→S14 overlapping) → 1 unit (S15/S16) → S17: the 17 tasks collapse to about **6–7 sequential "waves,"** dominated by the S6→S7→S12→S13→S14 demo/multinode chain.

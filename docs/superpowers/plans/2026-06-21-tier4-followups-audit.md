@@ -1,4 +1,4 @@
-# Tier 4 — FOLLOWUPS Audit + Multinode Un-Gate Scoping
+# Tier 4: FOLLOWUPS Audit + Multinode Un-Gate Scoping
 
 > **Task D4** of `docs/superpowers/plans/2026-06-21-persistence-suite-completion.md`
 >
@@ -12,27 +12,27 @@
 
 | # | FOLLOWUPS item | Current behavior (file:line) | Classification | Task |
 |---|---|---|---|---|
-| 1 | Unkeyed `IMongoDatabase` registration | `WolverineMongoDbExtensions.cs:59-60` — `AddSingleton(sp => client.GetDatabase(name))`, unkeyed | document-as-constraint (default) or implement wrapper | **T4.3** |
-| 2 | `INodeAgentPersistence.ClearAllAsync` scope | `MongoDbMessageStore.NodeAgents.cs:177-181` — clears only `wolverine_nodes` + `wolverine_node_assignments` | document-as-narrow-by-design | **T4.4** |
-| 3 | Node-number reuse | `MongoDbMessageStore.NodeAgents.cs:16-20` — `Inc(Count, 1)` with `IsUpsert = true`; counter never resets freed slots | document-as-non-goal (post-1.0) | **T4.6** |
-| 4 | Pre-1.0 index migration | `MongoDbMessageStore.Admin.cs:18-64` — creates current compound indexes; old single-field indexes on beta deployments left in place | document-as-non-goal (pre-1.0 beta) | **T4.6** |
-| 5 | Lease fencing token / epoch | `MongoDbMessageStore.Locking.cs:1-74` — `LockDocument` carries `Id`, `NodeId`, `ExpiresAt`; no `Epoch`/fencing field | document-as-non-goal (future hardening) | **T4.6** |
-| 6 | `IListenerStore` still `NullListenerStore` | `MongoDbMessageStore.cs:64` — `Listeners { get; } = NullListenerStore.Instance` | document-as-non-goal (Tier 3, matches Cosmos/Raven) | **T3.1** |
+| 1 | Unkeyed `IMongoDatabase` registration | `WolverineMongoDbExtensions.cs:59-60`: `AddSingleton(sp => client.GetDatabase(name))`, unkeyed | document-as-constraint (default) or implement wrapper | **T4.3** |
+| 2 | `INodeAgentPersistence.ClearAllAsync` scope | `MongoDbMessageStore.NodeAgents.cs:177-181`: clears only `wolverine_nodes` + `wolverine_node_assignments` | document-as-narrow-by-design | **T4.4** |
+| 3 | Node-number reuse | `MongoDbMessageStore.NodeAgents.cs:16-20`: `Inc(Count, 1)` with `IsUpsert = true`; counter never resets freed slots | document-as-non-goal (post-1.0) | **T4.6** |
+| 4 | Pre-1.0 index migration | `MongoDbMessageStore.Admin.cs:18-64`: creates current compound indexes; old single-field indexes on beta deployments left in place | document-as-non-goal (pre-1.0 beta) | **T4.6** |
+| 5 | Lease fencing token / epoch | `MongoDbMessageStore.Locking.cs:1-74`: `LockDocument` carries `Id`, `NodeId`, `ExpiresAt`; no `Epoch`/fencing field | document-as-non-goal (future hardening) | **T4.6** |
+| 6 | `IListenerStore` still `NullListenerStore` | `MongoDbMessageStore.cs:64`: `Listeners { get; } = NullListenerStore.Instance` | document-as-non-goal (Tier 3, matches Cosmos/Raven) | **T3.1** |
 | 7 | Demo `MongoDbUnitOfWork` example | demo/CLAUDE.md confirms no UoW example; `PlaceOrderHandler` uses `IClientSessionHandle` only | implement | **T4.1** |
-| 8 | Demo saga cascade consumer | `OrderFulfillmentSaga.cs:63-68,75-81` — returns `FulfillmentShippedEvent`/`FulfillmentCompletedEvent`; no handler wired in demo | implement | **T4.2** |
-| 9 | Saga-specific indexes | `MongoDbMessageStore.Admin.cs:18-64` — indexes created only for system collections; saga collections (`wolverine_saga_*`) have only the implicit `_id` unique index | document-as-non-goal (add via `RebuildAsync` when query patterns demand) | **T4.6** |
-| 10 | Multinode leadership compliance re-eval | `leadership_election_compliance.cs:1,61` — `#if RUN_MULTINODE` / `#endif` guard; one-off 13/13 passed against 6.9.0 | verify (5× green per TFM before un-gate) | **T4.5** |
-| 11 | `ISagaStoreDiagnostics` not implemented | `WolverineMongoDbExtensions.cs` — no `ISagaStoreDiagnostics` registration; no implementation class | implement (Tier 2) | **T2.1** |
+| 8 | Demo saga cascade consumer | `OrderFulfillmentSaga.cs:63-68,75-81`: returns `FulfillmentShippedEvent`/`FulfillmentCompletedEvent`; no handler wired in demo | implement | **T4.2** |
+| 9 | Saga-specific indexes | `MongoDbMessageStore.Admin.cs:18-64`: indexes created only for system collections; saga collections (`wolverine_saga_*`) have only the implicit `_id` unique index | document-as-non-goal (add via `RebuildAsync` when query patterns demand) | **T4.6** |
+| 10 | Multinode leadership compliance re-eval | `leadership_election_compliance.cs:1,61`: `#if RUN_MULTINODE` / `#endif` guard; one-off 13/13 passed against 6.9.0 | verify (5× green per TFM before un-gate) | **T4.5** |
+| 11 | `ISagaStoreDiagnostics` not implemented | `WolverineMongoDbExtensions.cs`: no `ISagaStoreDiagnostics` registration; no implementation class | implement (Tier 2) | **T2.1** |
 
 > **Out-of-D4-scope item (in FOLLOWUPS but not audited here):** `HasLeadershipLock external-delete
-> edge` — already documented as acceptable (self-corrects within one lease); no code change. Belongs
+> edge`, already documented as acceptable (self-corrects within one lease); no code change. Belongs
 > to T4.6's "document/defer" bundle.
 
 ---
 
 ## 2. Per-Item Evidence & Classification Rationale
 
-### Item 1 — Unkeyed `IMongoDatabase` registration → T4.3
+### Item 1: Unkeyed `IMongoDatabase` registration → T4.3
 
 **Evidence:**
 ```csharp
@@ -41,17 +41,17 @@ options.Services.AddSingleton(sp =>
     sp.GetRequiredService<IMongoClient>().GetDatabase(databaseName));
 ```
 
-The call is `AddSingleton<IMongoDatabase>(...)` — an **unkeyed** registration. An app that
+The call is `AddSingleton<IMongoDatabase>(...)`, an **unkeyed** registration. An app that
 registers its own `IMongoDatabase` will either conflict or shadow this one.
 
-**Classification:** document-as-constraint (default) — the saga and entity frames resolve
+**Classification:** document-as-constraint (default): the saga and entity frames resolve
 `IMongoDatabase` via `chain.FindVariable(typeof(IMongoDatabase))`; switching to a keyed
 registration is a high-blast-radius codegen change. Alternative is a thin `WolverineMongoDatabase`
 wrapper the frames resolve instead, but only if D6/T1.1 find it contained. T4.3 makes the call.
 
 ---
 
-### Item 2 — `INodeAgentPersistence.ClearAllAsync` scope → T4.4
+### Item 2: `INodeAgentPersistence.ClearAllAsync` scope → T4.4
 
 **Evidence:**
 ```csharp
@@ -70,18 +70,18 @@ Clears ONLY `wolverine_nodes` + `wolverine_node_assignments`. Does **not** clear
 - `wolverine_locks` (leader/scheduled-job lock documents)
 
 Compare with `IMessageStoreAdmin.ClearAllAsync` (`MongoDbMessageStore.Admin.cs:67-88`), which
-clears ALL six system collections plus all `wolverine_saga_*` collections — the full reset.
+clears ALL six system collections plus all `wolverine_saga_*` collections: the full reset.
 The test harness (`AppFixture.ClearAll()`) calls `RebuildAsync()` → `Admin.ClearAllAsync`, so
 compliance tests always get the full clear.
 
-**Classification:** document-as-narrow-by-design — the node-level `ClearAllAsync` is invoked by
+**Classification:** document-as-narrow-by-design: the node-level `ClearAllAsync` is invoked by
 `INodeAgentPersistence` consumers for operational node-state reset, not system reset. The FOLLOWUPS
 ambiguity resolves as: `Admin.RebuildAsync()`/`ClearAllAsync()` is the full reset; the node-level
 one is intentionally narrow. T4.4 documents this boundary explicitly.
 
 ---
 
-### Item 3 — Node-number reuse → T4.6
+### Item 3: Node-number reuse → T4.6
 
 **Evidence:**
 ```csharp
@@ -94,18 +94,18 @@ var counter = await Counters.FindOneAndUpdateAsync(
 node.AssignedNodeNumber = counter.Count;
 ```
 
-The counter (`wolverine_counters` / `node_number` id) is a pure monotonic increment — once a node
+The counter (`wolverine_counters` / `node_number` id) is a pure monotonic increment, so once a node
 is deregistered its slot is freed from `wolverine_nodes` but the counter value never decreases.
 The next registering node gets `count + 1`, not the freed slot.
 
-**Classification:** document-as-non-goal — lowest-free-slot reuse is deferred post-1.0. The
+**Classification:** document-as-non-goal: lowest-free-slot reuse is deferred post-1.0. The
 monotonic model is simple, correct, and matches Wolverine's usage pattern (node numbers are
 short-lived identifiers for multi-node coordination, not long-lived external keys). T4.6 adds
 a dated decision entry to FOLLOWUPS/CLAUDE.
 
 ---
 
-### Item 4 — Pre-1.0 index migration → T4.6
+### Item 4: Pre-1.0 index migration → T4.6
 
 **Evidence:**
 ```csharp
@@ -119,7 +119,7 @@ a dated decision entry to FOLLOWUPS/CLAUDE.
 
 The hardening pass that introduced compound indexes did not drop the old single-field
 `executionTime` and `ownerId` indexes from collections on existing beta deployments. Those old
-indexes are harmless (still valid, just suboptimal for the new query patterns) — no correctness
+indexes are harmless (still valid, just suboptimal for the new query patterns), no correctness
 issue.
 
 **Classification:** document-as-non-goal (pre-1.0 beta, no migration planned). An explicit
@@ -128,7 +128,7 @@ the decision.
 
 ---
 
-### Item 5 — Lease fencing token / epoch → T4.6
+### Item 5: Lease fencing token / epoch → T4.6
 
 **Evidence:**
 ```csharp
@@ -148,13 +148,13 @@ The lock document has no fencing token (monotonically increasing epoch). A fenci
 allow store writes to carry the epoch and reject writes from a node with a stale epoch, closing
 the "paused node acts on stale leadership for external systems" residual.
 
-**Classification:** document-as-non-goal — not needed for store-only leader work; the 75%-lease
+**Classification:** document-as-non-goal: not needed for store-only leader work; the 75%-lease
 margin already mitigates the stale-leadership window for internal coordination. Track as a future
 hardening item if leader-scoped external side effects become common. T4.6 documents this.
 
 ---
 
-### Item 6 — `IListenerStore` still `NullListenerStore` → T3.1
+### Item 6: `IListenerStore` still `NullListenerStore` → T3.1
 
 **Evidence:**
 ```csharp
@@ -165,30 +165,30 @@ public IListenerStore Listeners { get; protected set; } = NullListenerStore.Inst
 The `IListenerStore` interface is satisfied by the no-op `NullListenerStore.Instance`. Listener
 persistence (durable local queues surviving restarts) is not implemented.
 
-**Classification:** document-as-non-goal (Tier 3 parity decision) — this is a **Tier 3** item
+**Classification:** document-as-non-goal (Tier 3 parity decision): this is a **Tier 3** item
 (parity capabilities), not a Tier 4 item. Cosmos (`CosmosDbMessageStore.cs:74`) and RavenDb
 (`RavenDbMessageStore.cs:68`) both return `NullListenerStore.Instance` with explicit "follow-up"
-comments — the same state. T3.1 formalizes the defer + records the cheap optional implementation
+comments: the same state. T3.1 formalizes the defer + records the cheap optional implementation
 shape as a tracked FOLLOWUPS entry.
 
 ---
 
-### Item 7 — Demo `MongoDbUnitOfWork` example → T4.1
+### Item 7: Demo `MongoDbUnitOfWork` example → T4.1
 
 **Evidence:**
 
 Demo CLAUDE.md explicitly states: *"The demo does not use it (the repository pattern is the
 fuller example), but it is documented in the library README."*
 
-`PlaceOrderHandler` accepts `IClientSessionHandle` directly — there is no handler in
+`PlaceOrderHandler` accepts `IClientSessionHandle` directly. There is no handler in
 `demo/src/OrderDemo.Application/` that accepts `MongoDbUnitOfWork`.
 
-**Classification:** implement — T4.1 adds a new handler (e.g. `RecordOrderAuditCommand`) that
+**Classification:** implement: T4.1 adds a new handler (e.g. `RecordOrderAuditCommand`) that
 accepts `MongoDbUnitOfWork` and writes through `Collection<T>()`. Per D5's design spec.
 
 ---
 
-### Item 8 — Demo saga cascade consumer → T4.2
+### Item 8: Demo saga cascade consumer → T4.2
 
 **Evidence:**
 ```csharp
@@ -200,16 +200,16 @@ public FulfillmentCompletedEvent Handle(ConfirmDeliveryCommand cmd) { ... return
 ```
 
 The saga returns cascade events, but no consumer is wired. From the saga source:
-*"Returns FulfillmentShippedEvent to illustrate that a saga handler may cascade a message — this
+*"Returns FulfillmentShippedEvent to illustrate that a saga handler may cascade a message. This
 demo wires no consumer for it."*
 
-**Classification:** implement — T4.2 adds a fulfillment read-model projector consuming
+**Classification:** implement: T4.2 adds a fulfillment read-model projector consuming
 `FulfillmentShippedEvent`/`FulfillmentCompletedEvent` (recording delivery status/timestamp the
 `OrderSummary` does not track) plus a matching route and assertion. Per D5's design spec.
 
 ---
 
-### Item 9 — Saga-specific indexes → T4.6
+### Item 9: Saga-specific indexes → T4.6
 
 **Evidence:**
 ```csharp
@@ -223,7 +223,7 @@ The `RebuildAsync` path (`Admin.cs:10-14`) calls `ClearAllAsync` then `EnsureInd
 `EnsureIndexesAsync` does not touch saga collections. Each saga collection gets only the MongoDB
 implicit `_id` unique index.
 
-**Classification:** document-as-non-goal — the implicit `_id` index is sufficient for the
+**Classification:** document-as-non-goal: the implicit `_id` index is sufficient for the
 current load/insert/update-by-id access pattern. Per-collection secondary indexes (e.g.
 filtering sagas by status fields or range scans) are meaningful only when query patterns demand
 them; when they do, `EnsureIndexesAsync` is the correct extension point. T4.6 documents the
@@ -231,7 +231,7 @@ extension point and defers until a concrete query pattern exists.
 
 ---
 
-### Item 10 — Multinode leadership compliance re-eval → T4.5
+### Item 10: Multinode leadership compliance re-eval → T4.5
 
 **Evidence:**
 ```csharp
@@ -263,11 +263,11 @@ store loses ~50% of the time. Full analysis:
 This is a single-run result, not the standing bar. T4.5 must confirm 5× consecutive green on
 both net9.0 and net10.0 before un-gating.
 
-**Classification:** verify — see the runbook below.
+**Classification:** verify: see the runbook below.
 
 ---
 
-### Item 11 — `ISagaStoreDiagnostics` not implemented → T2.1
+### Item 11: `ISagaStoreDiagnostics` not implemented → T2.1
 
 **Evidence:**
 ```csharp
@@ -279,7 +279,7 @@ RavenDb implements and registers `RavenDbSagaStoreDiagnostics` (`ISagaStoreDiagn
 `UseRavenDbPersistence` extension (exposes saga-explorer tooling for the Wolverine dashboard).
 Cosmos does not implement it. MongoDB follows Cosmos's current state.
 
-**Classification:** implement (Tier 2, independent of Tier 4) — T2.1 adds
+**Classification:** implement (Tier 2, independent of Tier 4): T2.1 adds
 `MongoDbSagaStoreDiagnostics` mirroring the RavenDb implementation, requiring D2's discovery
 doc for the exact API mapping.
 
@@ -298,15 +298,15 @@ src/Wolverine.MongoDB.Tests/leadership_election_compliance.cs
 ```
 
 To un-gate: **remove lines 1 and 61** (the `#if` / `#endif` pair). The `using` directives
-on lines 2–7 are inside the guard; they become unconditional after removal (safe). The
+on lines 2-7 are inside the guard; they become unconditional after removal (safe). The
 `[Trait("Category", "multinode")]` at line 34 already ensures the class routes to the CI
-multinode step — no further editing needed.
+multinode step. No further editing needed.
 
 The `configureNode` override (`lines 45-54`) uses:
-- `LockLeaseDuration = TimeSpan.FromSeconds(5)` — the plan's standard lease; acceptable since
+- `LockLeaseDuration = TimeSpan.FromSeconds(5)`: the plan's standard lease; acceptable since
   the 6.9.0 rework removed the lock-race sensitivity.
 
-### Pre-gate verification — run 5× per TFM
+### Pre-gate verification: run 5× per TFM
 
 All runs must pass in a **single consecutive sequence per TFM** with no interleaving of other
 multinode tests. Each run exercises the full `Category=multinode` suite (including the
@@ -315,7 +315,7 @@ existing `multinode_end_to_end.cs` tests) so regressions to existing facts are c
 Compile the suite with `DefineConstants=RUN_MULTINODE` **while the guard is still present**
 for the first 5-run verification. Only remove the guard after confirming green.
 
-**net9.0 — run 5× (all must pass):**
+**net9.0: run 5× (all must pass):**
 ```bash
 # From repo root (with Wolverine submodule initialized)
 for i in 1 2 3 4 5; do
@@ -329,7 +329,7 @@ for i in 1 2 3 4 5; do
 done
 ```
 
-**net10.0 — run 5× (all must pass):**
+**net10.0: run 5× (all must pass):**
 ```bash
 for i in 1 2 3 4 5; do
   dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj \
@@ -347,10 +347,10 @@ assertion-weakening, no timeout-lengthening. Any single failure = do not un-gate
 the observed failure and keep the gate (update FOLLOWUPS.md with the 6.9.0 result and the
 new failure mode).
 
-### Facts covered (6.9.0 compliance suite — 13 facts)
+### Facts covered (6.9.0 compliance suite, 13 facts)
 
 The 13 facts include the two formerly-flaky ones and the new racing-nodes fact:
-- `leader_switchover_between_nodes` (formerly flaky at 6.2.2 — key watch fact)
+- `leader_switchover_between_nodes` (formerly flaky at 6.2.2, key watch fact)
 - `singular_agent_is_only_running_on_one` (was coupled to the above)
 - `take_over_leader_ship_if_leader_becomes_stale` (was fixable at 6.2.2)
 - `take_over_leader_ship_if_leader_becomes_stale_with_racing_nodes` (**new** at 6.9.0)
@@ -383,7 +383,7 @@ The 13 facts include the two formerly-flaky ones and the new racing-nodes fact:
 - **No timeout-lengthening.** If a timing-sensitive fact is flaky, stop and report rather
   than bumping the budget.
 - **No ci.yml `--filter` changes** to exclude leadership facts from the multinode step.
-- **Stop and extend this report** if 5× cannot be reached — document the new failure mode and
+- **Stop and extend this report** if 5× cannot be reached: document the new failure mode and
   keep the gate.
 
 ### If 5×-green cannot be reached

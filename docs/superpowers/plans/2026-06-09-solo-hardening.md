@@ -16,11 +16,11 @@
 
 **Every task is delivered as its own feature branch and its own PR against `main`.** The inline "Commit" step at the end of each task stays as written; it is followed by the push/PR steps below. Each PR must be independently green: the task's own tests pass, plus the full library suite.
 
-**Per-task procedure (one git worktree per task — safe for parallel agents):**
+**Per-task procedure (one git worktree per task, safe for parallel agents):**
 
-> **Why a worktree, not `git checkout`:** a clone has exactly one working tree, one `HEAD`, and one index, all global to the directory. Two task-agents sharing one checkout clobber each other — a `git checkout` / `reset` / `stash` in one silently reverts the other's uncommitted work, or bleeds edits across branches. Each task therefore gets its **own** working directory backed by the shared `.git`. `.worktrees/` is gitignored.
+> **Why a worktree, not `git checkout`:** a clone has exactly one working tree, one `HEAD`, and one index, all global to the directory. Two task-agents sharing one checkout clobber each other, a `git checkout` / `reset` / `stash` in one silently reverts the other's uncommitted work, or bleeds edits across branches. Each task therefore gets its **own** working directory backed by the shared `.git`. `.worktrees/` is gitignored.
 
-> **Already isolated?** If you were dispatched as a subagent with worktree isolation (the `Agent` / `Workflow` `isolation: "worktree"` option, or a native `EnterWorktree` / `/worktree` tool), you are **already** in your own worktree — do not nest another. Confirm with `git branch --show-current`, then skip straight to the task's steps.
+> **Already isolated?** If you were dispatched as a subagent with worktree isolation (the `Agent` / `Workflow` `isolation: "worktree"` option, or a native `EnterWorktree` / `/worktree` tool), you are **already** in your own worktree, do not nest another. Confirm with `git branch --show-current`, then skip straight to the task's steps.
 
 ```bash
 # Start: from the main checkout, cut an isolated worktree off the CURRENT main
@@ -44,12 +44,12 @@ rtk git worktree remove .worktrees/<branch-name>
 ```
 
 - **`--head <branch-name>` is now required:** `gh` would infer the head from the current branch, but stating it explicitly keeps the PR unambiguous no matter which worktree it is invoked from. `gh` reads the shared `.git`, so it behaves identically in every worktree.
-- A slashed branch name (e.g. `fix/outgoing-owner-filter`) just nests one extra directory level under `.worktrees/` — that is fine.
+- A slashed branch name (e.g. `fix/outgoing-owner-filter`) just nests one extra directory level under `.worktrees/`, that is fine.
 - Each worktree has its own `bin` / `obj`, so parallel `dotnet build` / `dotnet test` runs never collide. A branch can be checked out in only one worktree at a time; since every task has a distinct branch, this never conflicts.
 
 Commit messages end with the standard `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line.
 
-**A task with a dependency must not start until the dependency's PR is MERGED into `main`** (CI green on the PR is not enough — the next branch forks from `main`). PRs are merged by the repository owner after review.
+**A task with a dependency must not start until the dependency's PR is MERGED into `main`** (CI green on the PR is not enough, the next branch forks from `main`). PRs are merged by the repository owner after review.
 
 | Task | Branch | PR title | Depends on | Model |
 |---|---|---|---|---|
@@ -69,13 +69,13 @@ Commit messages end with the standard `Co-Authored-By: Claude Fable 5 <noreply@a
 
 **Model guidance.** When dispatching a subagent per task (Agent tool `model` parameter: `sonnet`, `opus`, `fable`):
 
-- **Sonnet (4.6)** is sufficient where the plan already contains the exact code and the test is the oracle — Tasks 1–4, 6, 7, 10, 11, and the doc/verification tasks. These are deliberately specified to implementation level; the work is transcription + running tests.
-- **Fable 5 (or Opus 4.8)** for the tasks whose steps contain open-ended judgment: Task 5 (iterating on GitHub Actions failures — Wolverine clone resolution, Testcontainers-on-CI, nupkg rewiring — is debugging, not transcription), Task 8 (must verify `IChain.HandlerCalls()`/`ServiceDependencies` semantics against the Wolverine clone and debug generated code), Task 9 (code-generation frame wiring and new public API surface).
-- **Do not use Haiku** for anything in this plan — even the "trivial" tasks touch durability semantics where a plausible-but-wrong shortcut (e.g. an unconditional TTL field) is exactly the class of bug this plan exists to remove.
+- **Sonnet (4.6)** is sufficient where the plan already contains the exact code and the test is the oracle, Tasks 1–4, 6, 7, 10, 11, and the doc/verification tasks. These are deliberately specified to implementation level; the work is transcription + running tests.
+- **Fable 5 (or Opus 4.8)** for the tasks whose steps contain open-ended judgment: Task 5 (iterating on GitHub Actions failures, i.e. Wolverine clone resolution, Testcontainers-on-CI, nupkg rewiring, is debugging, not transcription), Task 8 (must verify `IChain.HandlerCalls()`/`ServiceDependencies` semantics against the Wolverine clone and debug generated code), Task 9 (code-generation frame wiring and new public API surface).
+- **Do not use Haiku** for anything in this plan, even the "trivial" tasks touch durability semantics where a plausible-but-wrong shortcut (e.g. an unconditional TTL field) is exactly the class of bug this plan exists to remove.
 - **Escalation rule:** if a Sonnet-assigned task fails its verification step twice for non-obvious reasons, or discovers that a plan assumption doesn't hold (API missing, test can't fail/pass as predicted), stop and re-dispatch that task on Fable 5 with the failure context rather than letting the Sonnet agent improvise around the plan.
-- **Code review between tasks** (the subagent-driven-development flow): run reviews on Fable 5/Opus — review quality is the safety net for the cheaper implementation runs.
+- **Code review between tasks** (the subagent-driven-development flow): run reviews on Fable 5/Opus, review quality is the safety net for the cheaper implementation runs.
 
-**Recommended merge order:** **Task 5 first** — once the CI PR is merged, every subsequent PR gets full library-test coverage on GitHub Actions (Tasks 1–4 are still safe to do before it, since they are test-driven locally). Then 1–4, 6, 7, 10, 11 in any order (they touch disjoint files and can be open as parallel PRs), then 8 → 9, then 12, then 13. If parallel PRs produce trivial merge conflicts in shared test files (`inbox.cs`, `admin_smoke.cs`, `ci.yml`), rebase on `main` and resolve — each task's changes are additive.
+**Recommended merge order:** **Task 5 first**: once the CI PR is merged, every subsequent PR gets full library-test coverage on GitHub Actions (Tasks 1–4 are still safe to do before it, since they are test-driven locally). Then 1–4, 6, 7, 10, 11 in any order (they touch disjoint files and can be open as parallel PRs), then 8 → 9, then 12, then 13. If parallel PRs produce trivial merge conflicts in shared test files (`inbox.cs`, `admin_smoke.cs`, `ci.yml`), rebase on `main` and resolve: each task's changes are additive.
 
 **Plan documents:** commit the two plan files themselves as a preliminary docs-only PR (branch `docs/implementation-plans`, title "docs: add solo-hardening and multinode implementation plans") so every task PR can reference them by path.
 
@@ -99,7 +99,7 @@ Commit messages end with the standard `Co-Authored-By: Claude Fable 5 <noreply@a
 | `src/Wolverine.MongoDB/Internals/MongoSerializerRegistration.cs` | **Delete** |
 | `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs` | Broaden `CanApply` |
 | `src/Wolverine.MongoDB/Internals/TransactionalFrame.cs` | Emit `MongoDbUnitOfWork` variable |
-| `src/Wolverine.MongoDB/MongoDbUnitOfWork.cs` | **New** — session-bound write helper (public API) |
+| `src/Wolverine.MongoDB/MongoDbUnitOfWork.cs` | **New**: session-bound write helper (public API) |
 | `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs` | Remove serializer call |
 | `src/Wolverine.MongoDB.Tests/*` | New + amended tests per task |
 | `.github/workflows/ci.yml` | Library tests + fresh-nupkg demo job |
@@ -116,7 +116,7 @@ Every RDBMS provider implements this as `WHERE owner_id = 0 AND destination = @d
 - Modify: `src/Wolverine.MongoDB.Tests/outbox_recovery.cs` (assertions use `LoadOutgoingAsync` post-reassignment, which the fix breaks by design)
 - Test: `src/Wolverine.MongoDB.Tests/outbox.cs` (add test)
 
-- [x] **Step 1: Write the failing test** — add to `src/Wolverine.MongoDB.Tests/outbox.cs`:
+- [x] **Step 1: Write the failing test**: add to `src/Wolverine.MongoDB.Tests/outbox.cs`:
 
 ```csharp
 [Fact]
@@ -146,9 +146,9 @@ public async Task load_outgoing_only_returns_globally_owned_envelopes()
 - [x] **Step 2: Run the test to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~load_outgoing_only_returns_globally_owned"`
-Expected: FAIL — `loaded.Count` is 2.
+Expected: FAIL, `loaded.Count` is 2.
 
-- [x] **Step 3: Implement the filter + limit** — replace `LoadOutgoingAsync` in `MongoDbMessageStore.Outbox.cs`:
+- [x] **Step 3: Implement the filter + limit**: replace `LoadOutgoingAsync` in `MongoDbMessageStore.Outbox.cs`:
 
 ```csharp
 public async Task<IReadOnlyList<Envelope>> LoadOutgoingAsync(Uri destination)
@@ -167,7 +167,7 @@ public async Task<IReadOnlyList<Envelope>> LoadOutgoingAsync(Uri destination)
 }
 ```
 
-- [x] **Step 4: Amend `outbox_recovery.cs`** — both existing tests assert recovery results through `LoadOutgoingAsync`, which now (correctly) returns nothing once the envelope is owned. Switch the post-recovery assertions to `Admin.AllOutgoingAsync()`:
+- [x] **Step 4: Amend `outbox_recovery.cs`**: both existing tests assert recovery results through `LoadOutgoingAsync`, which now (correctly) returns nothing once the envelope is owned. Switch the post-recovery assertions to `Admin.AllOutgoingAsync()`:
 
 In `recovers_orphaned_outgoing_by_reassigning_to_this_node`, replace
 
@@ -219,7 +219,7 @@ rtk git commit -m "fix: LoadOutgoingAsync only returns globally-owned envelopes,
 - Test: `src/Wolverine.MongoDB.Tests/inbox.cs` (add test)
 - Modify: `src/Wolverine.MongoDB.Tests/eager_idempotency_transaction.cs` (add end-of-test assertion)
 
-- [x] **Step 1: Write the failing test** — add to `src/Wolverine.MongoDB.Tests/inbox.cs`:
+- [x] **Step 1: Write the failing test**: add to `src/Wolverine.MongoDB.Tests/inbox.cs`:
 
 ```csharp
 [Fact]
@@ -248,14 +248,14 @@ public async Task handled_marker_stored_via_store_incoming_carries_keep_until()
 }
 ```
 
-(Requires `using MongoDB.Driver;` and `using Wolverine.MongoDB.Internals;` — already present in `inbox.cs`.)
+(Requires `using MongoDB.Driver;` and `using Wolverine.MongoDB.Internals;`, already present in `inbox.cs`.)
 
 - [x] **Step 2: Run the test to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~handled_marker_stored_via_store_incoming_carries_keep_until"`
-Expected: FAIL — `doc.KeepUntil` is null.
+Expected: FAIL, `doc.KeepUntil` is null.
 
-- [x] **Step 3: Map `KeepUntil` in the constructor and `Read()`** — in `IncomingMessage.cs`, add to the envelope constructor (after the `ReceivedAt` assignment):
+- [x] **Step 3: Map `KeepUntil` in the constructor and `Read()`**: in `IncomingMessage.cs`, add to the envelope constructor (after the `ReceivedAt` assignment):
 
 ```csharp
 KeepUntil = envelope.KeepUntil;
@@ -272,7 +272,7 @@ envelope.KeepUntil = KeepUntil;
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~handled_marker_stored_via_store_incoming_carries_keep_until"`
 Expected: PASS
 
-- [x] **Step 5: Guard the eager path too** — in `eager_idempotency_transaction.cs`, after the existing `stored.ShouldNotBeNull();` at the end of the test, add:
+- [x] **Step 5: Guard the eager path too**: in `eager_idempotency_transaction.cs`, after the existing `stored.ShouldNotBeNull();` at the end of the test, add:
 
 ```csharp
 // Regression guard: the handled marker persisted by the eager idempotency check
@@ -300,14 +300,14 @@ rtk git commit -m "fix: handled inbox markers carry KeepUntil so the TTL index e
 
 ### Task 3: Dead-letter expiration must honor `DeadLetterQueueExpirationEnabled` ✅
 
-Wolverine's `DeadLetterQueueExpirationEnabled` defaults to **false** — RDBMS providers keep dead letters forever unless it is enabled. The Mongo store unconditionally stamps `ExpirationTime` and TTL-deletes every dead letter after 10 days: silent data loss under default settings.
+Wolverine's `DeadLetterQueueExpirationEnabled` defaults to **false**: RDBMS providers keep dead letters forever unless it is enabled. The Mongo store unconditionally stamps `ExpirationTime` and TTL-deletes every dead letter after 10 days: silent data loss under default settings.
 
 **Files:**
 - Modify: `src/Wolverine.MongoDB/Internals/DeadLetterMessage.cs:61` (nullable + ignore-if-null)
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Inbox.cs:139-140`
 - Test: Create `src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs`
 
-- [x] **Step 1: Write the failing tests** — create `src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs`:
+- [x] **Step 1: Write the failing tests**: create `src/Wolverine.MongoDB.Tests/dead_letter_expiration.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -368,9 +368,9 @@ public class dead_letter_expiration
 - [x] **Step 2: Run to verify the first test fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~dead_letter_expiration"`
-Expected: `expiration_disabled_by_default...` FAILS (ExpirationTime is stamped today); the compile may also fail on `ShouldBeNull()` against a non-nullable `DateTimeOffset` — that is the signal for Step 3's type change.
+Expected: `expiration_disabled_by_default...` FAILS (ExpirationTime is stamped today); the compile may also fail on `ShouldBeNull()` against a non-nullable `DateTimeOffset`, that is the signal for Step 3's type change.
 
-- [x] **Step 3: Implement** — in `DeadLetterMessage.cs` change the property to nullable and skip nulls so the TTL index ignores unexpirable docs:
+- [x] **Step 3: Implement**: in `DeadLetterMessage.cs` change the property to nullable and skip nulls so the TTL index ignores unexpirable docs:
 
 ```csharp
 [BsonElement("expirationTime")]
@@ -419,7 +419,7 @@ A crash between `StoreIncomingAsync` and the DLQ delete leaves a state where eve
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs:19-35`
 - Test: `src/Wolverine.MongoDB.Tests/dead_letter_replay.cs` (add tests)
 
-- [x] **Step 1: Write the failing tests** — add to `src/Wolverine.MongoDB.Tests/dead_letter_replay.cs`:
+- [x] **Step 1: Write the failing tests**: add to `src/Wolverine.MongoDB.Tests/dead_letter_replay.cs`:
 
 ```csharp
 [Fact]
@@ -483,7 +483,7 @@ public async Task replay_skips_and_unflags_bodyless_poison_dead_letters()
 }
 ```
 
-(Required usings in `dead_letter_replay.cs`: `MongoDB.Driver`, `Wolverine.MongoDB.Internals`, `Wolverine.Persistence.Durability.DeadLetterManagement`, `Wolverine.ComplianceTests` — add any missing.)
+(Required usings in `dead_letter_replay.cs`: `MongoDB.Driver`, `Wolverine.MongoDB.Internals`, `Wolverine.Persistence.Durability.DeadLetterManagement`, `Wolverine.ComplianceTests`, add any missing.)
 
 - [x] **Step 2: Run to verify both fail**
 
@@ -549,7 +549,7 @@ rtk git commit -m "fix: dead-letter replay converges after crashes and skips bod
 
 ---
 
-### Task 5: CI — run the library suite against a pinned Wolverine clone; run the demo against the freshly packed nupkg
+### Task 5: CI, run the library suite against a pinned Wolverine clone; run the demo against the freshly packed nupkg
 
 Today CI runs zero library tests and the demo tests exercise the *previously published* package. After this task, every PR runs the full compliance suite and the demo consumes the nupkg packed from the same commit.
 
@@ -648,7 +648,7 @@ jobs:
 
 Notes for the implementer: `Directory.Build.props:25` picks up the `WOLVERINE_SOURCE` env var for `WolverineSourcePath`, so no csproj change is needed. Testcontainers works on `ubuntu-latest` out of the box (the demo job already proves it).
 
-- [ ] **Step 3: Validate locally what can be validated** — the sed expression and nuget source addition:
+- [ ] **Step 3: Validate locally what can be validated**: the sed expression and nuget source addition:
 
 Run (PowerShell, from repo root):
 ```powershell
@@ -663,7 +663,7 @@ rtk git add .github/workflows/ci.yml
 rtk git commit -m "ci: run library compliance suite against pinned Wolverine clone; demo consumes fresh nupkg"
 ```
 
-Then follow the per-task PR procedure from the workflow section (`rtk git push -u ...`, `rtk gh pr create ...`) and watch the checks with `rtk gh pr checks --watch` until both jobs are green. Iterate here until they are — this task is not done until CI is green on the PR.
+Then follow the per-task PR procedure from the workflow section (`rtk git push -u ...`, `rtk gh pr create ...`) and watch the checks with `rtk gh pr checks --watch` until both jobs are green. Iterate here until they are, this task is not done until CI is green on the PR.
 
 ---
 
@@ -676,7 +676,7 @@ Wolverine defaults to `Balanced`. This store is only safe in `Solo` (and trivial
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs:64-70` (comment fix)
 - Test: Create `src/Wolverine.MongoDB.Tests/durability_mode_guard.cs`
 
-- [ ] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/durability_mode_guard.cs`:
+- [ ] **Step 1: Write the failing test**: create `src/Wolverine.MongoDB.Tests/durability_mode_guard.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -734,7 +734,7 @@ public class durability_mode_guard
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~durability_mode_guard"`
 Expected: `balanced_mode_fails_fast_at_startup` FAILS (no exception thrown).
 
-- [ ] **Step 3: Implement the guard** — in `MongoDbMessageStore.cs`, replace the empty `Initialize` and route the agent factories through the same check:
+- [ ] **Step 3: Implement the guard**: in `MongoDbMessageStore.cs`, replace the empty `Initialize` and route the agent factories through the same check:
 
 ```csharp
 public void Initialize(IWolverineRuntime runtime) => AssertSupportedDurabilityMode(runtime);
@@ -763,11 +763,11 @@ private static void AssertSupportedDurabilityMode(IWolverineRuntime runtime)
 }
 ```
 
-The check lives in *both* `Initialize` and the agent factories because `Initialize` timing differs across Wolverine versions; the agent factories are guaranteed to run before any durability work starts. If the test still fails after this change, the runtime is not calling either path before `StartAsync` returns — in that case also add the same `AssertSupportedDurabilityMode` call at the top of `MongoDbDurabilityAgent.StartAsync`.
+The check lives in *both* `Initialize` and the agent factories because `Initialize` timing differs across Wolverine versions; the agent factories are guaranteed to run before any durability work starts. If the test still fails after this change, the runtime is not calling either path before `StartAsync` returns, in that case also add the same `AssertSupportedDurabilityMode` call at the top of `MongoDbDurabilityAgent.StartAsync`.
 
-- [ ] **Step 4: Fix the misleading comment** — in `MongoDbMessageStore.Durability.cs` (`PublishDueScheduledMessagesAsync`), replace the sentence
+- [ ] **Step 4: Fix the misleading comment**: in `MongoDbMessageStore.Durability.cs` (`PublishDueScheduledMessagesAsync`), replace the sentence
 
-> `A crash after the flip but before enqueue leaves the doc Incoming owned by this node, which the incoming orphan-recovery loop re-picks — it is never silently stranded.`
+> `A crash after the flip but before enqueue leaves the doc Incoming owned by this node, which the incoming orphan-recovery loop re-picks, it is never silently stranded.`
 
 with
 
@@ -779,7 +779,7 @@ which releases all ownership (NodeAgentController.StartLocally). Balanced-mode
 recovery of this window is part of the multinode plan.
 ```
 
-- [ ] **Step 5: Sweep test hosts for missing Solo mode** — every `UseWolverine` host in the test project must set Solo or it now fails:
+- [ ] **Step 5: Sweep test hosts for missing Solo mode**: every `UseWolverine` host in the test project must set Solo or it now fails:
 
 Run: `rtk grep "UseWolverine" src/Wolverine.MongoDB.Tests --files-with-matches` then check each hit contains `DurabilityMode.Solo`. Add `opts.Durability.Mode = DurabilityMode.Solo;` where missing (known candidates: `end_to_end.cs`, `reassign_incoming.cs`, `scheduled_messages.cs`, `node_heartbeat.cs`, `inbox_identity.cs`, `admin_smoke.cs`, compliance subclasses).
 
@@ -806,7 +806,7 @@ A library must not mutate the process-wide BSON registry (it changes how the *ho
 - Delete: `src/Wolverine.MongoDB/Internals/MongoSerializerRegistration.cs`
 - Modify: `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs:45` (remove `MongoSerializerRegistration.Register();` and its comment)
 
-- [ ] **Step 1: Add `[BsonRepresentation(BsonType.DateTime)]` to every `DateTimeOffset`/`DateTimeOffset?` document property.** Complete list (do not miss one — a missed property silently reverts to the `[ticks, offset]` array format and breaks TTL/range queries on existing data):
+- [ ] **Step 1: Add `[BsonRepresentation(BsonType.DateTime)]` to every `DateTimeOffset`/`DateTimeOffset?` document property.** Complete list (do not miss one, a missed property silently reverts to the `[ticks, offset]` array format and breaks TTL/range queries on existing data):
 
 | File | Properties |
 |---|---|
@@ -824,14 +824,14 @@ Example (pattern is identical for each):
 public DateTimeOffset? KeepUntil { get; set; }
 ```
 
-(`LockDocument.ExpiresAt` and `NodeDocument.LastHealthCheck` are `DateTime` — BSON Date by default, no change.)
+(`LockDocument.ExpiresAt` and `NodeDocument.LastHealthCheck` are `DateTime`, BSON Date by default, no change.)
 
-- [ ] **Step 2: Delete the global registration** — delete `src/Wolverine.MongoDB/Internals/MongoSerializerRegistration.cs`, and in `WolverineMongoDbExtensions.UseMongoDbPersistence` remove the `MongoSerializerRegistration.Register();` line and the two comment lines above it.
+- [ ] **Step 2: Delete the global registration**: delete `src/Wolverine.MongoDB/Internals/MongoSerializerRegistration.cs`, and in `WolverineMongoDbExtensions.UseMongoDbPersistence` remove the `MongoSerializerRegistration.Register();` line and the two comment lines above it.
 
-- [ ] **Step 3: Run the serialization regression tests + full suite** — these tests assert raw BSON types (`doc["keepUntil"].BsonType == BsonType.DateTime`), which is exactly the contract this task must preserve:
+- [ ] **Step 3: Run the serialization regression tests + full suite**: these tests assert raw BSON types (`doc["keepUntil"].BsonType == BsonType.DateTime`), which is exactly the contract this task must preserve:
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~datetime_serialization"`
-Expected: PASS. Then run the full suite: `dotnet test src/Wolverine.MongoDB.Tests` — Expected: PASS.
+Expected: PASS. Then run the full suite: `dotnet test src/Wolverine.MongoDB.Tests`, Expected: PASS.
 
 - [ ] **Step 4: Commit**
 
@@ -850,7 +850,7 @@ Today only handlers whose dependency tree contains `IMongoDatabase` get the tran
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs:34-40`
 - Test: Create `src/Wolverine.MongoDB.Tests/transaction_frame_application.cs`
 
-- [ ] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/transaction_frame_application.cs`:
+- [ ] **Step 1: Write the failing test**: create `src/Wolverine.MongoDB.Tests/transaction_frame_application.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -962,7 +962,7 @@ public bool CanApply(IChain chain, IServiceContainer container)
 }
 ```
 
-Add `using Wolverine.Runtime.Handlers;` if `HandlerCalls()` requires it. If `IChain` in this Wolverine version does not expose `HandlerCalls()`, use `chain.As<HandlerChain>().Handlers` for handler chains and fall back to the dependency scan for non-handler chains — verify against the Wolverine clone (`C:\source\external\wolverine\src\Wolverine\Configuration\IChain.cs`) before improvising.
+Add `using Wolverine.Runtime.Handlers;` if `HandlerCalls()` requires it. If `IChain` in this Wolverine version does not expose `HandlerCalls()`, use `chain.As<HandlerChain>().Handlers` for handler chains and fall back to the dependency scan for non-handler chains, verify against the Wolverine clone (`C:\source\external\wolverine\src\Wolverine\Configuration\IChain.cs`) before improvising.
 
 - [ ] **Step 4: Run the new tests + full suite, then commit**
 
@@ -975,7 +975,7 @@ rtk git commit -m "fix: apply transactions to handlers using IMongoCollection<T>
 
 ---
 
-### Task 9: `MongoDbUnitOfWork` — session-bound write helper
+### Task 9: `MongoDbUnitOfWork`, session-bound write helper
 
 The sharpest consumer edge: forgetting to pass the session compiles, runs, and silently breaks atomicity. `MongoDbUnitOfWork` binds the session to every write so it *cannot* be forgotten. Handlers take it as a parameter instead of (or alongside) `IClientSessionHandle`.
 
@@ -985,7 +985,7 @@ The sharpest consumer edge: forgetting to pass the session compiles, runs, and s
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs` (`CanApply` recognizes it)
 - Test: Create `src/Wolverine.MongoDB.Tests/unit_of_work.cs`
 
-- [ ] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/unit_of_work.cs`:
+- [ ] **Step 1: Write the failing test**: create `src/Wolverine.MongoDB.Tests/unit_of_work.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -1079,7 +1079,7 @@ public class unit_of_work
 Run: `dotnet build src/Wolverine.MongoDB.Tests`
 Expected: compile error `CS0246: MongoDbUnitOfWork`.
 
-- [ ] **Step 3: Create the public API** — `src/Wolverine.MongoDB/MongoDbUnitOfWork.cs`:
+- [ ] **Step 3: Create the public API**: `src/Wolverine.MongoDB/MongoDbUnitOfWork.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -1165,7 +1165,7 @@ public class SessionBoundCollection<T>
 }
 ```
 
-- [ ] **Step 4: Emit the variable from the frame** — in `TransactionalFrame.cs`:
+- [ ] **Step 4: Emit the variable from the frame**: in `TransactionalFrame.cs`:
 
 In the constructor, after `Session = ...`, add:
 
@@ -1197,7 +1197,7 @@ writer.Write(
 
 Add `using Wolverine.MongoDB;` (or fully qualify) for the type reference.
 
-- [ ] **Step 5: Teach `CanApply` about the new parameter type** — in the `HandlerCalls` check from Task 8, extend the predicate:
+- [ ] **Step 5: Teach `CanApply` about the new parameter type**: in the `HandlerCalls` check from Task 8, extend the predicate:
 
 ```csharp
 p.ParameterType == typeof(IClientSessionHandle) || p.ParameterType == typeof(MongoDbUnitOfWork)
@@ -1219,13 +1219,13 @@ rtk git commit -m "feat: MongoDbUnitOfWork session-bound write helper for handle
 
 ### Task 10: Pin majority write/read concerns on the store's database handle
 
-If the consumer's `MongoClient` is configured `w:1`, the "durable" inbox write can be acknowledged before replication and lost on failover. Pin `w:majority` + journaled writes and majority reads on the store's own handle (the app-facing `IMongoDatabase` registration stays untouched — domain write concerns are the app's choice).
+If the consumer's `MongoClient` is configured `w:1`, the "durable" inbox write can be acknowledged before replication and lost on failover. Pin `w:majority` + journaled writes and majority reads on the store's own handle (the app-facing `IMongoDatabase` registration stays untouched, domain write concerns are the app's choice).
 
 **Files:**
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs:28` (ctor)
 - Test: Create `src/Wolverine.MongoDB.Tests/durability_concerns.cs`
 
-- [ ] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/durability_concerns.cs`:
+- [ ] **Step 1: Write the failing test**: create `src/Wolverine.MongoDB.Tests/durability_concerns.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -1258,9 +1258,9 @@ public class durability_concerns
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~durability_concerns"`
-Expected: FAIL — collections inherit the client default (`w:1` acknowledged or unset).
+Expected: FAIL, collections inherit the client default (`w:1` acknowledged or unset).
 
-- [ ] **Step 3: Implement** — in the `MongoDbMessageStore` constructor, replace
+- [ ] **Step 3: Implement**: in the `MongoDbMessageStore` constructor, replace
 
 ```csharp
 _database = client.GetDatabase(databaseName);
@@ -1359,7 +1359,7 @@ private async Task EnsureIndexesAsync()
 }
 ```
 
-Note: `RecordDocs` is a private property in `MongoDbMessageStore.NodeAgents.cs` — it is visible here because both files are the same partial class. The old single-field `ExecutionTime` and `OwnerId` (outgoing) index definitions are removed; pre-existing deployments keep the stale indexes harmlessly (mention in CHANGELOG, no migration for a beta).
+Note: `RecordDocs` is a private property in `MongoDbMessageStore.NodeAgents.cs`, it is visible here because both files are the same partial class. The old single-field `ExecutionTime` and `OwnerId` (outgoing) index definitions are removed; pre-existing deployments keep the stale indexes harmlessly (mention in CHANGELOG, no migration for a beta).
 
 - [ ] **Step 2: Add an index-shape test** to `src/Wolverine.MongoDB.Tests/admin_smoke.cs`:
 
@@ -1379,7 +1379,7 @@ public async Task migrate_creates_the_expected_indexes()
 }
 ```
 
-(Driver-generated index names follow `field_direction` convention; if the assertion fails on naming, print `names` and adjust to the actual generated names — the point is presence, not naming.)
+(Driver-generated index names follow `field_direction` convention; if the assertion fails on naming, print `names` and adjust to the actual generated names, the point is presence, not naming.)
 
 - [ ] **Step 3: Convert `SummarizeAllAsync`** in `MongoDbMessageStore.DeadLetters.cs` to a `$group` pipeline:
 
@@ -1444,7 +1444,7 @@ rtk git commit -m "perf: compound/TTL index tuning and server-side aggregation s
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`, `FOLLOWUPS.md`, `CHANGELOG.md`, `demo/README.md`, `demo/CLAUDE.md`
 
-- [ ] **Step 1: `README.md`** — add/update these sections (adapt to the existing structure):
+- [ ] **Step 1: `README.md`**: add/update these sections (adapt to the existing structure):
   - **Durability mode**: state that `opts.Durability.Mode = DurabilityMode.Solo` is required and that startup now fails fast on `Balanced` (multinode is on the roadmap).
   - **Dead-letter retention**: dead letters are kept forever by default; opting into `DeadLetterQueueExpirationEnabled` activates TTL-based expiry.
   - **Write durability**: document that the message store pins `w:majority` (journaled) + majority reads internally, independent of the consumer's `MongoClient` configuration, and that the app-facing `IMongoDatabase` is not modified.
@@ -1462,22 +1462,22 @@ public static async Task<OrderPlaced> Handle(PlaceOrder cmd, MongoDbUnitOfWork m
 
   Keep the raw `IClientSessionHandle` pattern documented as the advanced/repository-friendly alternative.
 
-- [ ] **Step 2: `CLAUDE.md`** — update the "Key Design Decisions" and "Important Constraints" sections:
+- [ ] **Step 2: `CLAUDE.md`**: update the "Key Design Decisions" and "Important Constraints" sections:
   - Add: dead-letter TTL only active when `DeadLetterQueueExpirationEnabled`; handled markers expire via `KeepUntil` TTL; store pins majority write/read concerns; `Balanced` mode throws at startup; `MongoDbUnitOfWork` is the recommended handler write surface; `LoadOutgoingAsync` is owner-scoped and batch-limited.
   - Update the CI description: library compliance tests now run in CI against a pinned Wolverine clone (`WOLVERINE_TAG` in `ci.yml`); the demo job consumes the freshly packed nupkg (version `0.0.0-ci`).
   - Remove the now-false statements: "CI skips library tests for now" and the `[ModuleInitializer]` serializer mention.
 
-- [ ] **Step 3: `FOLLOWUPS.md`** — prune completed items and add new ones:
+- [ ] **Step 3: `FOLLOWUPS.md`**: prune completed items and add new ones:
   - **Remove** (done in this plan): "Missing `EnvelopeId` index", "Unbounded `wolverine_node_records`" (TTL added; the `DeleteOldNodeRecordsAsync` override remains a multinode-plan item), "Process-wide `DateTimeOffset` serializer", "Session-bound write helper".
   - **Keep**: `ClearAllAsync` scope, node-number reuse, unqualified `IMongoDatabase` registration, `HasLeadershipLock` external-delete edge.
   - **Update** the multinode entry to point at `docs/superpowers/plans/2026-06-09-multinode-support.md`.
-  - **Add**: "Old single-field `executionTime`/outgoing `ownerId` indexes are not dropped on existing deployments — add an index migration if this ever matters pre-1.0."
+  - **Add**: "Old single-field `executionTime`/outgoing `ownerId` indexes are not dropped on existing deployments, add an index migration if this ever matters pre-1.0."
 
-- [ ] **Step 4: `CHANGELOG.md`** — add an `## [Unreleased]` section listing every change from Tasks 1–11 under `### Fixed` / `### Added` / `### Changed`, explicitly calling out the two behavior changes: (a) dead letters no longer expire by default, (b) startup now throws on `DurabilityMode.Balanced`.
+- [ ] **Step 4: `CHANGELOG.md`**: add an `## [Unreleased]` section listing every change from Tasks 1–11 under `### Fixed` / `### Added` / `### Changed`, explicitly calling out the two behavior changes: (a) dead letters no longer expire by default, (b) startup now throws on `DurabilityMode.Balanced`.
 
-- [ ] **Step 5: `demo/README.md` + `demo/CLAUDE.md`** — add a short "Session-bound writes" note: the demo's repository pattern (explicit `IClientSessionHandle` threading) remains valid and is shown in all handlers; link to the library README's `MongoDbUnitOfWork` section as the lighter-weight alternative for handlers that talk to collections directly. Update the demo CLAUDE.md "Dependencies" note to mention CI consumes the freshly packed library.
+- [ ] **Step 5: `demo/README.md` + `demo/CLAUDE.md`**: add a short "Session-bound writes" note: the demo's repository pattern (explicit `IClientSessionHandle` threading) remains valid and is shown in all handlers; link to the library README's `MongoDbUnitOfWork` section as the lighter-weight alternative for handlers that talk to collections directly. Update the demo CLAUDE.md "Dependencies" note to mention CI consumes the freshly packed library.
 
-- [ ] **Step 6: Verify docs claims against code** — re-read each edited file once; every statement must be true *after* Tasks 1–11 (e.g. don't claim index migration happens automatically).
+- [ ] **Step 6: Verify docs claims against code**: re-read each edited file once; every statement must be true *after* Tasks 1–11 (e.g. don't claim index migration happens automatically).
 
 - [ ] **Step 7: Commit**
 
@@ -1488,7 +1488,7 @@ rtk git commit -m "docs: hardening pass — durability mode, DLQ retention, writ
 
 ---
 
-### Task 13: Final verification (on `main`, after the Task 12 PR merges — no branch, no PR)
+### Task 13: Final verification (on `main`, after the Task 12 PR merges, no branch, no PR)
 
 - [ ] **Step 1: Full local run against merged main**
 
@@ -1507,4 +1507,4 @@ rtk gh run list --branch main --limit 3
 
 - [ ] **Step 3: Self-review merged main against this plan**
 
-Run: `rtk git log --oneline -15` — one merged PR per task (1–12). Then confirm every file in the File Structure Overview was touched: `rtk git diff <commit-before-task-1> main --stat`. Anything missing means a task PR was not merged — stop and resolve before starting the multinode plan.
+Run: `rtk git log --oneline -15`: one merged PR per task (1–12). Then confirm every file in the File Structure Overview was touched: `rtk git diff <commit-before-task-1> main --stat`. Anything missing means a task PR was not merged: stop and resolve before starting the multinode plan.

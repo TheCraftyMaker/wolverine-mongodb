@@ -2,7 +2,7 @@
 
 > **Task:** D5 from `docs/superpowers/plans/2026-06-21-persistence-suite-completion.md`  
 > **Branch:** `docs/demo-and-test-inventory`  
-> **Status:** ✅ Complete (design-only — no code changes)  
+> **Status:** ✅ Complete (design-only, no code changes)  
 > **D6 status:** Not yet merged. Collection naming follows the plan's LD3 recommendation
 > (`type.Name.ToLowerInvariant()`, un-prefixed). Refine section 5 once D6 lands and
 > confirms or overrides that choice.
@@ -24,7 +24,7 @@ document as their specification; T1.1 uses section 5 (collection naming) as an i
 
 The existing demo uses the **repository + `IClientSessionHandle`** pattern. The `OrderNote`
 entity showcases the new `[Entity]`/`IStorageAction<T>` surface side-by-side with the
-existing approach — demonstrating that both patterns coexist in the same Wolverine host and
+existing approach: demonstrating that both patterns coexist in the same Wolverine host and
 commit atomically with the outbox.
 
 `OrderNote` is chosen over `CustomerProfile` because:
@@ -44,7 +44,7 @@ namespace OrderDemo.Domain.Notes;
 /// <summary>
 /// A freeform note attached to an order. Persisted as a MongoDB document in the
 /// <c>ordernote</c> collection via the Wolverine-generated entity frames (Tier 1).
-/// No repository, no manual session — <see cref="Insert{T}"/>/<see cref="Update{T}"/>
+/// No repository, no manual session: <see cref="Insert{T}"/>/<see cref="Update{T}"/>
 /// /<see cref="Delete{T}"/> return values drive the write through the TransactionalFrame.
 /// </summary>
 public sealed class OrderNote
@@ -64,9 +64,9 @@ public sealed class OrderNote
 }
 ```
 
-**Identity:** `Guid Id` — maps to `_id` via the driver's default `Id`-member convention.
+**Identity:** `Guid Id` maps to `_id` via the driver's default `Id`-member convention.
 No attribute required. This exercises the same Guid id path the saga uses, but without
-`Saga.Version` OCC (entity writes are plain upserts — see LD2).
+`Saga.Version` OCC (entity writes are plain upserts, see LD2).
 
 ### 1.3 Commands
 
@@ -75,7 +75,7 @@ No attribute required. This exercises the same Guid id path the saga uses, but w
 namespace OrderDemo.Contracts.Commands.Notes;
 
 /// <summary>Adds a new note to an order. The handler creates the entity and returns
-/// Insert&lt;OrderNote&gt; — no pre-existing document required.</summary>
+/// Insert&lt;OrderNote&gt;. No pre-existing document required.</summary>
 public sealed record AddOrderNoteCommand(Guid OrderId, string Text, string Author);
 
 // demo/src/OrderDemo.Contracts/Commands/Notes/EditOrderNoteCommand.cs
@@ -95,7 +95,7 @@ public sealed record DeleteOrderNoteCommand(Guid NoteId);
 
 **Id resolution:** `[Entity("NoteId")]` binds the `NoteId` property on the command to the
 `Id` member of `OrderNote`. This is the explicit `EntityAttribute` constructor arg
-(`EntityAttribute.cs` optional `string` param — "names the id member on the message").
+(`EntityAttribute.cs` optional `string` param: "names the id member on the message").
 Using an explicit binding avoids requiring the command property to be named `OrderNoteId`
 (which is the auto-convention fallback).
 
@@ -112,12 +112,12 @@ namespace OrderDemo.Application.Notes;
 
 /// <summary>
 /// Demonstrates the Tier-1 generic entity persistence surface:
-///   Insert&lt;T&gt;  — create a new entity (no prior document required)
-///   Update&lt;T&gt;  — mutate a loaded entity (entity loaded via [Entity])
-///   Delete&lt;T&gt;  — remove a loaded entity (entity loaded via [Entity])
+///   Insert&lt;T&gt;: create a new entity (no prior document required)
+///   Update&lt;T&gt;: mutate a loaded entity (entity loaded via [Entity])
+///   Delete&lt;T&gt;: remove a loaded entity (entity loaded via [Entity])
 ///
 /// Wolverine's generated frame opens the TransactionalFrame session, runs the handler,
-/// then persists the returned storage action inside the same transaction — the entity
+/// then persists the returned storage action inside the same transaction: the entity
 /// write and any cascaded outbox entries commit atomically. No manual session needed.
 /// </summary>
 public static class OrderNoteHandler
@@ -158,12 +158,12 @@ public static class OrderNoteHandler
   helpers on the concrete Wolverine types. The exact factory API will be confirmed in T1.1
   against the submodule source; adapt if the constructors take the entity directly
   (`new Insert<OrderNote>(entity)`).
-- No `IClientSessionHandle` parameter — the generated `TransactionalFrame` resolves it. This
+- No `IClientSessionHandle` parameter: the generated `TransactionalFrame` resolves it. This
   is the key contrast with the repository-based handlers (`PlaceOrderHandler`, etc.) that
   accept `IClientSessionHandle` explicitly.
 - `AutoApplyTransactions()` in the fixture/program wires the transactional frame automatically.
 - The handler is intentionally `static` to match Wolverine convention and remove any DI
-  dependency — demonstrating that a purely functional entity handler needs zero infrastructure.
+  dependency: demonstrating that a purely functional entity handler needs zero infrastructure.
 
 ### 1.5 Discovery + Routing
 
@@ -174,14 +174,14 @@ public static class OrderNoteHandler
 opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly); // already includes Application.*
 
 // Route note commands through a durable queue so the outbox path is exercised.
-// NoteId-bearing commands don't need their own event route — they are fire-and-forget
+// NoteId-bearing commands don't need their own event route, they are fire-and-forget
 // commands invoked inline in tests (not via the outbox fan-out path).
 // No LocalQueueFor<T>().UseDurableInbox() needed unless the commands flow through RabbitMQ.
 // (For demo API: POST /orders/{id}/notes → sends AddOrderNoteCommand inline.)
 ```
 
 No new routing entries are needed in `OrdersFixture` for the `AddOrderNoteCommand`/
-`EditOrderNoteCommand`/`DeleteOrderNoteCommand` — these are invoked via `TrackActivity()
+`EditOrderNoteCommand`/`DeleteOrderNoteCommand`: these are invoked via `TrackActivity()
 .InvokeMessageAndWaitAsync(...)` directly from tests (fire-and-return). The entity write
 still exercises the full outbox transaction because `AutoApplyTransactions()` wraps the
 handler and `UseDurableInbox()` on the overall host confirms commit.
@@ -193,7 +193,7 @@ demo/tests/OrderDemo.IntegrationTests/OrderNoteFlowTests.cs
 ```
 
 ```csharp
-// [Collection("orders")] — shares OrdersFixture, one DB per test.
+// [Collection("orders")], shares OrdersFixture, one DB per test.
 // Reads the "ordernote" collection directly to verify persistence.
 private const string NoteCollection = "ordernote"; // MongoConstants.EntityCollectionName(typeof(OrderNote))
 
@@ -207,9 +207,9 @@ Scenarios:
 | `can_add_order_note` | `Insert<OrderNote>` persists to `ordernote`; entity doc readable |
 | `can_edit_order_note` | `Update<OrderNote>` overwrites the doc; `UpdatedAt` set |
 | `can_delete_order_note` | `Delete<OrderNote>` removes the doc |
-| `edit_note_not_found_is_skipped` | `Required=true` — handler not executed when entity missing |
+| `edit_note_not_found_is_skipped` | `Required=true`, handler not executed when entity missing |
 | `delete_note_not_found_is_skipped` | same, for delete |
-| `add_note_commits_atomically_with_outbox` | entity write + outbox entry committed together (force rollback → neither persists) — optional, light version of `entity_atomicity.cs` |
+| `add_note_commits_atomically_with_outbox` | entity write + outbox entry committed together (force rollback → neither persists), optional, light version of `entity_atomicity.cs` |
 
 The last test is **optional in T1.3** (the full rollback proof is in `entity_atomicity.cs`);
 a simpler "entity persists AND at least one outbox envelope was committed" assertion is sufficient
@@ -273,7 +273,7 @@ namespace OrderDemo.Application.Audit;
 ///
 /// MongoDbUnitOfWork is injected by Wolverine's generated frame (constructed from the
 /// open IClientSessionHandle). Every write through Collection&lt;T&gt;(name) automatically
-/// participates in the TransactionalFrame transaction — it is impossible to forget the session.
+/// participates in the TransactionalFrame transaction: it is impossible to forget the session.
 /// </summary>
 public static class RecordOrderAuditHandler
 {
@@ -291,7 +291,7 @@ public static class RecordOrderAuditHandler
             OccurredAt = DateTimeOffset.UtcNow
         };
 
-        // Collection<T>(name) returns a session-bound write surface — the session is
+        // Collection<T>(name) returns a session-bound write surface: the session is
         // threaded automatically so the write commits with the outbox in one transaction.
         await uow.Collection<OrderAuditEntry>("order_audit_entries").InsertOneAsync(entry, ct);
     }
@@ -299,12 +299,12 @@ public static class RecordOrderAuditHandler
 ```
 
 **Key contrasts with existing handlers:**
-- No `IClientSessionHandle` parameter — the UoW wraps it
-- No repository interface — writes directly to a named collection
-- No domain aggregate — purely infrastructure-facing logic
+- No `IClientSessionHandle` parameter: the UoW wraps it
+- No repository interface: writes directly to a named collection
+- No domain aggregate: purely infrastructure-facing logic
 
 The `"order_audit_entries"` collection name is specified by the caller (not derived from the
-type name) — demonstrating the `Collection<T>(name)` flexibility. The UoW does NOT use the
+type name), demonstrating the `Collection<T>(name)` flexibility. The UoW does NOT use the
 entity-collection naming convention; it is a free-form write surface.
 
 ### 2.4 Discovery + Routing
@@ -313,7 +313,7 @@ entity-collection naming convention; it is a free-form write surface.
 // In OrdersFixture.CreateHostAsync and Program.cs:
 
 // opts.Discovery.IncludeAssembly(typeof(PlaceOrderHandler).Assembly) already includes
-// Application.Audit.RecordOrderAuditHandler — no new discovery entry needed.
+// Application.Audit.RecordOrderAuditHandler, no new discovery entry needed.
 
 // RecordOrderAuditCommand is an inline command (invoked directly by the test/API).
 // No LocalQueueFor<T> route needed unless the command flows through RabbitMQ.
@@ -349,7 +349,7 @@ saga handler → outbox entry → local durable queue → projector → read mod
 ```
 
 The `FulfillmentDeliveryStatus` read model records shipping + delivery timestamps that
-`OrderSummary` does not track (orthogonal data — no duplication, no conflict).
+`OrderSummary` does not track (orthogonal data, no duplication, no conflict).
 
 ### 3.2 Read Model Shape
 
@@ -436,7 +436,7 @@ public static class FulfillmentStatusProjector
 ```
 
 **Notes:**
-- `IMongoDatabase db` — **not** `MongoDbUnitOfWork`; the projector runs outside the saga's
+- `IMongoDatabase db`: **not** `MongoDbUnitOfWork`; the projector runs outside the saga's
   transaction (it receives the cascade event from the outbox queue). The inbox-delivery path
   has its own transaction; projector writes are fine outside the saga session.
 - `$setOnInsert` for `ShippedAt` on FulfillmentShippedEvent prevents a late/retried event
@@ -449,7 +449,7 @@ public static class FulfillmentStatusProjector
 ### 3.4 Queue Routes + OrdersFixture Changes
 
 ```csharp
-// In OrdersFixture.CreateHostAsync — add routes for the saga cascade events:
+// In OrdersFixture.CreateHostAsync, add routes for the saga cascade events:
 
 opts.LocalQueueFor<Contracts.Events.FulfillmentShippedEvent>().UseDurableInbox();
 opts.LocalQueueFor<Contracts.Events.FulfillmentCompletedEvent>().UseDurableInbox();
@@ -459,7 +459,7 @@ These entries are also needed in `Program.cs` (for the production app) and in th
 `OrdersFixture` (for integration tests). Without them the cascade events are dropped (they
 have no handler route in the current config).
 
-`MultipleHandlerBehavior.Separated` is already set — the saga and the new projector both
+`MultipleHandlerBehavior.Separated` is already set: the saga and the new projector both
 handle `OrderShippedApplicationEvent`/`OrderPlacedApplicationEvent` independently.
 `FulfillmentShippedEvent` and `FulfillmentCompletedEvent` have **only one handler each**
 (the new projector), so no `Separated` concern for those message types.
@@ -480,7 +480,7 @@ Or as an extension to the existing `ship_order_advances_saga_state` / `confirm_d
 | `fulfillment_completed_event_updates_delivery_status` | After confirm: same doc has `Status="Delivered"`, `DeliveredAt` set |
 | `fulfillment_projection_is_idempotent` | Replay of `FulfillmentShippedEvent` → same doc, no duplication |
 
-**Preferred approach:** extend `SagaFlowTests` with `saga_cascade_events_are_projected` — a
+**Preferred approach:** extend `SagaFlowTests` with `saga_cascade_events_are_projected`, a
 single end-to-end test that ships + confirms, then reads the `fulfillment_delivery_statuses`
 collection and asserts both timestamps are set. Keeps the saga-cascade path in one file.
 
@@ -511,7 +511,7 @@ public static string EntityCollectionName(Type entityType)
   Prefixing (like `wolverine_entity_todo`) would be misleading and non-idiomatic MongoDB.
 - Lowercased type name: minimal, collision-free per type, mirrors the saga convention
   (`wolverine_saga_orderfulfillmentsaga = "wolverine_saga_" + type.Name.ToLowerInvariant()`).
-- The caller controls collection names for `MongoDbUnitOfWork.Collection<T>(name)` writes —
+- The caller controls collection names for `MongoDbUnitOfWork.Collection<T>(name)` writes:
   those are free-form and NOT derived from this convention.
 
 ### 4.2 Implications for the Compliance Host
@@ -521,7 +521,7 @@ The compliance host must expose `Load`/`Persist` against the **same** collection
 frames write to. Specifically:
 
 ```csharp
-// storage_action_compliance.cs — Load and Persist MUST use EntityCollectionName:
+// storage_action_compliance.cs: Load and Persist MUST use EntityCollectionName:
 private static IMongoCollection<Todo> TodoCollection(AppFixture f)
     => f.Client.GetDatabase(AppFixture.DatabaseName)
         .GetCollection<Todo>(MongoConstants.EntityCollectionName(typeof(Todo)));  // "todo"
@@ -537,11 +537,11 @@ public override Task Persist(Todo todo)
 If D6 changes the naming convention, both the frame factory and the compliance host
 `Load`/`Persist` must be updated together to match. They are a coupled pair.
 
-### 4.3 `ClearAllAsync` — No Cleanup of Entity Collections
+### 4.3 `ClearAllAsync`: No Cleanup of Entity Collections
 
 Entity collections (`ordernote`, `todo`, etc.) are **not** Wolverine system collections.
 `ClearAllAsync` (via `IMessageStoreAdmin.ClearAllAsync`) clears system collections and drops
-`wolverine_saga_*` collections. It must **not** drop entity collections — those are
+`wolverine_saga_*` collections. It must **not** drop entity collections: those are
 application state. The compliance host clears its `todo` collection manually in its
 `InitializeAsync`/`DisposeAsync` lifecycle (or via `configureWolverine` before each test).
 
@@ -551,7 +551,7 @@ application state. The compliance host clears its `todo` collection manually in 
 
 ### 5.1 Tier 1: Generic Entity / `IStorageAction<T>` Persistence
 
-**Library tests** — `src/Wolverine.MongoDB.Tests/storage_action_compliance.cs`
+**Library tests:** `src/Wolverine.MongoDB.Tests/storage_action_compliance.cs`
 (single file, `: StorageActionCompliance`):
 
 | Compliance fact | What it exercises |
@@ -565,9 +565,9 @@ application state. The compliance host clears its `todo` collection manually in 
 | `use_generic_action_as_update` | `IStorageAction<Todo>` with `StorageAction.Update` |
 | `use_generic_action_as_store` | `IStorageAction<Todo>` with `StorageAction.Store` |
 | `use_generic_action_as_delete` | `IStorageAction<Todo>` with `StorageAction.Delete` |
-| `do_nothing_as_generic_action` | `StorageAction.Nothing` — no-op, entity unchanged |
-| `do_nothing_if_storage_action_is_null` | null `IStorageAction<Todo>` — no-op |
-| `do_nothing_if_generic_storage_action_is_null` | null generic action — no-op |
+| `do_nothing_as_generic_action` | `StorageAction.Nothing` (no-op, entity unchanged) |
+| `do_nothing_if_storage_action_is_null` | null `IStorageAction<Todo>` (no-op) |
+| `do_nothing_if_generic_storage_action_is_null` | null generic action (no-op) |
 | `do_not_execute_the_handler_if_the_entity_is_not_found` | Required=true, missing entity → handler skipped |
 | `handler_not_required_entity_attributes` | Required=false, missing entity → handler executes with null |
 | `entity_can_be_used_in_before_methods_...` | `[Entity]` in before-middleware method |
@@ -576,30 +576,30 @@ application state. The compliance host clears its `todo` collection manually in 
 
 All ~17 facts target the `todo` collection via `MongoConstants.EntityCollectionName(typeof(Todo))`.
 
-**Library tests** — `src/Wolverine.MongoDB.Tests/entity_atomicity.cs`:
+**Library tests:** `src/Wolverine.MongoDB.Tests/entity_atomicity.cs`:
 
 | Test method | What it proves |
 |---|---|
 | `entity_write_and_outbox_commit_together` | `Insert<T>` + cascade message → both persist on success |
 | `entity_write_rolls_back_with_outbox` | post-write throw → neither entity doc nor outbox envelope persists |
-| `saga_and_entity_coexist_in_same_handler` | handler returns `(SagaUpdate, entity Insert<T>)` — saga OCC untouched, entity persisted |
+| `saga_and_entity_coexist_in_same_handler` | handler returns `(SagaUpdate, entity Insert<T>)`, saga OCC untouched, entity persisted |
 | `entity_not_found_does_not_execute_handler` | end-to-end: required `[Entity]` missing → handler body never runs |
 
-**Demo tests** — `demo/tests/OrderDemo.IntegrationTests/OrderNoteFlowTests.cs`:
+**Demo tests:** `demo/tests/OrderDemo.IntegrationTests/OrderNoteFlowTests.cs`:
 
 | Test method | What it proves |
 |---|---|
 | `can_add_order_note` | `Insert<OrderNote>` → doc in `ordernote` collection |
 | `can_edit_order_note` | `Update<OrderNote>` → doc updated; `UpdatedAt` populated |
 | `can_delete_order_note` | `Delete<OrderNote>` → doc removed |
-| `edit_note_not_found_is_skipped` | `Required=true` — no entity → command silently skipped |
+| `edit_note_not_found_is_skipped` | `Required=true`, no entity → command silently skipped |
 | `delete_note_not_found_is_skipped` | same for delete |
 
 ---
 
 ### 5.2 Tier 2: `ISagaStoreDiagnostics`
 
-**Library tests** — `src/Wolverine.MongoDB.Tests/saga_store_diagnostics.cs`
+**Library tests:** `src/Wolverine.MongoDB.Tests/saga_store_diagnostics.cs`
 (per-provider integration test; no unified compliance spec exists):
 
 | Test method | What it proves |
@@ -619,14 +619,14 @@ All ~17 facts target the `todo` collection via `MongoConstants.EntityCollectionN
 
 ### 5.3 Tier 3: Parity Capabilities (Document-as-Non-Goal)
 
-No library tests or demo tests — these are documentation-only decisions.
+No library tests or demo tests: these are documentation-only decisions.
 
 | Capability | Recommendation | Library test | Demo test |
 |---|---|---|---|
-| Multi-tenancy | DEFER — non-goal (matches Cosmos/Raven) | None | None |
-| Durable listeners | DEFER — keep `NullListenerStore` (matches Cosmos/Raven) | None | None |
-| Query-spec frames | DEFER — non-goal (Marten/EF only) | None | None |
-| Soft-delete | DEFER — non-goal (Marten only) | None | None |
+| Multi-tenancy | DEFER, non-goal (matches Cosmos/Raven) | None | None |
+| Durable listeners | DEFER, keep `NullListenerStore` (matches Cosmos/Raven) | None | None |
+| Query-spec frames | DEFER, non-goal (Marten/EF only) | None | None |
+| Soft-delete | DEFER, non-goal (Marten only) | None | None |
 
 The existing `ClearAllAsync`, startup, and admin tests implicitly confirm the non-goal
 defaults are inert (no-op implementations don't break anything). No new test files.
@@ -635,7 +635,7 @@ defaults are inert (no-op implementations don't break anything). No new test fil
 
 ### 5.4 Tier 4: Hardening + Tracked Follow-ups
 
-**Library tests — existing or new per task:**
+**Library tests, existing or new per task:**
 
 | Task | Library test | Notes |
 |---|---|---|
@@ -644,7 +644,7 @@ defaults are inert (no-op implementations don't break anything). No new test fil
 | T4.5 multinode leadership | `leadership_election_compliance.cs` (un-gated) | 5× green on net9.0 + net10.0 required before un-gating |
 | T4.6 hardening docs | None (doc only) | Pre-1.0 backlog items documented, not implemented |
 
-**Demo tests — `MongoDbUnitOfWork` example (T4.1):**
+**Demo tests, `MongoDbUnitOfWork` example (T4.1):**
 
 New file: `demo/tests/OrderDemo.IntegrationTests/OrderAuditTests.cs`
 
@@ -653,7 +653,7 @@ New file: `demo/tests/OrderDemo.IntegrationTests/OrderAuditTests.cs`
 | `can_record_order_audit_entry` | `Handle(RecordOrderAuditCommand, MongoDbUnitOfWork)` → doc in `order_audit_entries` |
 | `audit_entry_commits_atomically_with_outbox` | post-write throw → neither audit doc nor outbox envelope persists (session enrolled) |
 
-**Demo tests — fulfillment projector (T4.2):**
+**Demo tests, fulfillment projector (T4.2):**
 
 Extension to `SagaFlowTests.cs` (single new fact) or new `FulfillmentProjectorTests.cs`:
 
@@ -708,8 +708,8 @@ Extension to `SagaFlowTests.cs` (single new fact) or new `FulfillmentProjectorTe
 | Compliance `Load`/`Persist` collection | `MongoConstants.EntityCollectionName(typeof(Todo))` = `"todo"` | T1.1 |
 | `ClearAllAsync` entity scope | No cleanup of entity collections (app-owned, not Wolverine system) | D6, T1.1 |
 | Tier-4 UoW handler | `RecordOrderAuditHandler(RecordOrderAuditCommand, MongoDbUnitOfWork)` | T4.1 |
-| UoW collection naming | Caller-specified string (`"order_audit_entries"`) — free-form | T4.1 |
+| UoW collection naming | Caller-specified string (`"order_audit_entries"`), free-form | T4.1 |
 | Tier-4 fulfillment projector | `FulfillmentStatusProjector`: handles `FulfillmentShippedEvent` + `FulfillmentCompletedEvent` | T4.2 |
-| Projector write surface | `IMongoDatabase` (not UoW — projector runs outside saga session) | T4.2 |
+| Projector write surface | `IMongoDatabase` (not UoW, projector runs outside saga session) | T4.2 |
 | Fulfillment collection | `"fulfillment_delivery_statuses"` (caller-specified) | T4.2 |
 | Saga cascade queue routes | Add `LocalQueueFor<FulfillmentShipped/Completed>().UseDurableInbox()` | T4.2 |

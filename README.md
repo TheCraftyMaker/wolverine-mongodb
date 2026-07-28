@@ -2,15 +2,14 @@
 
 A native MongoDB message store for [Wolverine](https://wolverinefx.net)'s
 transactional inbox/outbox. Wolverine ships first-class durability providers
-for PostgreSQL and SQL Server, but none for MongoDB — and the EF Core + MongoDB
+for PostgreSQL and SQL Server, but none for MongoDB, and the EF Core + MongoDB
 EF provider path does not work because Wolverine's outbox integration assumes a
 relational ADO.NET connection and SQL-managed envelope tables. This package
 implements `IMessageStore` directly against the MongoDB .NET driver, giving
 MongoDB-backed applications reliable, durable message delivery without EF Core.
 
-> **Status: pre-release (`0.1.0-beta.7`).** The multinode (`DurabilityMode.Balanced`)
+> **Status: `1.0.0`** (released 2026-07-06). The multinode (`DurabilityMode.Balanced`)
 > path is functional and integration-tested; see [Known limitations](#known-limitations).
-> The major version tracks Wolverine's major version (`6.x` ↔ `WolverineFx 6.x`).
 
 [![NuGet](https://img.shields.io/nuget/vpre/Wolverine.MongoDB?label=nuget)](https://www.nuget.org/packages/Wolverine.MongoDB)
 [![Build](https://github.com/TheCraftyMaker/wolverine-mongodb/actions/workflows/ci.yml/badge.svg)](https://github.com/TheCraftyMaker/wolverine-mongodb/actions/workflows/ci.yml)
@@ -20,15 +19,14 @@ MongoDB-backed applications reliable, durable message delivery without EF Core.
 
 ## Prerequisites
 
-- **MongoDB running as a replica set.** Multi-document transactions — used when
-  writing a domain change and outgoing envelopes atomically inside a handler —
+- **MongoDB running as a replica set.** Multi-document transactions (used when
+  writing a domain change and outgoing envelopes atomically inside a handler)
   are not available on standalone MongoDB. Atlas and any production deployment
   already satisfy this; for local development use a Docker Compose replica set.
   Standalone MongoDB is explicitly unsupported.
-- **Wolverine 6.x** (`WolverineFx 6.9.x`). The major version of this package
-  must match the major version of `WolverineFx`.
+- **WolverineFx 6.x**: see `Directory.Packages.props` for the exact pinned version.
 - **.NET 9 or .NET 10.**
-- **MongoDB.Driver** 3.x (2.x also supported).
+- **MongoDB.Driver** 3.x.
 
 ## Installation
 
@@ -71,7 +69,7 @@ can configure the client however you like (Atlas connection string, custom
 `Wolverine.MongoDB` supports both single-node (`DurabilityMode.Solo`) and
 multi-node (`DurabilityMode.Balanced`) deployments.
 
-Use `DurabilityMode.Solo` for single-instance deployments — no control endpoint
+Use `DurabilityMode.Solo` for single-instance deployments: no control endpoint
 is required and node coordination is minimal.
 
 For multi-node clusters see [Multinode support](#multinode-support) below.
@@ -79,12 +77,12 @@ For multi-node clusters see [Multinode support](#multinode-support) below.
 ### Domain-write atomicity
 
 When a handler both modifies a MongoDB document and publishes outgoing messages,
-the outbox write is committed inside a single MongoDB multi-document transaction
-— this is why a replica set is required.
+the outbox write is committed inside a single MongoDB multi-document transaction,
+which is why a replica set is required.
 
 The simplest way to enlist domain writes in the Wolverine-managed transaction is
 `MongoDbUnitOfWork`. Accept it as a handler parameter and call writes through
-it — the session is threaded automatically:
+it; the session is threaded automatically:
 
 ```csharp
 public static async Task<OrderPlaced> Handle(PlaceOrder cmd, MongoDbUnitOfWork mongo, CancellationToken ct)
@@ -98,7 +96,7 @@ public static async Task<OrderPlaced> Handle(PlaceOrder cmd, MongoDbUnitOfWork m
 
 `MongoDbUnitOfWork` exposes `InsertOneAsync`, `InsertManyAsync`, `ReplaceOneAsync`,
 `UpdateOneAsync`, `UpdateManyAsync`, `DeleteOneAsync`, `DeleteManyAsync`,
-`FindOneAndUpdateAsync`, and `Find` — all automatically scoped to the active
+`FindOneAndUpdateAsync`, and `Find`, all automatically scoped to the active
 transaction session.
 
 **Advanced / repository pattern:** if you prefer to thread the session through
@@ -127,7 +125,7 @@ includes `IMongoDatabase`, `IMongoClient`, `IMongoCollection<T>`,
 
 The message store internally pins **`w:majority` (journaled) write concern** and
 **majority read concern** on all envelope collections. This is independent of
-how the consumer's `MongoClient` is configured — a `w:1` client does not weaken
+how the consumer's `MongoClient` is configured: a `w:1` client does not weaken
 the durability of the inbox/outbox writes. The app-facing `IMongoDatabase`
 registered by `UseMongoDbPersistence` is **not** modified; domain write concerns
 remain the application's choice.
@@ -143,15 +141,15 @@ opts.Durability.DeadLetterQueueExpiration = TimeSpan.FromDays(10); // default
 ```
 
 When expiration is disabled (the default), the TTL index on
-`wolverine_dead_letters` is a no-op — documents without an `expirationTime`
+`wolverine_dead_letters` is a no-op: documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
 
 ### The registered `IMongoDatabase`
 
 `UseMongoDbPersistence("my_database")` registers a single **unkeyed**
 `IMongoDatabase` (pointing at `my_database`) in the container. Every
-code-generated handler frame — the transaction frame, saga and `[Entity]`
-persistence, and the `MongoDbUnitOfWork` write surface — resolves the database
+code-generated handler frame (the transaction frame, saga and `[Entity]`
+persistence, and the `MongoDbUnitOfWork` write surface) resolves the database
 through this one registration. The database the generated code writes to is
 therefore fixed at registration time and shared with any `IMongoDatabase` you
 inject into your own handlers.
@@ -160,7 +158,7 @@ Because the registration is unkeyed, **an app that also registers its own
 unkeyed `IMongoDatabase` collides with it.** `Microsoft.Extensions.DependencyInjection`
 resolves the *last* registration for a single-service request, so registration
 order alone would decide which database the Wolverine frames (and your own
-injections) resolve — a subtle way for writes to land in the wrong database. If
+injections) resolve, a subtle way for writes to land in the wrong database. If
 your app needs a database handle of its own, do **not** register a second
 unkeyed `IMongoDatabase`. Instead:
 
@@ -172,13 +170,13 @@ unkeyed `IMongoDatabase`. Instead:
 
 This is a deliberate, documented consumer constraint. The generated frames
 resolve `IMongoDatabase` by type, so a keyed or dedicated registration would be
-a high-blast-radius change to code generation for a rare conflict — not worth it
+a high-blast-radius change to code generation for a rare conflict, not worth it
 while a single Wolverine database is the overwhelmingly common case.
 
 ## Saga persistence
 
 `Wolverine.MongoDB` supports [Wolverine sagas](https://wolverinefx.net/guide/durability/sagas.html)
-— stateful, message-correlated workflows represented by a `Saga` subclass. No additional
+(stateful, message-correlated workflows represented by a `Saga` subclass). No additional
 registration is required; `UseMongoDbPersistence` automatically enables saga storage
 alongside the inbox/outbox.
 
@@ -219,7 +217,7 @@ public class OrderFulfillmentSaga : Saga
 ### Supported id types
 
 The saga identity member may be `Guid`, `string`, `int`, or `long`. MongoDB stores each
-natively as its corresponding BSON type — no conversion overhead, no cross-type collision.
+natively as its corresponding BSON type: no conversion overhead, no cross-type collision.
 
 By convention, Wolverine uses the member named `Id`, `SagaId`, or `{SagaTypeName}Id`
 as the identity. The `[SagaIdentity]` attribute may be used on a message member to
@@ -229,12 +227,12 @@ tell Wolverine which field carries the saga id.
 
 The provider uses `Saga.Version` for optimistic concurrency on updates:
 
-- **Insert** (new saga): stamps `Version = 1`. Unguarded — concurrent double-starts fail on
+- **Insert** (new saga): stamps `Version = 1`. Unguarded: concurrent double-starts fail on
   the unique `_id` index (duplicate key), so the second start retries onto the update path.
 - **Update** (existing saga): captures `oldVersion`, increments `Version`, then
   `ReplaceOneAsync` with filter `(_id, oldVersion)`. Throws `SagaConcurrencyException`
-  when `ModifiedCount == 0` — the saga write and the outbox roll back together.
-- **Delete** (completed saga): unguarded by version — completion is terminal.
+  when `ModifiedCount == 0`; the saga write and the outbox roll back together.
+- **Delete** (completed saga): unguarded by version: completion is terminal.
 
 Under multi-node deployments, wire a retry policy so a losing node reloads and re-applies
 its step rather than failing the message:
@@ -264,7 +262,7 @@ are created automatically on startup.
 ### Atomicity with the outbox
 
 The saga state write and any outbox entries produced in the handler commit inside the same
-MongoDB multi-document transaction — the same guarantee as domain writes via
+MongoDB multi-document transaction, the same guarantee as domain writes via
 `MongoDbUnitOfWork`. No session handling is needed in the saga methods; the generated
 transactional frame manages the session lifecycle.
 
@@ -280,9 +278,9 @@ opts.MultipleHandlerBehavior = MultipleHandlerBehavior.Separated;
 
 ## Entity persistence
 
-`Wolverine.MongoDB` also implements Wolverine's generic persistence surface — `[Entity]`
+`Wolverine.MongoDB` also implements Wolverine's generic persistence surface: `[Entity]`
 parameter loading and `Insert<T>`/`Update<T>`/`Store<T>`/`Delete<T>`/`IStorageAction<T>`
-return-value side effects — for any plain document type, not just `Saga` subclasses. No
+return-value side effects, for any plain document type, not just `Saga` subclasses. No
 additional registration is required.
 
 ```csharp
@@ -303,23 +301,23 @@ public static Update<OrderNote> Handle(EditOrderNoteCommand cmd, [Entity("NoteId
 ```
 
 - **Collection naming:** each entity type gets its own collection named
-  `<lowercased-type-name>` (e.g. `OrderNote` → `ordernote`) — un-prefixed, unlike the
+  `<lowercased-type-name>` (e.g. `OrderNote` → `ordernote`), un-prefixed, unlike the
   `wolverine_saga_` sagas, because entity collections are application-owned data, not a
   Wolverine system collection. `IMessageStoreAdmin.ClearAllAsync`/`RebuildAsync` never
   touch them.
 - **Write semantics: upsert, no optimistic concurrency.** `Insert`/`Update`/`Store` all
   compile to the same upserting write (`ReplaceOneAsync` with `IsUpsert = true`); `Delete`
   removes by the entity's id. Plain entities do not carry a `Saga.Version`-style guard, so
-  concurrent writes are last-write-wins — matching Wolverine's Cosmos/RavenDb providers. If
+  concurrent writes are last-write-wins, matching Wolverine's Cosmos/RavenDb providers. If
   your handler needs optimistic concurrency, use the repository pattern (accept
   `IClientSessionHandle` directly and guard your own `ReplaceOneAsync` filter on a version
   field), the same pattern the demo's `OrderRepository` uses for the `Order` aggregate.
 - **Id extraction:** the entity's `_id` value is read generically via the MongoDB driver's
-  class map (`BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap`) — the same convention the
+  class map (`BsonClassMap.LookupClassMap(typeof(T)).IdMemberMap`), the same convention the
   driver itself uses to determine `_id`, not a `.ToString()` coercion.
 - **`[Entity]` not-found behavior** follows Wolverine core's `EntityAttribute` defaults
   (`Required = true` skips the handler with a 404-style outcome when the entity is missing;
-  `MaybeSoftDeleted` is not applicable — see [Known limitations](#known-limitations)).
+  `MaybeSoftDeleted` is not applicable, see [Known limitations](#known-limitations)).
 - Entity writes run on the same MongoDB session as saga and outbox writes, so they commit
   atomically with everything else the handler does.
 
@@ -329,7 +327,7 @@ for a complete `Insert`/`Update`/`Delete` example wired to HTTP endpoints.
 ## Saga store diagnostics
 
 `Wolverine.MongoDB` implements Wolverine's read-only `ISagaStoreDiagnostics` surface (the
-interface CritterWatch and other saga-explorer tooling use), matching RavenDb — Cosmos does
+interface CritterWatch and other saga-explorer tooling use), matching RavenDb. Cosmos does
 not implement it. It is registered automatically by `UseMongoDbPersistence`; no extra setup
 is needed. Saga descriptors are tagged `"MongoDb"`, and reads target the same
 `wolverine_saga_<type>` collections the saga frames write to, matching by native `_id` (no
@@ -357,14 +355,14 @@ builder.Host.UseWolverine(opts =>
 
 At startup, when `DurabilityMode.Balanced` is detected, the store logs an
 `Information` message confirming the mode and reminding you that synchronized
-clocks are required (not a throw — the host starts normally).
+clocks are required (not a throw; the host starts normally).
 
 ### Multinode requirements
 
-- **`opts.UseTcpForControlEndpoint()`** (or any configured control endpoint) —
+- **`opts.UseTcpForControlEndpoint()`** (or any configured control endpoint):
   nodes use Wolverine's control channel for leader election and agent balancing.
   Without it, nodes cannot exchange control messages.
-- **Synchronized node clocks** — the leader lock uses a time-based lease
+- **Synchronized node clocks**: the leader lock uses a time-based lease
   (`LockLeaseDuration`, default 1 minute). Node clocks must be synchronized to
   well within this duration. Standard NTP keeps typical server clocks within a
   few milliseconds, which is safe for the default lease.
@@ -374,8 +372,8 @@ clocks are required (not a throw — the host starts normally).
 - **Leader election:** a lock document in `wolverine_locks` is claimed via
   `findAndModify` (compare-and-swap). Any healthy node can become leader; the
   first to atomically claim an expired or absent lock wins.
-- **Scheduled messages:** claimed exactly-once via `FindOneAndUpdate` CAS —
-  `Status == Scheduled && ExecutionTime <= now` — so two nodes competing for the
+- **Scheduled messages:** claimed exactly-once via `FindOneAndUpdate` CAS
+  (`Status == Scheduled && ExecutionTime <= now`), so two nodes competing for the
   same due message produce at most one execution.
 - **Dead-node recovery:** on each recovery tick, each node releases envelope
   ownership held by node numbers with no live node document (crashed nodes), then
@@ -383,7 +381,7 @@ clocks are required (not a throw — the host starts normally).
 - **CAS-guarded outgoing recovery:** when recovering orphaned outgoing envelopes,
   only envelopes still globally-owned (`OwnerId == 0`) are claimed, and the claim
   uses a filter guard so a competing node that claimed an envelope between load and
-  write retains it — no double-sends.
+  write retains it, so there are no double-sends.
 - **Node records:** the leader trims old node-event records via
   `DeleteOldNodeRecordsAsync`; the TTL index on `wolverine_node_records` provides
   a 14-day backstop.
@@ -417,7 +415,7 @@ legitimately take over.
   sufficient for the default 1-minute lease).
 - **`LeadershipElectionCompliance` runs unconditionally in CI.** Earlier
   WolverineFx releases required the lowest-numbered surviving node to win the
-  election race — a property our `w:majority` lock could not guarantee — so the
+  election race (a property our `w:majority` lock could not guarantee), so the
   suite was compile-gated behind `#if RUN_MULTINODE`. WolverineFx 6.9.0 reworked
   those facts around the "any healthy node leads" model this provider already
   implements, so the gate was removed after 5 consecutive green runs on both
@@ -428,7 +426,7 @@ legitimately take over.
 
 ## Demo application
 
-The [`demo/`](demo/) directory contains a full working example — a CQRS
+The [`demo/`](demo/) directory contains a full working example: a CQRS
 order-management API that combines `Wolverine.MongoDB` with RabbitMQ to
 demonstrate:
 
@@ -438,7 +436,7 @@ demonstrate:
 - `IClientSessionHandle` threaded through repositories for atomicity
 - Config-driven durability mode (Solo by default; `Wolverine__DurabilityMode=Balanced`
   for multi-instance runs)
-- `OrderFulfillmentSaga` — a saga that tracks an order through placement, shipping, and
+- `OrderFulfillmentSaga`: a saga that tracks an order through placement, shipping, and
   delivery confirmation, exercising start / continue / complete flows and outbox atomicity
 
 See the [demo README](demo/README.md) for setup instructions, a walkthrough, and
@@ -451,7 +449,7 @@ The provider stores envelopes in dedicated collections
 `wolverine_dead_letters`) plus node-coordination collections
 (`wolverine_nodes`, `wolverine_node_assignments`). Single-document atomic
 operations (`findAndModify`) handle ownership claims and idempotency rather than
-relying on multi-document transactions for the hot path — the approach proven in
+relying on multi-document transactions for the hot path, the approach proven in
 the MassTransit MongoDB outbox.
 
 Collections and indexes are created automatically when Wolverine starts.
@@ -461,7 +459,7 @@ Collections and indexes are created automatically when Wolverine starts.
 The compliance test suite currently requires the Wolverine source, because
 `WolverineFx.ComplianceTests` is not yet published to NuGet. It is vendored as a
 git submodule at `external/wolverine`, pinned to the matching `WolverineFx`
-version — clone with `git clone --recursive` (or run `git submodule update
+version: clone with `git clone --recursive` (or run `git submodule update
 --init`). Both the library and the test project project-reference it so there is
 a single consistent `Wolverine.dll`. The path is overridable via the
 `WOLVERINE_SOURCE` environment variable or `-p:WolverineSourcePath=...`.
@@ -469,7 +467,7 @@ a single consistent `Wolverine.dll`. The path is overridable via the
 CI initialises the submodule, runs the compliance suite in two separate steps
 (single-node and multinode categories), then packs the library; the demo job
 downloads the freshly packed nupkg and runs end-to-end integration tests against
-it — no stale NuGet version is exercised.
+it, so no stale NuGet version is exercised.
 
 To run only the multinode tests locally:
 
@@ -495,7 +493,7 @@ required beyond Docker Desktop.
 
 ## Known limitations
 
-- **Standalone MongoDB is not supported** — a replica set is required for
+- **Standalone MongoDB is not supported**: a replica set is required for
   transactions.
 - **Multinode leadership is lease-based, not fenced.** See
   [Multinode known limitations](#multinode-known-limitations) for the fencing
@@ -510,12 +508,12 @@ required beyond Docker Desktop.
 - **Four RDBMS/Marten-only capabilities are explicit non-goals**, matching the
   closest document-store analogues (Cosmos, RavenDb): multi-tenancy (route on a
   tenant-id field in your message payload, or run a separate host per tenant),
-  durable listeners (`IListenerStore` stays `NullListenerStore` — only matters if
+  durable listeners (`IListenerStore` stays `NullListenerStore`, only matters if
   you opt into `EnableDynamicListeners`), query-spec frames
-  (`ICompiledQuery<,>`-style compile-time queries — a Marten/EF Core concept with
+  (`ICompiledQuery<,>`-style compile-time queries, a Marten/EF Core concept with
   no MongoDB analogue), and soft-delete (`[Entity(MaybeSoftDeleted = false)]` plus
   a manual `is_deleted` filter is the app-level equivalent). See `CLAUDE.md`
-  ("Parity Capabilities — Non-Goals") for the full rationale per capability.
+  ("Parity Capabilities: Non-Goals") for the full rationale per capability.
 
 ## License
 
