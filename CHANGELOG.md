@@ -562,7 +562,9 @@ Post-review hardening pass (adversarial review of the 0.1.0 implementation):
   `WolverineFx.ComplianceTests` is published to NuGet.
 - Replica set is required; standalone MongoDB is not supported.
 
-[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.7...HEAD
+[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.7...v1.0.0
 [0.1.0-beta.7]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.6...v0.1.0-beta.7
 [0.1.0-beta.6]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.2...v0.1.0-beta.6
 [0.1.0-beta.2]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.1...v0.1.0-beta.2
