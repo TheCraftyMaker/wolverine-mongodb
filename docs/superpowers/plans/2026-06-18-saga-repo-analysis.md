@@ -1,9 +1,9 @@
-# Task S1 — Repository & Convention Analysis
+# Task S1: Repository & Convention Analysis
 
 > **Produced by:** Task S1 of `2026-06-18-saga-persistence.md`  
 > **Branch:** `docs/saga-repo-analysis`  
 > **Date:** 2026-06-18  
-> **Status:** Complete — all "Verified Saga API Facts" confirmed against `main`; three drift items flagged.
+> **Status:** Complete. All "Verified Saga API Facts" confirmed against `main`; three drift items flagged.
 
 ---
 
@@ -15,7 +15,7 @@ must know about before starting S6.
 
 ---
 
-## 1. `MongoDbPersistenceFrameProvider.cs` — Required Changes for S6
+## 1. `MongoDbPersistenceFrameProvider.cs`: Required Changes for S6
 
 **File:** `src/Wolverine.MongoDB/Internals/MongoDbPersistenceFrameProvider.cs`
 
@@ -32,25 +32,25 @@ must know about before starting S6.
 | `DetermineDeleteFrame(sagaId, saga, c)` | `throw new NotSupportedException(SagaNotSupported)` |
 | `CommitUnitOfWorkFrame` | `throw new NotSupportedException(SagaNotSupported)` |
 | `CanPersist` | `persistenceService = typeof(IMongoDatabase); return false;` |
-| `CanApply` | No `chain is SagaChain` check — only inspects handler params / service deps |
+| `CanApply` | No `chain is SagaChain` check; only inspects handler params / service deps |
 | `ApplyTransactionSupport` | Adds commit postprocessor **unconditionally** (no `SagaChain` guard) |
 
-> **Note:** `CanPersist` does NOT throw — it returns `false`. The plan's "saga members throw"
+> **Note:** `CanPersist` does NOT throw, it returns `false`. The plan's "saga members throw"
 > refers to the saga-specific codegen methods above, not to `CanPersist`.
 
 ### Three flips required (S6)
 
-**Flip 1 — `CanApply`:** Add `if (chain is SagaChain) return true;` at the top of the method.
+**Flip 1: `CanApply`:** Add `if (chain is SagaChain) return true;` at the top of the method.
 Without this, Wolverine never routes saga chains to this provider.
 
-**Flip 2 — `CanPersist`:** Change `return false` to `return entityType.CanBeCastTo<Saga>()`.
-Do **not** return `true` unconditionally — `DetermineStorageActionFrame` (for generic
+**Flip 2: `CanPersist`:** Change `return false` to `return entityType.CanBeCastTo<Saga>()`.
+Do **not** return `true` unconditionally: `DetermineStorageActionFrame` (for generic
 `[Entity]`/`IStorageAction<T>` patterns) still throws, so claiming non-saga persistence
 would blow up at codegen for any entity-sourced handler.
 
-**Flip 3 — `ApplyTransactionSupport`:** Add the `if (chain is not SagaChain)` guard before
+**Flip 3: `ApplyTransactionSupport`:** Add the `if (chain is not SagaChain)` guard before
 adding `CommitMongoTransactionFrame` as a postprocessor. Saga chains receive commit+flush
-via `CommitUnitOfWorkFrame` — the unconditional postprocessor would double-commit them.
+via `CommitUnitOfWorkFrame`; the unconditional postprocessor would double-commit them.
 
 ```csharp
 // Current (line 17-27):
@@ -71,15 +71,15 @@ if (!chain.Middleware.OfType<TransactionalFrame>().Any())
 
 ### Additional overloads in the provider (noted for completeness)
 
-- `DetermineDeleteFrame(Variable variable, IServiceContainer container)` — single-variable
+- `DetermineDeleteFrame(Variable variable, IServiceContainer container)`: single-variable
   overload for generic entity deletion. Still throws; NOT needed for saga support.
-- `DetermineStorageActionFrame(Type, Variable, IServiceContainer)` — for `IStorageAction<T>`.
+- `DetermineStorageActionFrame(Type, Variable, IServiceContainer)`: for `IStorageAction<T>`.
   Still throws; out of scope.
-- `DetermineFrameToNullOutMaybeSoftDeleted(Variable entity)` — returns `[]` (no-op). Fine as-is.
+- `DetermineFrameToNullOutMaybeSoftDeleted(Variable entity)`: returns `[]` (no-op). Fine as-is.
 
 ---
 
-## 2. `TransactionalFrame.cs` — Codegen Variables Available to Saga Frames
+## 2. `TransactionalFrame.cs`: Codegen Variables Available to Saga Frames
 
 **File:** `src/Wolverine.MongoDB/Internals/TransactionalFrame.cs`
 
@@ -93,7 +93,7 @@ outbox, and wraps the chain in `try/catch`. Confirmed behaviour:
 | `Session` | `IClientSessionHandle` | `mongoSession` |
 | `UnitOfWork` | `MongoDbUnitOfWork` | `mongoUnitOfWork` |
 
-`Session` and `UnitOfWork` are `Variable` instances with `this` frame as creator — any
+`Session` and `UnitOfWork` are `Variable` instances with `this` frame as creator; any
 downstream frame can call `chain.FindVariable(typeof(IClientSessionHandle))` or
 `chain.FindVariable(typeof(MongoDbUnitOfWork))` and will resolve these created vars.
 
@@ -101,7 +101,7 @@ downstream frame can call `chain.FindVariable(typeof(IClientSessionHandle))` or
 
 | Variable | Source |
 |----------|--------|
-| `IClientSessionHandle` (opens it, creates the variable) | — |
+| `IClientSessionHandle` (opens it, creates the variable) | (n/a) |
 | `IMongoClient` | DI service |
 | `IMongoDatabase` | DI service |
 | `CancellationToken` | generated method |
@@ -112,7 +112,7 @@ should call `chain.FindVariable(typeof(IClientSessionHandle))` and
 `chain.FindVariable(typeof(IMongoDatabase))` in their `FindVariables` overrides to resolve
 the session opened by `TransactionalFrame` and the DI-registered database. Both are already
 in scope because `TransactionalFrame` is added to `chain.Middleware` by
-`ApplyTransactionSupport` — which fires before the saga frames.
+`ApplyTransactionSupport`, which fires before the saga frames.
 
 ### `CommitMongoTransactionFrame` (postprocessor)
 
@@ -122,7 +122,7 @@ For S6, `CommitUnitOfWorkFrame(saga, container)` should return `new CommitMongoT
 
 ---
 
-## 3. `WolverineMongoDbExtensions.cs` — Registration
+## 3. `WolverineMongoDbExtensions.cs`: Registration
 
 **File:** `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs`
 
@@ -137,14 +137,14 @@ options.CodeGeneration.InsertFirstPersistenceStrategy<MongoDbPersistenceFramePro
 options.CodeGeneration.ReferenceAssembly(typeof(WolverineMongoDbExtensions).Assembly);
 ```
 
-The `IMongoDatabase` registered here is the **app-facing** one — NOT pinned with majority
+The `IMongoDatabase` registered here is the **app-facing** one, NOT pinned with majority
 write/read concern (that pinning is only on `MongoDbMessageStore`'s internal `_database`).
-Saga frames should use this DI-registered `IMongoDatabase` — the plan's intent is that
+Saga frames should use this DI-registered `IMongoDatabase`: the plan's intent is that
 saga writes use the app's write concern, not the durability store's.
 
 ---
 
-## 4. `MongoConstants.cs` — Collection-Name Constants
+## 4. `MongoConstants.cs`: Collection-Name Constants
 
 **File:** `src/Wolverine.MongoDB/Internals/MongoConstants.cs`
 
@@ -174,11 +174,11 @@ so `ClearAllAsync` can enumerate and drop them.
 
 ---
 
-## 5. `MongoDbMessageStore.Admin.cs` — Collection Cleanup Gap
+## 5. `MongoDbMessageStore.Admin.cs`: Collection Cleanup Gap
 
 **File:** `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Admin.cs`
 
-### `RebuildAsync` / `ClearAllAsync` — confirmed flow
+### `RebuildAsync` / `ClearAllAsync`: confirmed flow
 
 ```csharp
 public async Task RebuildAsync()
@@ -207,7 +207,7 @@ public async Task ClearAllAsync()
 enumerate or drop per-saga-type collections (e.g. `wolverine_saga_OrderFulfillmentSaga`).
 
 `AppFixture.ClearAll()` calls `store.Admin.RebuildAsync()` before every test suite run.
-The shared fixture uses `DatabaseName = "wolverine_tests"` — a **fixed** database. If saga
+The shared fixture uses `DatabaseName = "wolverine_tests"`, a **fixed** database. If saga
 compliance tests write to `wolverine_saga_StringBasicWorkflow` in run 1 and `ClearAllAsync`
 doesn't clean it, run 2 starts with stale saga state and facts leak.
 
@@ -227,12 +227,12 @@ await allCollections.ForEachAsync(async name =>
 ```
 
 `EnsureIndexesAsync` (called from `RebuildAsync` after `ClearAllAsync`) does not touch saga
-collections today — that is correct; sagas should not have pre-declared indexes initially
+collections today, that is correct; sagas should not have pre-declared indexes initially
 (the `_id` index is automatic).
 
 ---
 
-## 6. `AppFixture.cs` — Test Harness Members
+## 6. `AppFixture.cs`: Test Harness Members
 
 **File:** `src/Wolverine.MongoDB.Tests/AppFixture.cs`
 
@@ -247,18 +247,18 @@ Confirmed members:
 | `ClearAll()` | Calls `BuildMessageStore().Admin.RebuildAsync()` |
 | `[CollectionDefinition("mongodb")]` | On `MongoDbCollection : ICollectionFixture<AppFixture>` |
 
-Container: `MongoDbBuilder("mongo:7").WithReplicaSet()` — single-instance replica set,
+Container: `MongoDbBuilder("mongo:7").WithReplicaSet()`, single-instance replica set,
 started once per process (shared static, semaphore-guarded). Correct for compliance tests
 that require transactions.
 
 **Note for `MongoDbSagaHost` (S9):** The saga host will use `_fixture.Client` and
-`AppFixture.DatabaseName` exactly like `message_store_compliance` does — confirmed pattern.
+`AppFixture.DatabaseName` exactly like `message_store_compliance` does: confirmed pattern.
 `ClearAll()` should be called in the host's setup to reset saga collections once S6 lands
 the `ClearAllAsync` fix.
 
 ---
 
-## 7. `message_store_compliance.cs` — Compliance Pattern
+## 7. `message_store_compliance.cs`: Compliance Pattern
 
 **File:** `src/Wolverine.MongoDB.Tests/message_store_compliance.cs`
 
@@ -303,7 +303,7 @@ public async Task<IHost> BuildHostAsync<TSaga>()
 
 ---
 
-## 8. Demo OCC Precedent — `OrderRepository.UpdateAsync`
+## 8. Demo OCC Precedent: `OrderRepository.UpdateAsync`
 
 **File:** `demo/src/OrderDemo.Infrastructure/Persistence/OrderRepository.cs`
 
@@ -329,7 +329,7 @@ public async Task UpdateAsync(Order order, IClientSessionHandle session, Cancell
 **Demo pattern:** the aggregate increments `Version` (private setter) inside its mutation
 method, so `UpdateAsync` filters on `Version - 1` to find the old document.
 
-**Saga OCC pattern (plan S8) — slight difference:** `Saga.Version` has a public setter.
+**Saga OCC pattern (plan S8), slight difference:** `Saga.Version` has a public setter.
 The saga frame will:
 1. Capture `oldVersion = saga.Version` before the handler executes.
 2. Post-handler, set `saga.Version = oldVersion + 1`.
@@ -342,7 +342,7 @@ The demo uses `InvalidOperationException`; the saga frame must use the Wolverine
 
 ---
 
-## 9. `PlaceOrderHandler.cs` — Repository Session Pattern
+## 9. `PlaceOrderHandler.cs`: Repository Session Pattern
 
 **File:** `demo/src/OrderDemo.Application/Orders/PlaceOrderHandler.cs`
 
@@ -363,7 +363,7 @@ public static async Task<OrderPlacedApplicationEvent> Handle(
 ```
 
 Saga frames will follow the same pattern, threading the session through collection
-operations — but unlike the repository pattern, the session will be threaded into the
+operations, but unlike the repository pattern, the session will be threaded into the
 codegen frame's `FindVariables`, not hand-passed by the developer.
 
 ---
@@ -374,7 +374,7 @@ Each fact from the plan's "Verified Saga API Facts (local)" section checked agai
 
 | # | Plan fact | Verified? | Notes |
 |---|-----------|-----------|-------|
-| 1 | `SagaNotSupported` const → throws in all saga members | ✅ Confirmed | Lines 12-13 and all saga methods. `CanPersist` returns `false` (does not throw — this is correct). |
+| 1 | `SagaNotSupported` const → throws in all saga members | ✅ Confirmed | Lines 12-13 and all saga methods. `CanPersist` returns `false` (does not throw, this is correct). |
 | 2 | `CanApply` matches `IClientSessionHandle`/`MongoDbUnitOfWork` params + `IMongoDatabase`/`IMongoClient`/`IMongoCollection<>` deps | ✅ Confirmed | Lines 34-53 exactly. |
 | 3 | `CanApply` does **not** match `chain is SagaChain` | ✅ Confirmed | Required Flip 1 for S6. |
 | 4 | `TransactionalFrame` opens `IClientSessionHandle` (`mongoSession`), builds `MongoDbUnitOfWork` | ✅ Confirmed | Lines 35-39. |
@@ -382,11 +382,11 @@ Each fact from the plan's "Verified Saga API Facts (local)" section checked agai
 | 6 | `CommitMongoTransactionFrame` commits then flushes | ✅ Confirmed | Lines 134-146. |
 | 7 | `IClientSessionHandle` and `IMongoDatabase` resolvable codegen variables | ✅ Confirmed | `Session` created var; `_database` found via `FindVariables`. |
 | 8 | `WolverineMongoDbExtensions` registers `IMessageStore`, `IMongoDatabase`, `InsertFirstPersistenceStrategy`, `ReferenceAssembly` | ✅ Confirmed | Lines 51-63. |
-| 9 | `MongoConstants.cs` — collection-name constants live here | ✅ Confirmed | 9 system collections + 3 string/int constants. |
-| 10 | `MongoDbMessageStore.Admin.cs` — `RebuildAsync()` (used by `AppFixture.ClearAll()`) | ✅ Confirmed | `RebuildAsync → ClearAllAsync + EnsureIndexesAsync`. |
+| 9 | `MongoConstants.cs`: collection-name constants live here | ✅ Confirmed | 9 system collections + 3 string/int constants. |
+| 10 | `MongoDbMessageStore.Admin.cs`: `RebuildAsync()` (used by `AppFixture.ClearAll()`) | ✅ Confirmed | `RebuildAsync → ClearAllAsync + EnsureIndexesAsync`. |
 | 11 | `AppFixture`: `[CollectionDefinition("mongodb")]`, `DatabaseName = "wolverine_tests"`, `Client`, `ClearAll()`, `BuildMessageStore()` | ✅ Confirmed | All present. |
 | 12 | `AppFixture`: `mongo:7` replica-set Testcontainer | ✅ Confirmed | Line 23-25. |
-| 13 | `OrderRepository.UpdateAsync` — Version-guarded `ReplaceOneAsync`, throws on `ModifiedCount == 0` | ✅ Confirmed | Lines 25-41. Filter on `(Id, Version - 1)`. |
+| 13 | `OrderRepository.UpdateAsync`: Version-guarded `ReplaceOneAsync`, throws on `ModifiedCount == 0` | ✅ Confirmed | Lines 25-41. Filter on `(Id, Version - 1)`. |
 
 ---
 
@@ -394,15 +394,15 @@ Each fact from the plan's "Verified Saga API Facts (local)" section checked agai
 
 Three items diverge from the plan's framing or add precision implementors must know:
 
-### Drift 1 — `MongoConstants.cs` has no saga-related entries yet
+### Drift 1: `MongoConstants.cs` has no saga-related entries yet
 
-The plan says "collection-name constants live here" — correct, but it implies the naming
+The plan says "collection-name constants live here", correct, but it implies the naming
 helper is **present**. It is **not yet written**. S6 must add:
 - `public const string SagaCollectionPrefix = "wolverine_saga_"` (for enumeration in `ClearAllAsync`)
 - `public static string SagaCollectionName(Type sagaType) => $"{SagaCollectionPrefix}{SagaTypeName(sagaType)}"`
 - A `private static string SagaTypeName(Type t)` sanitizer (e.g. strip namespace, lowercase, collapse generics).
 
-### Drift 2 — `ClearAllAsync` does NOT drop per-saga collections
+### Drift 2: `ClearAllAsync` does NOT drop per-saga collections
 
 The plan correctly identifies this as a required S6 change (§ "Required" in the File
 Structure Overview). The code confirms it: `ClearAllAsync` enumerates only the nine named
@@ -411,7 +411,7 @@ into the next run, which will fail compliance facts that assert a fresh start (e
 expecting no pre-existing saga state). This cleanup **must land in S6** alongside the frame
 implementation.
 
-### Drift 3 — Demo OCC pattern vs. Saga OCC pattern (public vs. private setter)
+### Drift 3: Demo OCC pattern vs. Saga OCC pattern (public vs. private setter)
 
 The plan maps the saga OCC directly to `OrderRepository.UpdateAsync`. This is accurate at
 a high level. The codegen difference: `Order.Version` has `private set` (incremented inside
@@ -422,13 +422,13 @@ must capture `int oldVersion = saga.Version;` before the post-handler write, the
 
 ---
 
-## 12. Files Saga Implementation Will Touch (S6–S8)
+## 12. Files Saga Implementation Will Touch (S6-S8)
 
 | File | What changes |
 |------|-------------|
 | `Internals/MongoDbPersistenceFrameProvider.cs` | Flip 1 (`CanApply`), Flip 2 (`CanPersist`), Flip 3 (`ApplyTransactionSupport`); implement all saga frame methods |
 | **New** `Internals/SagaFrames.cs` | `LoadSagaFrame`, `StoreSagaFrame` (insert + update), `DeleteSagaFrame` |
 | `Internals/MongoConstants.cs` | `SagaCollectionPrefix`, `SagaCollectionName(Type)` helper |
-| `Internals/MongoDbMessageStore.Admin.cs` | `ClearAllAsync` — enumerate + drop `wolverine_saga_*` collections |
+| `Internals/MongoDbMessageStore.Admin.cs` | `ClearAllAsync`: enumerate + drop `wolverine_saga_*` collections |
 | **New** `src/Wolverine.MongoDB.Tests/MongoDbSagaHost.cs` | `ISagaHost` impl (S9) |
 | **New** `src/Wolverine.MongoDB.Tests/string_saga_storage_compliance.cs` | compliance subclass (S9) |

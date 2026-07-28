@@ -13,7 +13,7 @@
 
 Produce a complete, concrete design for the demo `OrderFulfillmentSaga` and an exhaustive
 inventory of every library + demo test required by the saga persistence plan. Downstream
-tasks (S9, S10, S11, S12, S13, S14) should be able to use this document as a spec —
+tasks (S9, S10, S11, S12, S13, S14) should be able to use this document as a spec:
 no further design work needed.
 
 ---
@@ -77,7 +77,7 @@ public sealed class OrderFulfillmentSaga : Saga
 - `Version` is inherited from `Wolverine.Saga`. The OCC-guarded update frame (S8) will filter
   on `(_id, Version)` and increment it on each save; insert (Start) sets `Version = 1`.
 - MongoDB collection (per S4's per-saga-type decision):
-  `wolverine_saga_order_fulfillment_saga` — derived by camel-to-snake-case from the
+  `wolverine_saga_order_fulfillment_saga`, derived by camel-to-snake-case from the
   type name. The helper in `MongoConstants` will determine the exact convention; this
   document uses the camel-to-snake form throughout.
 
@@ -90,18 +90,18 @@ public sealed class OrderFulfillmentSaga : Saga
 | Id type | `Guid` (Option B native) |
 | MongoDB `_id` | Maps via default `Id` driver convention |
 | Collection name | `wolverine_saga_order_fulfillment_saga` (pending S4 naming helper) |
-| OCC token | `Saga.Version` (int) — guarded update in S8 |
+| OCC token | `Saga.Version` (int), guarded update in S8 |
 | Completion | `MarkCompleted()` in `Handle(ConfirmDeliveryCommand)` → document deleted |
 
 ---
 
 ## 2. Message Contracts
 
-### 2.1 Existing Messages — Reused As-Is for Saga Trigger
+### 2.1 Existing Messages: Reused As-Is for Saga Trigger
 
 | Message | Assembly | Existing role | Saga role | Change required |
 |---|---|---|---|---|
-| `OrderPlacedApplicationEvent(Guid OrderId, Guid CustomerId, decimal TotalAmount, DateTimeOffset PlacedAt)` | `OrderDemo.Contracts` | Cascaded from `PlaceOrderHandler`; consumed by `OrderSummaryProjector` | **Starts** `OrderFulfillmentSaga` | **None** — start message creates a new saga; no routing attribute needed |
+| `OrderPlacedApplicationEvent(Guid OrderId, Guid CustomerId, decimal TotalAmount, DateTimeOffset PlacedAt)` | `OrderDemo.Contracts` | Cascaded from `PlaceOrderHandler`; consumed by `OrderSummaryProjector` | **Starts** `OrderFulfillmentSaga` | **None**: start message creates a new saga; no routing attribute needed |
 | `OrderShippedApplicationEvent(Guid OrderId, DateTimeOffset ShippedAt)` | `OrderDemo.Contracts` | Cascaded from `ShipOrderHandler`; consumed by `OrderSummaryProjector` | **Continues** `OrderFulfillmentSaga` | **Add `[SagaIdentity]` to `OrderId`** (see section 2.3) |
 
 ### 2.2 New Contracts
@@ -179,7 +179,7 @@ public sealed record OrderShippedApplicationEvent(
 assembly) to `OrderDemo.Contracts`. `ConfirmDeliveryCommand` (new) already requires this.
 Add `WolverineFx` to `OrderDemo.Contracts.csproj` once in S12 (covers both).
 
-> **S4 alignment item OQ-A** — if S4 picks a different identity resolution approach
+> **S4 alignment item OQ-A**: if S4 picks a different identity resolution approach
 > (e.g., always use a `SagaId` property convention and let S12 add `SagaId` aliases),
 > update this section before S12 begins.
 
@@ -270,7 +270,7 @@ public sealed record FulfillmentShippedEvent(Guid OrderId, DateTimeOffset Shippe
 
 | Message | Saga method | Returns | Routing resolved by |
 |---|---|---|---|
-| `OrderPlacedApplicationEvent` | `Start(OrderPlacedApplicationEvent)` | `void` | New saga — no routing needed |
+| `OrderPlacedApplicationEvent` | `Start(OrderPlacedApplicationEvent)` | `void` | New saga, no routing needed |
 | `OrderShippedApplicationEvent` | `Handle(OrderShippedApplicationEvent)` | `FulfillmentShippedEvent` | `[SagaIdentity] Guid OrderId` |
 | `ConfirmDeliveryCommand` | `Handle(ConfirmDeliveryCommand)` | `FulfillmentCompletedEvent` | `[SagaIdentity] Guid OrderId` |
 | `FulfillmentTimedOut` *(stretch)* | `Handle(FulfillmentTimedOut)` | `void` | `[SagaIdentity] Guid OrderId` |
@@ -311,24 +311,24 @@ and the task that delivers it.
 
 | # | Flow | Trigger | Assert | Test | Task |
 |---|---|---|---|---|---|
-| F1 | **Start** — saga created on OrderPlaced | `OrderPlacedApplicationEvent` with new `OrderId` | `LoadState<OrderFulfillmentSaga>(orderId)` → not null; `OrderPlaced == true` | `SagaFlowTests.PlaceOrder_StartsSaga` | S13 |
-| F2 | **Continue** — saga advanced on OrderShipped | `OrderShippedApplicationEvent` after start | `LoadState` → `OrderShipped == true`, `ShippedAt != null` | `SagaFlowTests.ShipOrder_AdvancesSaga` | S13 |
-| F3 | **Complete** — saga deleted on delivery confirmed | `ConfirmDeliveryCommand` after ship | `LoadState` → null (document deleted) | `SagaFlowTests.ConfirmDelivery_CompletesSaga_SagaDocumentDeleted` | S13 |
-| F4 | **Missing state** — continue on unknown id | `ConfirmDeliveryCommand` for a `Guid.NewGuid()` never placed | Wolverine throws `UnknownSagaException` | `SagaFlowTests.ConfirmDelivery_UnknownOrder_ThrowsUnknownSagaException` | S13 |
-| F4b | **Unknown state — library** | `StringCompleteThree { SagaId = "unknown" }` | `UnknownSagaException` | `string_saga_storage_compliance.unknown_state` | S9 |
-| F5 | **Duplicate / repeated message** — inbox idempotency | Re-deliver same `OrderPlacedApplicationEvent` envelope (same `EnvelopeId`) | Saga doc exists once; `OrderPlaced == true`; no duplicate insert | `SagaFlowTests.DuplicateOrderPlacedEnvelope_SagaStartedOnce` | S13 |
-| F5b | **Inbox idempotency — library** | Same-envelope re-delivery to `StringBasicWorkflow` | State applied once | `saga_atomicity.SameEnvelope_Redelivered_IsIdempotent` | S11 |
-| F6 | **Across restarts** — saga persists across host disposal | Start saga, `await host.DisposeAsync()`, rebuild host on same DB name, send `OrderShippedApplicationEvent` | `OrderShipped == true` on reloaded state | `SagaFlowTests.SagaState_SurvivesHostRestart` | S13 |
-| F7 | **Inbox/outbox interaction** — saga cascades event through outbox | `OrderShippedApplicationEvent` → saga returns `FulfillmentShippedEvent` | `FulfillmentShippedEvent` arrives at the local durable queue; saga state updated; both atomic | `SagaFlowTests.SagaHandler_CascadedEvent_FlowsThroughOutbox` | S13 |
-| F8 | **Atomicity — saga + outbox** | Saga handler writes state and cascades outbox message; force post-handler exception | Neither the saga document nor the outbox envelope persists (rolled back together) | `saga_atomicity.SagaAndOutbox_RollbackTogether_OnPostHandlerFailure` | S11 |
-| F8b | **Atomicity — success path** | Same saga handler without forced exception | Both saga document and cascaded outbox envelope persist | `saga_atomicity.SagaAndOutbox_BothPersist_OnSuccess` | S11 |
-| F9 | **OCC conflict** — stale version | Two loads of the same saga; first updates; second attempts stale update | Second update throws `SagaConcurrencyException`; document unchanged | `saga_atomicity.StaleSagaVersion_ThrowsSagaConcurrencyException` | S11 (after S8) |
-| F10 | **Single-node compliance — string id** | All `StringIdentifiedSagaComplianceSpecs` facts | All 8 facts green | `string_saga_storage_compliance` (8 facts) | S9 |
-| F11 | **Single-node compliance — Guid id** | All `GuidIdentifiedSagaComplianceSpecs` facts | All 8 facts green (+ Guid `_id` round-trip) | `guid_saga_storage_compliance` (8 facts) | S10 |
-| F12 | **Single-node compliance — int id** | All `IntIdentifiedSagaComplianceSpecs` facts | All facts green | `int_saga_storage_compliance` | S10 (if in scope) |
-| F13 | **Single-node compliance — long id** | All `LongIdentifiedSagaComplianceSpecs` facts | All facts green | `long_saga_storage_compliance` | S10 (if in scope) |
-| F14 | **Multi-node — exactly-once saga progression** | Two Balanced hosts; drive `OrderFulfillmentSaga` start + multiple continues across nodes | Saga state advanced exactly once; no double-apply; completion deletes doc | `saga_multinode.CrossNode_SagaAdvancesExactlyOnce` | S14 |
-| F15 | **Multi-node — dead-node saga rescue** (stretch) | Crash node 1 mid-saga; node 2 takes over | Saga completes correctly via node 2 | `saga_multinode.DeadNode_SagaRescuedByAliveNode` | S14 (stretch) |
+| F1 | **Start**: saga created on OrderPlaced | `OrderPlacedApplicationEvent` with new `OrderId` | `LoadState<OrderFulfillmentSaga>(orderId)` → not null; `OrderPlaced == true` | `SagaFlowTests.PlaceOrder_StartsSaga` | S13 |
+| F2 | **Continue**: saga advanced on OrderShipped | `OrderShippedApplicationEvent` after start | `LoadState` → `OrderShipped == true`, `ShippedAt != null` | `SagaFlowTests.ShipOrder_AdvancesSaga` | S13 |
+| F3 | **Complete**: saga deleted on delivery confirmed | `ConfirmDeliveryCommand` after ship | `LoadState` → null (document deleted) | `SagaFlowTests.ConfirmDelivery_CompletesSaga_SagaDocumentDeleted` | S13 |
+| F4 | **Missing state**: continue on unknown id | `ConfirmDeliveryCommand` for a `Guid.NewGuid()` never placed | Wolverine throws `UnknownSagaException` | `SagaFlowTests.ConfirmDelivery_UnknownOrder_ThrowsUnknownSagaException` | S13 |
+| F4b | **Unknown state, library** | `StringCompleteThree { SagaId = "unknown" }` | `UnknownSagaException` | `string_saga_storage_compliance.unknown_state` | S9 |
+| F5 | **Duplicate / repeated message**: inbox idempotency | Re-deliver same `OrderPlacedApplicationEvent` envelope (same `EnvelopeId`) | Saga doc exists once; `OrderPlaced == true`; no duplicate insert | `SagaFlowTests.DuplicateOrderPlacedEnvelope_SagaStartedOnce` | S13 |
+| F5b | **Inbox idempotency, library** | Same-envelope re-delivery to `StringBasicWorkflow` | State applied once | `saga_atomicity.SameEnvelope_Redelivered_IsIdempotent` | S11 |
+| F6 | **Across restarts**: saga persists across host disposal | Start saga, `await host.DisposeAsync()`, rebuild host on same DB name, send `OrderShippedApplicationEvent` | `OrderShipped == true` on reloaded state | `SagaFlowTests.SagaState_SurvivesHostRestart` | S13 |
+| F7 | **Inbox/outbox interaction**: saga cascades event through outbox | `OrderShippedApplicationEvent` → saga returns `FulfillmentShippedEvent` | `FulfillmentShippedEvent` arrives at the local durable queue; saga state updated; both atomic | `SagaFlowTests.SagaHandler_CascadedEvent_FlowsThroughOutbox` | S13 |
+| F8 | **Atomicity, saga + outbox** | Saga handler writes state and cascades outbox message; force post-handler exception | Neither the saga document nor the outbox envelope persists (rolled back together) | `saga_atomicity.SagaAndOutbox_RollbackTogether_OnPostHandlerFailure` | S11 |
+| F8b | **Atomicity, success path** | Same saga handler without forced exception | Both saga document and cascaded outbox envelope persist | `saga_atomicity.SagaAndOutbox_BothPersist_OnSuccess` | S11 |
+| F9 | **OCC conflict**: stale version | Two loads of the same saga; first updates; second attempts stale update | Second update throws `SagaConcurrencyException`; document unchanged | `saga_atomicity.StaleSagaVersion_ThrowsSagaConcurrencyException` | S11 (after S8) |
+| F10 | **Single-node compliance, string id** | All `StringIdentifiedSagaComplianceSpecs` facts | All 8 facts green | `string_saga_storage_compliance` (8 facts) | S9 |
+| F11 | **Single-node compliance, Guid id** | All `GuidIdentifiedSagaComplianceSpecs` facts | All 8 facts green (+ Guid `_id` round-trip) | `guid_saga_storage_compliance` (8 facts) | S10 |
+| F12 | **Single-node compliance, int id** | All `IntIdentifiedSagaComplianceSpecs` facts | All facts green | `int_saga_storage_compliance` | S10 (if in scope) |
+| F13 | **Single-node compliance, long id** | All `LongIdentifiedSagaComplianceSpecs` facts | All facts green | `long_saga_storage_compliance` | S10 (if in scope) |
+| F14 | **Multi-node, exactly-once saga progression** | Two Balanced hosts; drive `OrderFulfillmentSaga` start + multiple continues across nodes | Saga state advanced exactly once; no double-apply; completion deletes doc | `saga_multinode.CrossNode_SagaAdvancesExactlyOnce` | S14 |
+| F15 | **Multi-node, dead-node saga rescue** (stretch) | Crash node 1 mid-saga; node 2 takes over | Saga completes correctly via node 2 | `saga_multinode.DeadNode_SagaRescuedByAliveNode` | S14 (stretch) |
 
 ---
 
@@ -383,18 +383,18 @@ public class string_saga_storage_compliance
 ```
 
 Facts covered (8):
-1. `complete` — `FinishItAll` → saga doc null
+1. `complete`: `FinishItAll` → saga doc null
 2. `handle_a_saga_message_with_cascading_messages_passes_along_the_saga_id_in_header`
-3. `start_1` — direct start by id
-4. `start_2` — wildcard start
+3. `start_1`: direct start by id
+4. `start_2`: wildcard start
 5. `straight_up_update_with_the_saga_id_on_the_message`
-6. `unknown_state` — throws `UnknownSagaException`
+6. `unknown_state`: throws `UnknownSagaException`
 7. `update_expecting_the_saga_id_to_be_on_the_envelope`
 8. `update_with_message_that_uses_saga_identity_attributed_property`
 9. `update_with_no_saga_id_to_be_on_the_envelope` → `IndeterminateSagaStateIdException`
 10. `update_with_no_saga_id_to_be_on_the_envelope_or_message` → `IndeterminateSagaStateIdException`
 
-*(10 facts total in StringIdentifiedSagaComplianceSpecs — recount against the source)*
+*(10 facts total in StringIdentifiedSagaComplianceSpecs, recount against the source)*
 
 #### `guid_saga_storage_compliance` (S10)
 
@@ -407,7 +407,7 @@ public class guid_saga_storage_compliance
 ```
 
 Requires: `LoadState<T>(Guid id)` implemented on `MongoDbSagaHost`.
-Also requires: `_id` round-trip for `Guid` in BSON — add a focused assertion to
+Also requires: `_id` round-trip for `Guid` in BSON: add a focused assertion to
 confirm the Guid `_id` stored and retrieved correctly (the demo's `Order._id` is
 already Guid and works, so this should just confirm parity).
 
@@ -559,8 +559,8 @@ private static Task<OrderFulfillmentSaga?> LoadSagaStateAsync(IMongoDatabase db,
          .FirstOrDefaultAsync()!;
 ```
 
-This reads directly from MongoDB (bypasses Wolverine) to independently verify persistence —
-mirrors the pattern used by `ISagaHost.LoadState<T>` in the compliance suite.
+This reads directly from MongoDB (bypasses Wolverine) to independently verify persistence,
+mirroring the pattern used by `ISagaHost.LoadState<T>` in the compliance suite.
 
 ---
 

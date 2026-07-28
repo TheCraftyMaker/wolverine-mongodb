@@ -9,7 +9,7 @@
 
 ## 1. `DurableReceiver` batch-store contract + RDBMS transaction
 
-### 1a. `DurableReceiver.ProcessReceivedMessagesAsync` — catch path and per-envelope retry
+### 1a. `DurableReceiver.ProcessReceivedMessagesAsync`: catch path and per-envelope retry
 
 `external/wolverine/src/Wolverine/Runtime/WorkerQueues/DurableReceiver.cs`
 
@@ -60,7 +60,7 @@ catch (DuplicateIncomingEnvelopeException e)
 ```
 
 `handleDuplicateIncomingEnvelope` (`:522-538`): logs the duplicate, calls
-`envelope.Listener.CompleteAsync(envelope)` (`:530`), and **returns** — it never reaches
+`envelope.Listener.CompleteAsync(envelope)` (`:530`), and **returns**: it never reaches
 `EnqueueAsync` (`:511`, only hit when `envelope.Status == EnvelopeStatus.Incoming`, which a
 duplicate-detected envelope never sets).
 
@@ -69,13 +69,13 @@ envelope in a failed batch through the single-envelope path, and the single-enve
 distinguishes fresh-vs-duplicate correctly *only if* nothing from the failed batch was already
 persisted. If the batch partially persisted N fresh envelopes before hitting a duplicate, the
 retry re-attempts those N envelopes' `StoreIncomingAsync(envelope)` calls, which now see *their own*
-already-persisted document and misclassify them as duplicates — `handleDuplicateIncomingEnvelope`
+already-persisted document and misclassify them as duplicates. `handleDuplicateIncomingEnvelope`
 completes them at the listener without ever calling `EnqueueAsync`. This is the exact stranding bug
 F8 fixes: envelopes are marked complete at the transport layer but never handed to a local queue for
 processing, and they sit in Mongo `OwnerId = <this node>`, invisible to orphan recovery (which only
 matches `OwnerId == AnyNode`, `MongoDbMessageStore.Durability.cs:126`) until this node fails.
 
-### 1b. RDBMS `StoreIncomingAsync(IReadOnlyList<Envelope>)` — explicit transaction + rollback
+### 1b. RDBMS `StoreIncomingAsync(IReadOnlyList<Envelope>)`: explicit transaction + rollback
 
 `external/wolverine/src/Persistence/Wolverine.RDBMS/MessageDatabase.Incoming.cs:174-213`:
 
@@ -128,7 +128,7 @@ public async Task StoreIncomingAsync(IReadOnlyList<Envelope> envelopes)
 `:200`). Note the RDBMS provider gets a **complete, precise** duplicate list post-rollback (it can
 afford an extra `ExistsAsync` round trip per envelope because rollback already guarantees nothing
 persisted); this is the property LD2/F8's transaction-wrap approach cannot fully replicate if Mongo
-aborts multi-document transactions fail-fast on the first write error (see §5) — the reported dupe
+aborts multi-document transactions fail-fast on the first write error (see §5); the reported dupe
 list from `MongoBulkWriteException` may cover only the first duplicate encountered, not all of
 them. The `DurableReceiver` contract in §1a tolerates this because it retries *every* envelope in
 the batch regardless of which ones the exception's dupe list actually names.
@@ -164,7 +164,7 @@ public MessageIdentity MessageIdentity { get; set; } = MessageIdentity.IdOnly;
 ```
 
 **Confirmed exactly as the plan states** (`:103-107` is the property + doc comment; the enum
-itself is `:40-53`, not `:103-107` — the plan's citation of `:103-107` refers to the settings
+itself is `:40-53`, not `:103-107`: the plan's citation of `:103-107` refers to the settings
 property, which is correct).
 
 ### 2b. Local `_inboxIdentity` construction
@@ -177,7 +177,7 @@ _inboxIdentity = options.Durability.MessageIdentity == MessageIdentity.IdOnly
     : e => $"{e.Id}|{e.Destination?.ToString().Replace(":/", "").TrimEnd('/')}";
 ```
 
-In `IdOnly` mode, `InboxIdentity(envelope) == envelope.Id.ToString()` — byte-identical to the raw
+In `IdOnly` mode, `InboxIdentity(envelope) == envelope.Id.ToString()`, byte-identical to the raw
 envelope Guid string. In `IdAndDestination` mode, the document `_id` becomes `"{guid}|{destination}"`,
 so **the same envelope Guid delivered to two different destinations produces two distinct
 documents** with distinct `_id`s but the same `EnvelopeId`.
@@ -190,7 +190,7 @@ documents** with distinct `_id`s but the same `EnvelopeId`.
 public Guid EnvelopeId { get; set; }                                     // the raw Wolverine envelope id — NOT unique across destinations in IdAndDestination mode
 ```
 
-### 2c. Claim (`ReassignIncomingAsync`) — unscoped by destination
+### 2c. Claim (`ReassignIncomingAsync`): unscoped by destination
 
 `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs:119-136`:
 
@@ -211,12 +211,12 @@ public Task ReassignIncomingAsync(int ownerId, IReadOnlyList<Envelope> incoming)
 
 **Confirmed exactly as the plan states** (`:131-135`). In `IdAndDestination` mode, claiming a page
 of envelopes for destination A's recovery loop will also flip `OwnerId` on any *other* destination's
-document that happens to share the same `EnvelopeId` — a document this node never loaded, was never
+document that happens to share the same `EnvelopeId`: a document this node never loaded, was never
 asked to recover, and has no listener circuit prepared to enqueue it into. It becomes "claimed" (no
-longer `OwnerId == AnyNode`, so no other node's recovery will pick it up) but is never enqueued —
-a second, distinct stranding bug from the same root cause (unscoped `EnvelopeId` filter) as F8's.
+longer `OwnerId == AnyNode`, so no other node's recovery will pick it up) but is never enqueued.
+That's a second, distinct stranding bug from the same root cause (unscoped `EnvelopeId` filter) as F8's.
 
-### 2d. Re-read (`RecoverOrphanedIncomingAsync`) — unscoped by destination
+### 2d. Re-read (`RecoverOrphanedIncomingAsync`): unscoped by destination
 
 `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs:122-167`, re-read at `:153-158`:
 
@@ -238,7 +238,7 @@ var claimed = envelopes.Where(e => claimedSet.Contains(e.Id)).ToList();   // :16
 re-read is destination-correct going in. The bug is entirely in the claim/re-read filter shape:
 because both key off `EnvelopeId` (not the destination-scoped document `_id`), a same-Guid sibling
 document at a different destination gets pulled into the `UpdateManyAsync` write and, if this node
-wins the CAS race for it too, into the `claimedIds` distinct-projection — the `envelopes.Where(...
+wins the CAS race for it too, into the `claimedIds` distinct-projection. The `envelopes.Where(...
 Contains(e.Id))` re-mapping at `:161` then further conflates them since `e.Id` (envelope Guid) is
 exactly the field that is *not* unique per destination in this mode.
 
@@ -248,7 +248,7 @@ claim and the re-read to exactly the documents `LoadPageOfGloballyOwnedIncomingA
 `IdOnly` mode `InboxIdentity(e) == e.Id.ToString()` so the filter values are unchanged from today
 (no `IdOnly` regression).
 
-### 2e. RDBMS comparison — already destination-scoped
+### 2e. RDBMS comparison: already destination-scoped
 
 `external/wolverine/src/Persistence/Wolverine.RDBMS/MessageDatabase.Incoming.cs:17-35`:
 
@@ -274,7 +274,7 @@ public Task ReassignIncomingAsync(int ownerId, IReadOnlyList<Envelope> incoming)
 **Confirmed exactly as the plan states** (`:27-30`). The RDBMS provider's composite primary key is
 effectively `(id, received_at)` and every incoming-table statement in this file (`ReassignIncomingAsync`
 `:27-30`, `MoveToDeadLetterStorageAsync` `:66-69`, both `MarkIncomingEnvelopeAsHandledAsync`
-overloads `:88-90`, `:104-109`) scopes by both columns — there is no RDBMS analogue of the Mongo
+overloads `:88-90`, `:104-109`) scopes by both columns: there is no RDBMS analogue of the Mongo
 bug because the RDBMS schema never conflates two destinations' rows under one identity in the first
 place.
 
@@ -282,7 +282,7 @@ place.
 
 ## 3. Dead-node release ordering + registration-before-claim proof
 
-### 3a. RDBMS `ReleaseOrphanedMessagesOperation` — single command, two statements
+### 3a. RDBMS `ReleaseOrphanedMessagesOperation`: single command, two statements
 
 `external/wolverine/src/Persistence/Wolverine.RDBMS/Durability/ReleaseOrphanedMessagesOperation.cs:24-35`:
 
@@ -297,11 +297,11 @@ public void ConfigureCommand(DbCommandBuilder builder)
 }
 ```
 
-**Correction to the plan's characterization:** this is not literally *one* SQL statement — it is
+**Correction to the plan's characterization:** this is not literally *one* SQL statement; it is
 two `update` statements (incoming, then outgoing), each carrying its own `not in (select ...)`
 subquery against the live `nodes` table. But each individual `update` is evaluated by the RDBMS
 engine as a single atomic operation: the subquery and the row-matching happen inside one statement's
-execution, so there is no read-then-write gap *within* a single `update` — a node that registers
+execution, so there is no read-then-write gap *within* a single `update`. A node that registers
 mid-statement either is or isn't in the sub-select's result set at the instant the engine evaluates
 it, and no envelope can be released based on a *snapshot* of node membership taken earlier and then
 compared later. This is the key structural difference from the Mongo implementation (§3b): the RDBMS
@@ -311,7 +311,7 @@ separated by network latency. Confirmed via `DurabilityAgent.buildOperationBatch
 only added `if (_settings.Mode != DurabilityMode.Solo)` and `_database.Settings.Role ==
 MessageStoreRole.Main`; for non-Main (ancillary) stores a *different* operation,
 `ReleaseOrphanedMessagesForAncillaryOperation`, is used instead, driven by an `activeNodeNumbers`
-list loaded once per tick by the *caller* (`DurabilityAgent.cs:194-197`) — that ancillary variant
+list loaded once per tick by the *caller* (`DurabilityAgent.cs:194-197`); that ancillary variant
 **does** have the same snapshot-then-write structure as the Mongo implementation (a list of live
 numbers computed once, then used in a later write), so it is not immune to the same race in
 principle. This nuance is worth flagging to F4/F11: the plan's LD3 two-tick design should apply
@@ -319,7 +319,7 @@ regardless of Main/Ancillary role, since the Mongo provider has only one message
 Main/Ancillary split in the local file structure) and always takes the "ancillary-shaped" snapshot
 path.
 
-### 3b. Local `ReleaseDeadNodeOwnershipAsync` — two round trips, stale snapshot
+### 3b. Local `ReleaseDeadNodeOwnershipAsync`: two round trips, stale snapshot
 
 `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs:169-194`:
 
@@ -357,7 +357,7 @@ false in the interleaving where: (1) a brand-new node N registers its `NodeDocum
 runs, and (2) that same node N has already been assigned envelopes with `OwnerId == N` by a prior
 tick or a concurrent claim in the same tick (possible once N's number is registered but before this
 particular recovery tick's read observed it). N's number is `Nin` the stale `liveNumbers` list, so
-its freshly-owned envelopes get released to `AnyNode` — exactly the race the plan describes. Two
+its freshly-owned envelopes get released to `AnyNode`, exactly the race the plan describes. Two
 round trips (read, then two separate writes) is strictly worse than the RDBMS Main-store shape
 (§3a) and structurally identical to the RDBMS ancillary-store shape.
 
@@ -377,9 +377,9 @@ belong to any node that registers after tick K**, because registration always al
 higher number than any previously-issued one. If two-tick confirmation requires the same number to
 appear as "dead" in two consecutive ticks before release, and a live node's number can only newly
 appear (never reappear after being freed and reissued), then a number confirmed dead across two
-ticks was dead for the *entire* interval between them — no live node could have silently reclaimed it
+ticks was dead for the *entire* interval between them: no live node could have silently reclaimed it
 mid-interval, because reclaiming would require either (a) the number being reissued (impossible,
-monotonic) or (b) the original node coming back with the same number (impossible — `PersistAsync`
+monotonic) or (b) the original node coming back with the same number (impossible: `PersistAsync`
 always allocates a new one per registration, per NodeAgentController flow in §3d).
 
 ### 3d. PROOF: node registers before its durability agent issues any claim
@@ -417,7 +417,7 @@ public async Task<AgentCommands> StartLocalAgentProcessingAsync(WolverineOptions
 }
 ```
 
-Critically, this method returns `AgentCommands.Empty` — **it does not itself start any per-store
+Critically, this method returns `AgentCommands.Empty`: **it does not itself start any per-store
 durability agent.** Per-store agents (e.g. `MongoDbDurabilityAgent`, whose `StartAsync` is what
 kicks off `ReleaseDeadNodeOwnershipAsync`/`RecoverOrphanedIncomingAsync`/etc. via `StartTimers()`,
 `MongoDbDurabilityAgent.cs:36-41`) are started only via `NodeAgentController.StartAgentAsync(uri)`
@@ -428,8 +428,8 @@ command (`StartAgent.cs:11-16`, `ExecuteAsync` → `runtime.Agents.StartLocallyA
 cluster's leader after evaluating `AssignmentGrid` (`WolverineRuntime.Agents.cs:123-132`,
 `ApplyRestrictionsAsync` → `Storage.Nodes.LoadNodeAgentStateAsync` reads the **persisted** node
 table → `NodeController.EvaluateAssignmentsAsync(nodes, assignments)`). A node cannot appear in
-`LoadNodeAgentStateAsync`'s result — and therefore cannot be assigned any agent, including its own
-store's durability agent — until its `NodeDocument` exists, which is exactly the `PersistAsync` call
+`LoadNodeAgentStateAsync`'s result, and therefore cannot be assigned any agent, including its own
+store's durability agent, until its `NodeDocument` exists, which is exactly the `PersistAsync` call
 at `StartLocalProcessing.cs:15`.
 
 **Conclusion: PROVEN.** `PersistAsync` (registration) happens-before any `StartAgent` command can
@@ -445,21 +445,21 @@ two-tick algorithm's storage location:** `startDurableScheduledJobs()`
 **before** `startNodeAgentWorkflowAsync()` in the Balanced-mode sequence (`HostService.cs:132` vs
 `:150`). For MongoDB, `IMessageStore.StartScheduledJobs` (`MongoDbMessageStore.cs:80`) delegates to
 the *same* `BuildAgent(runtime)` factory as the agent-family path
-(`MongoDbMessageStore.cs:82-86`) — but each call constructs a **new** `MongoDbDurabilityAgent`
+(`MongoDbMessageStore.cs:82-86`), but each call constructs a **new** `MongoDbDurabilityAgent`
 instance. The object returned from `StartScheduledJobProcessing` is stored in
-`WolverineRuntime.DurableScheduledJobs` (`WolverineRuntime.Agents.cs:193`) but — per an exhaustive
-grep of `external/wolverine/src` — **no code path ever calls `.StartAsync()` on it**; the only call
+`WolverineRuntime.DurableScheduledJobs` (`WolverineRuntime.Agents.cs:193`) but, per an exhaustive
+grep of `external/wolverine/src`, **no code path ever calls `.StartAsync()` on it**; the only call
 site found is `.StopAsync()` during `WolverineRuntime.Disposal.cs:22-24`. This strongly suggests
 `DurableScheduledJobs` is currently a construct-but-never-start no-op in the reference
 implementation for stores that (like Mongo) implement scheduled-job polling via the *same* agent
-object as recovery, rather than a genuinely separate scheduled-jobs-only agent — i.e. it does not
+object as recovery, rather than a genuinely separate scheduled-jobs-only agent; i.e. it does not
 appear to be a second, earlier-starting instance that would race the registration-before-claim
 proof above. This is worth a one-line note in F4's design doc (not a blocker): the two-tick dead-set
 state (LD3) should be stored per-`MongoDbDurabilityAgent`-instance or per-store, not assuming
 exactly one instance ever exists, since the plumbing technically constructs (if never starts) a
 second one.
 
-### 3e. Shutdown ordering — release before teardown
+### 3e. Shutdown ordering: release before teardown
 
 `external/wolverine/src/Wolverine/Runtime/WolverineRuntime.HostService.cs:362-403`:
 
@@ -485,19 +485,19 @@ if (StopMode == StopMode.Normal)
 }
 ```
 
-**Confirmed exactly as the plan states** (`:380` release, `:402` teardown — release strictly
+**Confirmed exactly as the plan states** (`:380` release, `:402` teardown; release strictly
 precedes teardown). `teardownAgentsAsync()` (`WolverineRuntime.Agents.cs:262-271`) calls
 `NodeController.StopAsync(bus)`
 (`NodeAgentController.cs:118-144`), which itself: (1) `stopAllAgentsAsync()` (`:120`, iterates
-every locally-running `IAgent` — including this node's `MongoDbDurabilityAgent` — and calls
+every locally-running `IAgent` (including this node's `MongoDbDurabilityAgent`) and calls
 `entry.Value.StopAsync(CancellationToken.None)`, `:146-160`), (2) releases the leadership lock if
 held (`:126-134`), (3) **deletes the node document** via `_persistence.DeleteAsync(...)` (`:136`).
 
 **Confirmed exactly as the plan states**: "`NodeAgentController.cs:136` deletes the node document
-immediately after the agent's instant-return stop" — `stopAllAgentsAsync()` at `:120` runs first and
+immediately after the agent's instant-return stop": `stopAllAgentsAsync()` at `:120` runs first and
 awaits each agent's `StopAsync`, but `MongoDbDurabilityAgent.StopAsync` (`MongoDbDurabilityAgent.cs
 :130-140`) returns `Task.CompletedTask` synchronously after firing cancellation and
-`SafeDispose`-ing both background tasks (§4 below) — so "await"-ing it doesn't actually wait for the
+`SafeDispose`-ing both background tasks (§4 below), so "await"-ing it doesn't actually wait for the
 recovery/scheduled-job loop bodies to finish their current iteration. By the time `_persistence
 .DeleteAsync` runs at `:136`, the loop bodies may still be mid-flight against a database handle
 whose owning `MongoDbMessageStore` may already be disposed (`HasDisposed` is set by
@@ -508,7 +508,7 @@ whose owning `MongoDbMessageStore` may already be disposed (`HasDisposed` is set
 
 ## 4. RDBMS `DurabilityAgent.StopAsync` awaits its loops; `SafeDispose` semantics
 
-### 4a. RDBMS `DurabilityAgent.StopAsync` — actually awaits
+### 4a. RDBMS `DurabilityAgent.StopAsync`: actually awaits
 
 `external/wolverine/src/Persistence/Wolverine.RDBMS/DurabilityAgent.cs:141-158`:
 
@@ -527,17 +527,17 @@ public async Task StopAsync(CancellationToken cancellationToken)
 }
 ```
 
-**Confirmed as the plan states** (line range in this checkout is `:141-166` — the plan's cited
+**Confirmed as the plan states** (line range in this checkout is `:141-166`; the plan's cited
 `:140-166` is off by one line but names the same method body). Every timer here is a
 `System.Threading.Timer` wrapped so its `DisposeAsync()` genuinely waits for any in-flight callback
 to finish before returning (the .NET `Timer.DisposeAsync` contract: it signals a `WaitHandle`/
-completes a `Task` only once no callback is executing and none will execute again) — this is a real
+completes a `Task` only once no callback is executing and none will execute again); this is a real
 await, not a fire-and-forget dispose. The RDBMS agent's recovery/scheduled-job/expiration/cleanup
 work all runs as `Timer` callbacks posted onto `_runningBlock` (a `Block<IAgentCommand>`,
 constructed in the ctor `:47-67`); `_runningBlock.Complete()` at `:143` additionally signals the
 block to drain in-flight work.
 
-### 4b. Local `MongoDbDurabilityAgent.StopAsync` — fire-and-forget
+### 4b. Local `MongoDbDurabilityAgent.StopAsync`: fire-and-forget
 
 Already quoted in full in §3e / earlier in this doc (`MongoDbDurabilityAgent.cs:130-140`):
 
@@ -553,13 +553,13 @@ public Task StopAsync(CancellationToken cancellationToken)
 ```
 
 `_recoveryTask`/`_scheduledJob` are plain `Task.Run(...)` background loops (`StartTimers()`,
-`:47-91`), not `System.Threading.Timer`s — there is no driver-provided "wait for in-flight callback"
+`:47-91`), not `System.Threading.Timer`s; there is no driver-provided "wait for in-flight callback"
 primitive here. `Task.Dispose()` on a `Task` that is not yet in a terminal state throws
 `InvalidOperationException` ("A task may only be disposed if it is in a completion state"); `SafeDispose`
-(JasperFx.Core — an external NuGet dependency, no local source in this repo or submodule; behavior
+(JasperFx.Core, an external NuGet dependency, no local source in this repo or submodule; behavior
 here is the CLAUDE.md/plan's already-established fact, re-confirmed only at the call site) is a
 try/catch wrapper that swallows exactly that exception. So `_recoveryTask?.SafeDispose()` neither
-awaits completion nor observes whether the task actually stopped — it merely attempts (and
+awaits completion nor observes whether the task actually stopped. It merely attempts (and
 discards the result of attempting) to dispose a `Task` object that is, in the overwhelmingly likely
 case, still running (cancellation was only just requested one line above, and the loop's
 `PeriodicTimer.WaitForNextTickAsync` / in-flight `await` chain needs at least one scheduler turn to
@@ -569,7 +569,7 @@ recovery loop has stopped running.**
 
 **Confirmed exactly as the plan states**, with the added precision that the two loops
 (`_recoveryTask`, `_scheduledJob`) are raw `Task.Run` continuations racing a `CancellationToken`,
-not driver-awaited `Timer`s — the F12 fix (awaiting both tasks with a bounded timeout before
+not driver-awaited `Timer`s; the F12 fix (awaiting both tasks with a bounded timeout before
 returning, per the plan's F4-deferred contract) has a real, uncancelled `await` primitive to bind to
 (`await Task.WhenAny(Task.WhenAll(_recoveryTask, _scheduledJob), Task.Delay(timeout))`-shaped), unlike
 the RDBMS agent's `Timer.DisposeAsync`, so the exact implementation shape will necessarily differ
@@ -580,7 +580,7 @@ even though the awaited-vs-fire-and-forget *contract* converges.
 ## 5. MongoDB in-transaction `InsertMany(IsOrdered:false)` failure mode
 
 No local source for `MongoDB.Driver` is available in this repo or the pinned submodule (compiled
-NuGet package only, `MongoDB.Driver 3.9.0` per `Directory.Packages.props:8`) — this section states
+NuGet package only, `MongoDB.Driver 3.9.0` per `Directory.Packages.props:8`); this section states
 the **documented MongoDB server/driver contract**, which F8 must still confirm empirically against
 the exact .NET exception type/shape (the plan already anticipates this: "code to the ACTUAL
 in-transaction exception shape... if it differs from the shape above, follow the driver, not the
@@ -588,7 +588,7 @@ snippet", `2026-07-07-review-findings-remediation.md:350`).
 
 **Server-level contract (MongoDB multi-document transactions):** all writes inside a transaction are
 part of one atomic unit. Per MongoDB's transaction semantics, once any operation inside a
-transaction errors, the transaction is left in an aborted state — the server does not continue
+transaction errors, the transaction is left in an aborted state: the server does not continue
 processing further statements in that transaction, and no partial writes from that transaction are
 visible to any other session (transactions provide snapshot isolation; nothing commits until
 `commitTransaction` succeeds). This is qualitatively different from an **unordered** bulk write
@@ -599,12 +599,12 @@ document.
 **Practical consequence for `InsertMany(session, docs, new InsertManyOptions { IsOrdered = false })`
 inside a `session.StartTransaction()`/`CommitTransactionAsync()` block:** the `IsOrdered = false`
 option only controls client/server *request-batching* behavior (whether the server may reorder or
-parallelize the individual inserts within the one bulk command) — it does not, and cannot, grant
+parallelize the individual inserts within the one bulk command); it does not, and cannot, grant
 transactional writes permission to continue past the first write conflict, because doing so would
 require partially committing a transaction, which MongoDB does not support. The practical effect
 F4/F8 must design around: **the driver will very likely surface only the first encountered
 duplicate-key error** (or a smaller subset than the true full set of duplicates in the batch),
-wrapped in some exception shape the .NET driver throws for a failed bulk write inside a session —
+wrapped in some exception shape the .NET driver throws for a failed bulk write inside a session,
 still very plausibly `MongoBulkWriteException<T>` (the same type thrown outside transactions) since
 that's the driver's standard vehicle for reporting `WriteError`s from an `insertMany`-shaped
 command, but this repo has no local evidence pinning the exact type/shape when a session is
@@ -623,16 +623,16 @@ the empirical test observes) rather than hardcoding one type.
 
 1. **§3a nuance:** `ReleaseOrphanedMessagesOperation` (RDBMS Main-store path) is genuinely
    single-round-trip-atomic per statement, but the plan's phrase "single-statement semantics"
-   undersells that it's actually *two* statements (incoming, outgoing) each independently atomic —
+   undersells that it's actually *two* statements (incoming, outgoing) each independently atomic,
    not one combined statement. There is also a **second, ancillary-store RDBMS operation**
    (`ReleaseOrphanedMessagesForAncillaryOperation`) that takes a pre-loaded `activeNodeNumbers`
-   snapshot exactly like the Mongo implementation does — meaning the RDBMS provider is not
+   snapshot exactly like the Mongo implementation does, meaning the RDBMS provider is not
    universally immune to this race either; only its *Main*-store path is. Worth a one-line mention
    in F4's design doc so the "RDBMS mirror is atomic" framing doesn't imply every RDBMS deployment
    shape avoids this class of bug.
 2. **§3d discovery (not a plan error, an addition):** a `DurableScheduledJobs` composite agent is
    constructed earlier in Balanced-mode startup than node registration, but appears to never be
-   started (`.StartAsync()` has no call site in the submodule) — so it does not threaten the
+   started (`.StartAsync()` has no call site in the submodule), so it does not threaten the
    registration-before-claim proof, but F4 should note it as a "confirmed not a second live claimer"
    footnote rather than silently assuming only one `MongoDbDurabilityAgent` instance is ever
    constructed.

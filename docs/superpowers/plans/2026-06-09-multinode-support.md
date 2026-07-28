@@ -4,7 +4,7 @@
 
 **Goal:** Make `Wolverine.MongoDB` safe and verified under `DurabilityMode.Balanced` (multi-node clusters): CAS-guarded outgoing recovery, dead-node ownership release, configurable leader lease, node-record retention, an un-gated and stabilized multinode compliance suite, cross-node integration tests, demo support, and documentation.
 
-**Architecture:** Multinode coordination reuses Wolverine core's `NodeAgentController` (leader election, stale-node ejection, agent balancing) — this plan supplies the store-side primitives it needs: a correct lease-based leader lock, ownership release for dead node numbers, and recovery loops that never double-claim. MongoDB has no native control transport, so Balanced mode requires `opts.UseTcpForControlEndpoint()` (mirroring Wolverine's RavenDb provider). All cross-node claims stay CAS-based (`findAndModify` / filtered `UpdateMany` + re-read), never lock-the-world.
+**Architecture:** Multinode coordination reuses Wolverine core's `NodeAgentController` (leader election, stale-node ejection, agent balancing), this plan supplies the store-side primitives it needs: a correct lease-based leader lock, ownership release for dead node numbers, and recovery loops that never double-claim. MongoDB has no native control transport, so Balanced mode requires `opts.UseTcpForControlEndpoint()` (mirroring Wolverine's RavenDb provider). All cross-node claims stay CAS-based (`findAndModify` / filtered `UpdateMany` + re-read), never lock-the-world.
 
 **Tech Stack:** .NET 9/10, MongoDB.Driver 3.x, WolverineFx 6.2.2 (`Wolverine.Transports.Tcp` for control endpoints), xUnit + Shouldly, Testcontainers.MongoDb.
 
@@ -16,11 +16,11 @@
 
 **Every task is delivered as its own feature branch and its own PR against `main`.** The inline "Commit" step at the end of each task stays as written; it is followed by the push/PR steps below. Each PR must be independently green: the task's own tests pass, plus the full library suite.
 
-**Per-task procedure (one git worktree per task — safe for parallel agents):**
+**Per-task procedure (one git worktree per task, safe for parallel agents):**
 
-> **Why a worktree, not `git checkout`:** a clone has exactly one working tree, one `HEAD`, and one index, all global to the directory. Two task-agents sharing one checkout clobber each other — a `git checkout` / `reset` / `stash` in one silently reverts the other's uncommitted work, or bleeds edits across branches. Each task therefore gets its **own** working directory backed by the shared `.git`. `.worktrees/` is gitignored.
+> **Why a worktree, not `git checkout`:** a clone has exactly one working tree, one `HEAD`, and one index, all global to the directory. Two task-agents sharing one checkout clobber each other, a `git checkout` / `reset` / `stash` in one silently reverts the other's uncommitted work, or bleeds edits across branches. Each task therefore gets its **own** working directory backed by the shared `.git`. `.worktrees/` is gitignored.
 
-> **Already isolated?** If you were dispatched as a subagent with worktree isolation (the `Agent` / `Workflow` `isolation: "worktree"` option, or a native `EnterWorktree` / `/worktree` tool), you are **already** in your own worktree — do not nest another. Confirm with `git branch --show-current`, then skip straight to the task's steps.
+> **Already isolated?** If you were dispatched as a subagent with worktree isolation (the `Agent` / `Workflow` `isolation: "worktree"` option, or a native `EnterWorktree` / `/worktree` tool), you are **already** in your own worktree, do not nest another. Confirm with `git branch --show-current`, then skip straight to the task's steps.
 
 ```bash
 # Start: from the main checkout, cut an isolated worktree off the CURRENT main
@@ -44,10 +44,10 @@ rtk git worktree remove .worktrees/<branch-name>
 ```
 
 - **`--head <branch-name>` is now required:** `gh` would infer the head from the current branch, but stating it explicitly keeps the PR unambiguous no matter which worktree it is invoked from. `gh` reads the shared `.git`, so it behaves identically in every worktree.
-- A slashed branch name (e.g. `feat/mongodb-persistence-options`) just nests one extra directory level under `.worktrees/` — that is fine.
+- A slashed branch name (e.g. `feat/mongodb-persistence-options`) just nests one extra directory level under `.worktrees/`, that is fine.
 - Each worktree has its own `bin` / `obj`, so parallel `dotnet build` / `dotnet test` runs never collide. A branch can be checked out in only one worktree at a time; since every task has a distinct branch, this never conflicts.
 
-Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged** — this plan is much more sequential than the hardening plan.
+Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer; PR bodies end with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **A dependent task starts only after its dependency's PR is merged**: this plan is much more sequential than the hardening plan.
 
 | Task | Branch | PR title | Depends on | Model | Status (2026-06-18) |
 |---|---|---|---|---|---|
@@ -56,27 +56,27 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | 3 | `fix/cas-outgoing-recovery` | fix: CAS-guarded outgoing recovery prevents cross-node double-claims | Solo plan merged | **Fable 5 / Opus** | ✅ Merged (#68) |
 | 4 | `feat/release-dead-node-ownership` | feat: release envelope ownership held by dead node numbers | Solo plan merged | Sonnet | ✅ Merged (#69) |
 | 5 | `feat/delete-old-node-records` | feat: implement DeleteOldNodeRecordsAsync | Solo plan merged | Sonnet | ✅ Merged (#70) |
-| 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first — balancing facts exercise recovery) | **Fable 5** | ⚠️ Partial (#71) — **blocked**; suite kept **gated**, findings doc landed |
-| ~~6b~~ | *(none — documented only)* | deterministic lowest-live-node leadership election | n/a | n/a | 📋 **Documented option, NOT a planned task** — analyzed & declined for production (see the note after Task 6 + the findings doc) |
-| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76) — production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
+| 6 | `test/ungate-multinode-compliance` | test: un-gate multinode leadership election compliance | **Tasks 1, 2** (and merge 3, 4 first, balancing facts exercise recovery) | **Fable 5** | ⚠️ Partial (#71), **blocked**; suite kept **gated**, findings doc landed |
+| ~~6b~~ | *(none, documented only)* | deterministic lowest-live-node leadership election | n/a | n/a | 📋 **Documented option, NOT a planned task**: analyzed & declined for production (see the note after Task 6 + the findings doc) |
+| 7 | `test/multinode-end-to-end` | test: cross-node exactly-once scheduling and dead-node rescue | **Tasks 1–4** | **Opus 4.8** | ✅ Merged (#76), production-confidence path; 5× green on net9.0+net10.0, full suite green (107/107 per TFM) |
 | 8 | `ci/multinode-category` | ci: run multinode test category as a separate step | **Task 7** (provides runnable multinode tests) | Sonnet | ✅ Merged (#78) |
-| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ✅ Merged (#79) — config-driven durability + multinode runbook; also added `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core); two-instance Balanced smoke passed |
+| 9 | `demo/config-driven-durability-mode` | demo: config-driven durability mode with multinode runbook | **Task 1** | Sonnet | ✅ Merged (#79), config-driven durability + multinode runbook; also added `WolverineFx.RuntimeCompilation` to the demo API (6.9 moved the runtime compiler out of core); two-instance Balanced smoke passed |
 | 10 | `docs/multinode-sweep` | docs: multinode support documentation | **Tasks 1–9 merged** | Sonnet | ✅ Merged (#81) |
-| 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ✅ Done (2026-06-18) — 105/105 suite (both TFMs), 5× multinode green, pack ok, demo 27/27, CI green (multinode step passes) |
-| 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ✅ Done (2026-06-18) — published `0.1.0-beta.6` to NuGet (#82 gate-2 PR + tag); demo bumped to `0.1.0-beta.6` (PR #83); 27/27 demo tests pass against published package |
+| 11 | *(no branch/PR)* | final verification on `main` | **Task 10 merged** | Sonnet | ✅ Done (2026-06-18), 105/105 suite (both TFMs), 5× multinode green, pack ok, demo 27/27, CI green (multinode step passes) |
+| 12 | release (via the `release` agent) + `demo/use-multinode-release` | release: publish the multinode version to NuGet; demo: consume it | **Tasks 1–11 merged** | Sonnet | ✅ Done (2026-06-18), published `0.1.0-beta.6` to NuGet (#82 gate-2 PR + tag); demo bumped to `0.1.0-beta.6` (PR #83); 27/27 demo tests pass against published package |
 
-**Recommended merge order (updated 2026-06-18):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned** — see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees — the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). **Task 8** (#78, run Task 7's multinode tests as a separate CI step) and **Task 9** (#79, demo config-driven durability + runbook) are now **merged**. **Task 10** (docs sweep) is **merged** (#81). Remaining work: **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
+**Recommended merge order (updated 2026-06-18):** Tasks 1–5 are **merged** (#63/#67/#68/#69/#70). Task 6 merged as a **gated findings PR** (#71). **Decision:** the leadership compliance suite **stays gated** (the production-appropriate any-healthy-node model is kept) and the lowest-node fix (formerly "Task 6b") is **documented-only, not planned**: see the note after Task 6 and `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. **Task 7** (cross-node message guarantees, the production-confidence path) is **merged** (#76; exactly-once scheduling + dead-node rescue, 5× green on net9.0+net10.0). **Task 8** (#78, run Task 7's multinode tests as a separate CI step) and **Task 9** (#79, demo config-driven durability + runbook) are now **merged**. **Task 10** (docs sweep) is **merged** (#81). Remaining work: **Task 11** on `main`. Finally, **Task 12** publishes the multinode release to NuGet and re-points the demo at the published package, so the demo's Balanced runbook works for end users (not just CI's freshly packed `0.0.0-ci` nupkg).
 
 > _Original order (pre-Task-6 outcome): 1 → 2, with 3, 4, 5 as parallel PRs alongside; then 6 → 8; 7 and 9 once their dependencies are in; 10 last; 11 on `main`._
 
 **Model guidance.** This plan skews to a stronger tier than the hardening plan because the failure modes are distributed-systems races, not transcription errors (Agent tool `model` parameter: `sonnet`, `opus`, `fable`):
 
-- **Fable 5 mandatory** for Tasks 6 and 7: stabilizing the leadership-election compliance suite and the cross-node end-to-end tests is iterative flaky-test diagnosis (lease/heartbeat timing, claim races, unverified Wolverine APIs like `PortFinder` and the control-endpoint registration). The plan provides stabilization levers, not a deterministic recipe — the agent must reason about *why* a fact flakes before turning a knob, and the explicit anti-goal is "do not mark facts as skipped / do not add retries".
-- **Fable 5 / Opus** for Task 2 (lease semantics + timing-sensitive tests where an off-by-margin bug looks like a pass) and Task 3 (CAS claim correctness — the test simulates a race, and a subtly wrong filter still passes locally most of the time).
-- **Sonnet** for Tasks 1, 4, 5, 8, 9, 10, 11 — fully specified code with deterministic tests.
+- **Fable 5 mandatory** for Tasks 6 and 7: stabilizing the leadership-election compliance suite and the cross-node end-to-end tests is iterative flaky-test diagnosis (lease/heartbeat timing, claim races, unverified Wolverine APIs like `PortFinder` and the control-endpoint registration). The plan provides stabilization levers, not a deterministic recipe, the agent must reason about *why* a fact flakes before turning a knob, and the explicit anti-goal is "do not mark facts as skipped / do not add retries".
+- **Fable 5 / Opus** for Task 2 (lease semantics + timing-sensitive tests where an off-by-margin bug looks like a pass) and Task 3 (CAS claim correctness, the test simulates a race, and a subtly wrong filter still passes locally most of the time).
+- **Sonnet** for Tasks 1, 4, 5, 8, 9, 10, 11, fully specified code with deterministic tests.
 - **Do not use Haiku** anywhere in this plan.
-- **Escalation rule:** same as the hardening plan — two non-obvious verification failures, or a broken plan assumption, means re-dispatch on Fable 5 with the failure context instead of improvising. For Tasks 6/7 specifically, if five-in-a-row stability cannot be reached after exhausting the listed levers, stop and report findings back to the user rather than weakening the assertions.
-- **Code review between tasks**: Fable 5/Opus, with extra scrutiny on Tasks 2, 3, 4 — concurrency bugs that pass a green suite are precisely what review must catch here.
+- **Escalation rule:** same as the hardening plan, two non-obvious verification failures, or a broken plan assumption, means re-dispatch on Fable 5 with the failure context instead of improvising. For Tasks 6/7 specifically, if five-in-a-row stability cannot be reached after exhausting the listed levers, stop and report findings back to the user rather than weakening the assertions.
+- **Code review between tasks**: Fable 5/Opus, with extra scrutiny on Tasks 2, 3, 4, concurrency bugs that pass a green suite are precisely what review must catch here.
 
 ---
 
@@ -84,7 +84,7 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 
 | File | Change |
 |---|---|
-| `src/Wolverine.MongoDB/MongoDbPersistenceOptions.cs` | **New** — public options (leader lease duration) |
+| `src/Wolverine.MongoDB/MongoDbPersistenceOptions.cs` | **New**: public options (leader lease duration) |
 | `src/Wolverine.MongoDB/WolverineMongoDbExtensions.cs` | `configure` overload for options |
 | `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs` | Accept options; replace Balanced throw with control-endpoint-aware warning |
 | `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs` | Configurable lease + renewal margin |
@@ -96,7 +96,7 @@ Commit messages end with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.
 | `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs` | **New** |
 | `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs` | **New** |
 | `src/Wolverine.MongoDB.Tests/leader_lease.cs` | **New** |
-| `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs` | **New** — two in-proc Balanced hosts |
+| `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs` | **New**: two in-proc Balanced hosts |
 | `demo/src/OrderDemo.Api/Program.cs` + `appsettings*.json` | Config-driven durability mode + control port |
 | `.github/workflows/ci.yml` | Run the multinode test category |
 | `README.md`, `CLAUDE.md`, `FOLLOWUPS.md`, `CHANGELOG.md`, `demo/README.md`, `demo/CLAUDE.md` | Documentation |
@@ -116,7 +116,7 @@ Multinode work needs Balanced hosts to start. Replace the hard throw (Solo plan 
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs`
 - Modify: `src/Wolverine.MongoDB.Tests/durability_mode_guard.cs`
 
-- [x] **Step 1: Amend the guard test** — in `durability_mode_guard.cs`, replace `balanced_mode_fails_fast_at_startup` with:
+- [x] **Step 1: Amend the guard test**: in `durability_mode_guard.cs`, replace `balanced_mode_fails_fast_at_startup` with:
 
 ```csharp
 [Fact]
@@ -143,7 +143,7 @@ Add `using Wolverine.Transports.Tcp;`. Keep `solo_mode_starts_normally` unchange
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~durability_mode_guard"`
 Expected: `balanced_mode_starts_with_a_control_endpoint` FAILS with the `InvalidOperationException` from the guard.
 
-- [x] **Step 3: Create the options type** — `src/Wolverine.MongoDB/MongoDbPersistenceOptions.cs`:
+- [x] **Step 3: Create the options type**: `src/Wolverine.MongoDB/MongoDbPersistenceOptions.cs`:
 
 ```csharp
 namespace Wolverine.MongoDB;
@@ -164,9 +164,9 @@ public class MongoDbPersistenceOptions
 }
 ```
 
-(Note: default changes from the previously hardcoded 5 minutes to 1 minute — 5 minutes makes leader failover unacceptably slow and is the root of the compliance-suite flakiness. CHANGELOG-worthy.)
+(Note: default changes from the previously hardcoded 5 minutes to 1 minute, 5 minutes makes leader failover unacceptably slow and is the root of the compliance-suite flakiness. CHANGELOG-worthy.)
 
-- [x] **Step 4: Thread the options through** — in `WolverineMongoDbExtensions.cs` change the signature and store construction:
+- [x] **Step 4: Thread the options through**: in `WolverineMongoDbExtensions.cs` change the signature and store construction:
 
 ```csharp
 public static WolverineOptions UseMongoDbPersistence(this WolverineOptions options, string databaseName,
@@ -203,7 +203,7 @@ public MongoDbMessageStore(IMongoClient client, string databaseName, WolverineOp
 }
 ```
 
-- [x] **Step 5: Replace the throw with a warning** — in `MongoDbMessageStore.cs` replace `AssertSupportedDurabilityMode` and its call sites:
+- [x] **Step 5: Replace the throw with a warning**: in `MongoDbMessageStore.cs` replace `AssertSupportedDurabilityMode` and its call sites:
 
 ```csharp
 public void Initialize(IWolverineRuntime runtime) => WarnOnBalancedMode(runtime);
@@ -251,7 +251,7 @@ Use `LockLeaseDuration` instead of the hardcoded 5 minutes, and make `HasLeaders
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Locking.cs`
 - Test: Create `src/Wolverine.MongoDB.Tests/leader_lease.cs`
 
-- [x] **Step 1: Write the failing tests** — create `src/Wolverine.MongoDB.Tests/leader_lease.cs`:
+- [x] **Step 1: Write the failing tests**: create `src/Wolverine.MongoDB.Tests/leader_lease.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -313,7 +313,7 @@ public class leader_lease
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~leader_lease"`
 Expected: both FAIL (lease is hardcoded to 5 minutes; `HasLeadershipLock` trusts the full lease).
 
-- [x] **Step 3: Implement** — in `MongoDbMessageStore.Locking.cs`:
+- [x] **Step 3: Implement**: in `MongoDbMessageStore.Locking.cs`:
 
 Replace `now.AddMinutes(5)` in `TryAttainAsync` with:
 
@@ -363,13 +363,13 @@ rtk git commit -m "feat: configurable leader lock lease with renewal safety marg
 
 ### Task 3: CAS-guarded outgoing recovery (no double-claims across nodes)
 
-After the Solo plan, `LoadOutgoingAsync` only returns owner-0 envelopes — but two nodes can still both load the same orphans and both `UpdateMany` them to themselves; the second write wins and both nodes enqueue → duplicate sends. Mirror the incoming-recovery pattern: claim with an `OwnerId == AnyNode` guard, then re-read which ids this node actually owns and enqueue only those.
+After the Solo plan, `LoadOutgoingAsync` only returns owner-0 envelopes, but two nodes can still both load the same orphans and both `UpdateMany` them to themselves; the second write wins and both nodes enqueue → duplicate sends. Mirror the incoming-recovery pattern: claim with an `OwnerId == AnyNode` guard, then re-read which ids this node actually owns and enqueue only those.
 
 **Files:**
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs` (`RecoverOrphanedOutgoingAsync`)
 - Test: Create `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs`
 
-- [x] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs`:
+- [x] **Step 1: Write the failing test**: create `src/Wolverine.MongoDB.Tests/outgoing_recovery_contention.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -440,16 +440,16 @@ public class outgoing_recovery_contention
 }
 ```
 
-Note: this is deterministic only if the claim happens *after* the load. With the current implementation (load → `DiscardAndReassignOutgoingAsync` unguarded `UpdateMany` on ids), the competitor's ownership IS overwritten — the test fails. That is exactly the bug.
+Note: this is deterministic only if the claim happens *after* the load. With the current implementation (load → `DiscardAndReassignOutgoingAsync` unguarded `UpdateMany` on ids), the competitor's ownership IS overwritten, the test fails. That is exactly the bug.
 
 - [x] **Step 2: Run to verify it fails**
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~outgoing_recovery_contention"`
-Expected: FAIL — `stolenDoc.OwnerId` is this node's number, not 999.
+Expected: FAIL, `stolenDoc.OwnerId` is this node's number, not 999.
 
-Caveat: because `LoadOutgoingAsync` (post Solo plan) already filters owner-0 at load time, the load in `RecoverOrphanedOutgoingAsync` happens before the test's manual flip only if the flip is applied after `StoreOutgoingAsync` but before recovery — which it is. The unguarded `UpdateMany` in `DiscardAndReassignOutgoingAsync` then overwrites. If the test unexpectedly passes, verify by inspecting `DiscardAndReassignOutgoingAsync` — the filter must currently be `In(ids)` only.
+Caveat: because `LoadOutgoingAsync` (post Solo plan) already filters owner-0 at load time, the load in `RecoverOrphanedOutgoingAsync` happens before the test's manual flip only if the flip is applied after `StoreOutgoingAsync` but before recovery, which it is. The unguarded `UpdateMany` in `DiscardAndReassignOutgoingAsync` then overwrites. If the test unexpectedly passes, verify by inspecting `DiscardAndReassignOutgoingAsync`: the filter must currently be `In(ids)` only.
 
-- [x] **Step 3: Implement the CAS claim** — in `MongoDbMessageStore.Durability.cs`, rewrite the body of `RecoverOrphanedOutgoingAsync`'s per-destination block:
+- [x] **Step 3: Implement the CAS claim**: in `MongoDbMessageStore.Durability.cs`, rewrite the body of `RecoverOrphanedOutgoingAsync`'s per-destination block:
 
 ```csharp
 foreach (var destinationStr in destinations)
@@ -505,7 +505,7 @@ foreach (var destinationStr in destinations)
 }
 ```
 
-(`DiscardAndReassignOutgoingAsync` itself keeps its current unguarded semantics — it is an `IMessageOutbox` interface member with broader contracts — but the recovery loop no longer routes through it.)
+(`DiscardAndReassignOutgoingAsync` itself keeps its current unguarded semantics, since it is an `IMessageOutbox` interface member with broader contracts, but the recovery loop no longer routes through it.)
 
 - [x] **Step 4: Run the contention test + existing recovery tests, then commit**
 
@@ -521,14 +521,14 @@ rtk git commit -m "fix: CAS-guarded outgoing recovery prevents cross-node double
 
 ### Task 4: Release ownership held by dead node numbers
 
-In Balanced mode there is no startup `ReleaseAllOwnershipAsync()`. Core's leader ejects stale nodes (which calls `DeleteAsync` → release), but envelopes can still be stranded under a node number with no registered node (e.g. crash between scheduled-claim and enqueue — the exact window documented in `PublishDueScheduledMessagesAsync`). Mirror the RDBMS `ReleaseOrphanedMessagesOperation`: any node may release ownership for node numbers that have no live node document.
+In Balanced mode there is no startup `ReleaseAllOwnershipAsync()`. Core's leader ejects stale nodes (which calls `DeleteAsync` → release), but envelopes can still be stranded under a node number with no registered node (e.g. crash between scheduled-claim and enqueue, the exact window documented in `PublishDueScheduledMessagesAsync`). Mirror the RDBMS `ReleaseOrphanedMessagesOperation`: any node may release ownership for node numbers that have no live node document.
 
 **Files:**
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Durability.cs` (new method)
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbDurabilityAgent.cs` (wire into recovery loop)
 - Test: Create `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs`
 
-- [x] **Step 1: Write the failing test** — create `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs`:
+- [x] **Step 1: Write the failing test**: create `src/Wolverine.MongoDB.Tests/dead_node_ownership_release.cs`:
 
 ```csharp
 using MongoDB.Driver;
@@ -592,7 +592,7 @@ public class dead_node_ownership_release
 Run: `dotnet build src/Wolverine.MongoDB.Tests`
 Expected: CS1061.
 
-- [x] **Step 3: Implement** — add to `MongoDbMessageStore.Durability.cs`:
+- [x] **Step 3: Implement**: add to `MongoDbMessageStore.Durability.cs`:
 
 ```csharp
 /// <summary>
@@ -623,7 +623,7 @@ internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
 }
 ```
 
-- [x] **Step 4: Wire into the recovery loop** — in `MongoDbDurabilityAgent.StartTimers()`, inside the recovery task's `try` block, add as the FIRST call (release before recover, so the same tick can pick up what it released), guarded to non-Solo modes:
+- [x] **Step 4: Wire into the recovery loop**: in `MongoDbDurabilityAgent.StartTimers()`, inside the recovery task's `try` block, add as the FIRST call (release before recover, so the same tick can pick up what it released), guarded to non-Solo modes:
 
 ```csharp
 if (_settings.Mode != DurabilityMode.Solo)
@@ -635,7 +635,7 @@ await _parent.RecoverOrphanedOutgoingAsync(_runtime, _combined.Token);
 await _parent.ReplayDeadLettersAsync(_combined.Token);
 ```
 
-(`DurabilitySettings.Mode` — verify the property name on `DurabilitySettings` in the Wolverine clone; it is `Mode` per `DurabilitySettings.cs`.)
+(`DurabilitySettings.Mode`, verify the property name on `DurabilitySettings` in the Wolverine clone; it is `Mode` per `DurabilitySettings.cs`.)
 
 - [x] **Step 5: Run the test + full suite, then commit**
 
@@ -656,7 +656,7 @@ The interface default is a no-op; the leader calls it to trim node-event history
 - Modify: `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.NodeAgents.cs`
 - Test: `src/Wolverine.MongoDB.Tests/node_heartbeat.cs` (add test; it already exercises node persistence)
 
-- [x] **Step 1: Write the failing test** — add to `node_heartbeat.cs`:
+- [x] **Step 1: Write the failing test**: add to `node_heartbeat.cs`:
 
 ```csharp
 [Fact]
@@ -691,9 +691,9 @@ public async Task delete_old_node_records_keeps_only_the_newest_n()
 - [x] **Step 2: Run to verify it fails** (default no-op → 10 remain)
 
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "FullyQualifiedName~delete_old_node_records"`
-Expected: FAIL — count is 10.
+Expected: FAIL, count is 10.
 
-- [x] **Step 3: Implement** — add to `MongoDbMessageStore.NodeAgents.cs`:
+- [x] **Step 3: Implement**: add to `MongoDbMessageStore.NodeAgents.cs`:
 
 ```csharp
 public async Task DeleteOldNodeRecordsAsync(int retainCount)
@@ -729,14 +729,14 @@ rtk git commit -m "feat: implement DeleteOldNodeRecordsAsync node-record trimmin
 
 ### Task 6: Un-gate and stabilize the multinode compliance suite
 
-> **Status (2026-06-16): ⚠️ Blocked — merged as a gated findings PR (#71).** Five-consecutive-green is **not** reachable via test config: `leader_switchover_between_nodes` (and the dependent `singular_agent_is_only_running_on_one`) hinge on a leadership-claim race Wolverine core decides by lock-arrival order, which our durable (`w:majority+j:true`) Mongo lock loses ~half the time. The suite is therefore **kept compile-gated behind `RUN_MULTINODE`** — a **deliberate decision** to keep the production-appropriate any-healthy-node model rather than constrain production for an upstream test (matching Wolverine's Cosmos provider, which gates the same facts `[Flaky]`). The lowest-node fix (formerly "Task 6b") was **analyzed and declined for production** — documented as an upstream-parity option only (see the note below). Full diagnosis, the ~45-run config matrix, observed interleavings, a MassTransit comparison, the suggested code change, and model guidance: `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. The steps below were executed (un-gate → stabilize attempts → re-gate); the acceptance bar (5× green) was not met, so they are intentionally left **unchecked**.
+> **Status (2026-06-16): ⚠️ Blocked, merged as a gated findings PR (#71).** Five-consecutive-green is **not** reachable via test config: `leader_switchover_between_nodes` (and the dependent `singular_agent_is_only_running_on_one`) hinge on a leadership-claim race Wolverine core decides by lock-arrival order, which our durable (`w:majority+j:true`) Mongo lock loses ~half the time. The suite is therefore **kept compile-gated behind `RUN_MULTINODE`**: a **deliberate decision** to keep the production-appropriate any-healthy-node model rather than constrain production for an upstream test (matching Wolverine's Cosmos provider, which gates the same facts `[Flaky]`). The lowest-node fix (formerly "Task 6b") was **analyzed and declined for production**: documented as an upstream-parity option only (see the note below). Full diagnosis, the ~45-run config matrix, observed interleavings, a MassTransit comparison, the suggested code change, and model guidance: `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`. The steps below were executed (un-gate → stabilize attempts → re-gate); the acceptance bar (5× green) was not met, so they are intentionally left **unchecked**.
 
 The suite is currently compile-gated behind `#if RUN_MULTINODE` because the balancing facts raced the hardcoded 5-minute lease. With the lease now configurable (Task 2) and defaulting to 1 minute, configure a short lease for tests and run the suite for real.
 
 **Files:**
 - Modify: `src/Wolverine.MongoDB.Tests/leadership_election_compliance.cs`
 
-- [ ] **Step 1: Remove the compile gate and shorten the lease** — replace the file contents with:
+- [ ] **Step 1: Remove the compile gate and shorten the lease**: replace the file contents with:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -784,7 +784,7 @@ public class leadership_election_compliance : LeadershipElectionCompliance
 Run: `dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"`
 Expected: PASS. Run it **five times in a row** (`for ($i=0; $i -lt 5; $i++) { dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode" }` in PowerShell); all five must pass.
 
-Stabilization levers if facts still flake, in order: (a) shorten `LockLeaseDuration` further (≥ 2s); (b) check whether the base class exposes heartbeat/assignment-check timing knobs on `WolverineOptions.Durability` (e.g. `FirstHealthCheckExecution`, `HealthCheckPollingTime`) and shorten them in `configureNode`; (c) compare against the RavenDb provider's subclass in the Wolverine clone (`src/Persistence/Wolverine.RavenDb*/`) for any extra configuration it applies. Do NOT mark facts as skipped — a flaky fact here means a real coordination bug or a timing knob not yet wired.
+Stabilization levers if facts still flake, in order: (a) shorten `LockLeaseDuration` further (≥ 2s); (b) check whether the base class exposes heartbeat/assignment-check timing knobs on `WolverineOptions.Durability` (e.g. `FirstHealthCheckExecution`, `HealthCheckPollingTime`) and shorten them in `configureNode`; (c) compare against the RavenDb provider's subclass in the Wolverine clone (`src/Persistence/Wolverine.RavenDb*/`) for any extra configuration it applies. Do NOT mark facts as skipped, a flaky fact here means a real coordination bug or a timing knob not yet wired.
 
 - [ ] **Step 3: Run the FULL suite** (the multinode suite shares the fixture database; ensure no cross-contamination)
 
@@ -804,7 +804,7 @@ rtk git commit -m "test: un-gate multinode leadership election compliance with s
 
 > **Decision (2026-06-16): declined for production.** This was briefly framed as "Task 6b"; it is **not** a planned task. It is recorded here only as a documented option in case the Wolverine/JasperFx team ever wants the provider to match the compliance suite's lowest-node expectation (upstream parity).
 
-Wolverine core elects a leader as "whichever node's heartbeat grabs the lock first"; the upstream `LeadershipElectionCompliance` suite expects the **lowest-numbered surviving node** to win — an emergent property only fast/low-variance stores satisfy. The provider *could* conform by making `TryAttainLeadershipLockAsync` attain the leader lock only when no lower-numbered, non-stale node exists (full code: the "Suggested code change" in `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`).
+Wolverine core elects a leader as "whichever node's heartbeat grabs the lock first"; the upstream `LeadershipElectionCompliance` suite expects the **lowest-numbered surviving node** to win, an emergent property only fast/low-variance stores satisfy. The provider *could* conform by making `TryAttainLeadershipLockAsync` attain the leader lock only when no lower-numbered, non-stale node exists (full code: the "Suggested code change" in `docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md`).
 
 **Why it's declined for production:** "lowest node wins" is a test tie-breaker, not a production requirement, and the change would *degrade* real failover (couples failover latency to `StaleNodeTimeout`; pins leadership to a degraded-but-heartbeating lowest node) purely to satisfy an upstream test. The current any-healthy-node model is the better production behavior. Production confidence comes from **Task 7** (cross-node message guarantees), not from conforming to the leadership-identity assertion. If ever pursued for upstream parity, use Opus 4.8, and pair it with a failover-window refinement (see the findings doc).
 
@@ -812,14 +812,14 @@ Wolverine core elects a leader as "whichever node's heartbeat grabs the lock fir
 
 ### Task 7: Cross-node end-to-end integration tests
 
-> **Status (2026-06-17): ✅ Done — merged (#76).** Both facts reached the acceptance bar of **five consecutive green runs** on net9.0 + net10.0 (no skips, no retries, no assertion-weakening); the full library suite is green (107/107 per TFM) and CI (`library` + `demo`) passed. Control-endpoint API resolved against the pinned V6.2.2 submodule — see the implementation note below.
+> **Status (2026-06-17): ✅ Done, merged (#76).** Both facts reached the acceptance bar of **five consecutive green runs** on net9.0 + net10.0 (no skips, no retries, no assertion-weakening); the full library suite is green (107/107 per TFM) and CI (`library` + `demo`) passed. Control-endpoint API resolved against the pinned V6.2.2 submodule: see the implementation note below.
 
 Compliance covers election/balancing; these tests cover the *message* guarantees across nodes: scheduled exactly-once claim, and dead-node envelope rescue end to end.
 
 **Files:**
 - Test: Create `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs`
 
-- [x] **Step 1: Write the tests** — create `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs`:
+- [x] **Step 1: Write the tests**: create `src/Wolverine.MongoDB.Tests/multinode_end_to_end.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -926,10 +926,10 @@ public class multinode_end_to_end
 
 Implementation notes for the engineer:
 - `PortFinder.GetAvailablePort()` comes from `Wolverine.ComplianceTests` (used by Wolverine's own multinode tests). If it does not exist in this Wolverine version, grep the clone: `rtk grep "GetAvailablePort" C:\source\external\wolverine\src\Testing` and use whatever helper their leadership tests use; worst case, bind a `TcpListener` on port 0 to find a free port.
-- `opts.ListenAtPort(port, x => x.UseForControlEndpoint())` — verify the exact control-endpoint API against the Wolverine clone (`UseTcpForControlEndpoint()` picks its own port; the explicit-port form is preferred here for clarity, but if only the parameterless form exists, use it and drop the PortFinder).
-- `opts.LocalQueueFor<T>()` — verify name (`PublishMessage<T>().ToLocalQueue(...)` is the fallback).
-- The static `Handled` list is shared across both in-proc nodes — that is the point: it observes total executions process-wide.
-- **API resolution (verified against the pinned V6.2.2 `external/wolverine` submodule):** `opts.ListenAtPort(port, x => x.UseForControlEndpoint())` does **not** exist — there is no `ListenAtPort(int, Action)` overload and no `UseForControlEndpoint` method. Used the documented fallback `opts.UseTcpForControlEndpoint()`, which grabs its own OS-assigned free port internally (`PortFinder.GetAvailablePort`), so two in-proc nodes never collide and `PortFinder` is dropped. `PortFinder` actually lives in `Wolverine.Util` (core), not `Wolverine.ComplianceTests`. `LocalQueueFor<T>()` + `UseDurableInbox()`, `Discovery.IncludeType`, and `ScheduledJob{PollingTime,FirstExecution}` all exist and are used as written. The bus is obtained via `host.MessageBus()` (the Wolverine-blessed scoped-bus accessor) rather than resolving `IMessageBus` from the root container, which the upstream convention warns is wrong for durable scheduling.
+- `opts.ListenAtPort(port, x => x.UseForControlEndpoint())`, verify the exact control-endpoint API against the Wolverine clone (`UseTcpForControlEndpoint()` picks its own port; the explicit-port form is preferred here for clarity, but if only the parameterless form exists, use it and drop the PortFinder).
+- `opts.LocalQueueFor<T>()`, verify name (`PublishMessage<T>().ToLocalQueue(...)` is the fallback).
+- The static `Handled` list is shared across both in-proc nodes, that is the point: it observes total executions process-wide.
+- **API resolution (verified against the pinned V6.2.2 `external/wolverine` submodule):** `opts.ListenAtPort(port, x => x.UseForControlEndpoint())` does **not** exist, there is no `ListenAtPort(int, Action)` overload and no `UseForControlEndpoint` method. Used the documented fallback `opts.UseTcpForControlEndpoint()`, which grabs its own OS-assigned free port internally (`PortFinder.GetAvailablePort`), so two in-proc nodes never collide and `PortFinder` is dropped. `PortFinder` actually lives in `Wolverine.Util` (core), not `Wolverine.ComplianceTests`. `LocalQueueFor<T>()` + `UseDurableInbox()`, `Discovery.IncludeType`, and `ScheduledJob{PollingTime,FirstExecution}` all exist and are used as written. The bus is obtained via `host.MessageBus()` (the Wolverine-blessed scoped-bus accessor) rather than resolving `IMessageBus` from the root container, which the upstream convention warns is wrong for durable scheduling.
 
 - [x] **Step 2: Run, iterate, and stabilize** (same 5-in-a-row bar as Task 6)
 
@@ -947,12 +947,12 @@ rtk git commit -m "test: cross-node exactly-once scheduling and dead-node rescue
 
 ### Task 8: CI runs the multinode category
 
-> **Status (2026-06-16): ⛔ Not started — depends on Task 7.** The leadership compliance suite stays gated (decision), so this step's value is to run **Task 7's** cross-node `[Category=multinode]` tests as a separate CI step once they exist. (Dependency re-pointed from the former "Task 6b".)
+> **Status (2026-06-16): ⛔ Not started, depends on Task 7.** The leadership compliance suite stays gated (decision), so this step's value is to run **Task 7's** cross-node `[Category=multinode]` tests as a separate CI step once they exist. (Dependency re-pointed from the former "Task 6b".)
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Split the test runs** so a multinode flake is immediately distinguishable from a core regression — in the `library` job, replace the single test step with:
+- [ ] **Step 1: Split the test runs** so a multinode flake is immediately distinguishable from a core regression, in the `library` job, replace the single test step with:
 
 ```yaml
       - name: Run library tests (single-node)
@@ -981,23 +981,23 @@ rtk git add .github/workflows/ci.yml
 rtk git commit -m "ci: run multinode test category as a separate step"
 ```
 
-Then follow the per-task PR procedure from the workflow section (`rtk git push -u ...`, `rtk gh pr create ...`, `rtk gh pr checks --watch`). Iterate until green. If the multinode step flakes on CI but not locally, revisit Task 6's stabilization levers before merging — do not add retries.
+Then follow the per-task PR procedure from the workflow section (`rtk git push -u ...`, `rtk gh pr create ...`, `rtk gh pr checks --watch`). Iterate until green. If the multinode step flakes on CI but not locally, revisit Task 6's stabilization levers before merging, do not add retries.
 
-- [ ] **Step 3: Check Task 8 off in the plan** — as part of this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
+- [ ] **Step 3: Check Task 8 off in the plan**: as part of this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
 
 ---
 
-### Task 9: Demo — config-driven durability mode + multinode runbook
+### Task 9: Demo, config-driven durability mode + multinode runbook
 
 The demo stays Solo by default (correct for a single-instance reference app) but becomes cluster-capable via configuration, with a documented two-instance local run.
 
 **Files:**
 - Modify: `demo/src/OrderDemo.Api/Program.cs`
 - Modify: `demo/src/OrderDemo.Api/appsettings.json`
-- Create: `demo/docker-compose.multinode.yml` *(documentation-only convenience: second API instance is run via `dotnet run`, compose stays infra-only)* — **skip creating this file**; the runbook below uses two `dotnet run` invocations instead.
+- Create: `demo/docker-compose.multinode.yml` *(documentation-only convenience: second API instance is run via `dotnet run`, compose stays infra-only)*, **skip creating this file**; the runbook below uses two `dotnet run` invocations instead.
 - Modify: `demo/README.md`, `demo/CLAUDE.md`
 
-- [x] **Step 1: Make the mode configurable** — in `demo/src/OrderDemo.Api/Program.cs`, replace
+- [x] **Step 1: Make the mode configurable**: in `demo/src/OrderDemo.Api/Program.cs`, replace
 
 ```csharp
 // Single-node durability for this demo (no multi-node agent coordination needed)
@@ -1022,7 +1022,7 @@ if (opts.Durability.Mode == DurabilityMode.Balanced)
 
 Add `using Wolverine.Transports.Tcp;` at the top of `Program.cs`. (`WolverineFx` ships the TCP transport in the core package; if the compiler disagrees, check the demo's package set and add the correct using/namespace from the library's own `leadership_election_compliance.cs`.)
 
-- [x] **Step 2: Add the default to `demo/src/OrderDemo.Api/appsettings.json`** — add a sibling section to `MongoDB`/`RabbitMQ`:
+- [x] **Step 2: Add the default to `demo/src/OrderDemo.Api/appsettings.json`**: add a sibling section to `MongoDB`/`RabbitMQ`:
 
 ```json
 "Wolverine": {
@@ -1030,7 +1030,7 @@ Add `using Wolverine.Transports.Tcp;` at the top of `Program.cs`. (`WolverineFx`
 }
 ```
 
-- [x] **Step 3: Add the runbook to `demo/README.md`** — new section:
+- [x] **Step 3: Add the runbook to `demo/README.md`**: new section:
 
 ```markdown
 ## Running multiple instances (multinode)
@@ -1058,9 +1058,9 @@ Requirements: synchronized clocks across instances (the leader lease tolerates
 skew well under its duration) and reachable TCP control endpoints between nodes.
 ```
 
-(On Windows PowerShell the env-var prefix syntax differs — note that in the README: `$env:Wolverine__DurabilityMode='Balanced'; dotnet run ...`.)
+(On Windows PowerShell the env-var prefix syntax differs, note that in the README: `$env:Wolverine__DurabilityMode='Balanced'; dotnet run ...`.)
 
-- [x] **Step 4: Update `demo/CLAUDE.md`** — change the "Key Wolverine Configuration" bullet from "`opts.Durability.Mode = DurabilityMode.Solo` — single-node" to "Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination with a TCP control endpoint".
+- [x] **Step 4: Update `demo/CLAUDE.md`**: change the "Key Wolverine Configuration" bullet from "`opts.Durability.Mode = DurabilityMode.Solo`, single-node" to "Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination with a TCP control endpoint".
 
 - [x] **Step 5: Verify the demo still builds and its tests pass** (demo tests run Solo, unchanged)
 
@@ -1083,18 +1083,18 @@ rtk git commit -m "demo: config-driven durability mode with a multinode runbook"
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`, `FOLLOWUPS.md`, `CHANGELOG.md`
 
-- [x] **Step 1: `README.md`** — replace the "Solo only / fails fast on Balanced" section (from the Solo plan) with a **Multinode** section:
+- [x] **Step 1: `README.md`**: replace the "Solo only / fails fast on Balanced" section (from the Solo plan) with a **Multinode** section:
   - Requirements: MongoDB replica set; `opts.UseTcpForControlEndpoint()` (or any control endpoint); synchronized node clocks (well within `LockLeaseDuration`); `UseMongoDbPersistence(db, mongo => mongo.LockLeaseDuration = ...)` for failover-speed tuning (default 1 minute).
   - Semantics: leader election via lease-based lock document; scheduled messages claimed exactly-once via CAS; dead-node envelopes released by survivors' recovery loops; node-event records trimmed (TTL 14 days + leader trim).
-  - Known limits (be honest): leadership is lease-based, not fenced — a node paused longer than the lease margin could briefly act on stale leadership for non-store side effects; clock skew approaching the lease duration breaks takeover ordering.
+  - Known limits (be honest): leadership is lease-based, not fenced, a node paused longer than the lease margin could briefly act on stale leadership for non-store side effects; clock skew approaching the lease duration breaks takeover ordering.
 
-- [x] **Step 2: `CLAUDE.md`** — update: remove "does not support Multinode" / "Least mature subsystem" wording on `MongoDbMessageStore.Locking.cs`; document `MongoDbPersistenceOptions`; note the multinode test category and how to run it (`dotnet test --filter "Category=multinode"`); update the CI description (separate multinode step).
+- [x] **Step 2: `CLAUDE.md`**: update: remove "does not support Multinode" / "Least mature subsystem" wording on `MongoDbMessageStore.Locking.cs`; document `MongoDbPersistenceOptions`; note the multinode test category and how to run it (`dotnet test --filter "Category=multinode"`); update the CI description (separate multinode step).
 
-- [x] **Step 3: `FOLLOWUPS.md`** — remove the now-done items: "Multi-node agent balancing / cross-node orphan correctness", "`HasLeadershipLock` external-delete edge" (the renewal margin shrinks it — keep a residual note if desired), "node-records `DeleteOldNodeRecordsAsync`". Keep/add: node-number reuse, lease fencing token (epoch) as a future hardening item, `IListenerStore` still `NullListenerStore`.
+- [x] **Step 3: `FOLLOWUPS.md`**: remove the now-done items: "Multi-node agent balancing / cross-node orphan correctness", "`HasLeadershipLock` external-delete edge" (the renewal margin shrinks it, keep a residual note if desired), "node-records `DeleteOldNodeRecordsAsync`". Keep/add: node-number reuse, lease fencing token (epoch) as a future hardening item, `IListenerStore` still `NullListenerStore`.
 
-- [x] **Step 4: `CHANGELOG.md`** — `## [Unreleased]` (or the next minor version): `### Added` multinode/Balanced support, `MongoDbPersistenceOptions.LockLeaseDuration`, `DeleteOldNodeRecordsAsync`; `### Changed` leader lease default 5 min → 1 min, Balanced startup no longer throws; `### Fixed` cross-node outgoing double-claim.
+- [x] **Step 4: `CHANGELOG.md`**: `## [Unreleased]` (or the next minor version): `### Added` multinode/Balanced support, `MongoDbPersistenceOptions.LockLeaseDuration`, `DeleteOldNodeRecordsAsync`; `### Changed` leader lease default 5 min → 1 min, Balanced startup no longer throws; `### Fixed` cross-node outgoing double-claim.
 
-- [x] **Step 5: Truth-check** — re-read every edited doc against the code on this branch; every claim must hold.
+- [x] **Step 5: Truth-check**: re-read every edited doc against the code on this branch; every claim must hold.
 
 - [x] **Step 6: Commit**
 
@@ -1103,11 +1103,11 @@ rtk git add README.md CLAUDE.md FOLLOWUPS.md CHANGELOG.md
 rtk git commit -m "docs: multinode support — requirements, semantics, tuning, and known limits"
 ```
 
-- [x] **Step 7: Check Task 10 off in the plan** — in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
+- [x] **Step 7: Check Task 10 off in the plan**: in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note if affected). The task is not "done" until the doc reflects it.
 
 ---
 
-### Task 11: Final verification (on `main`, after the Task 10 PR merges — no branch, no PR)
+### Task 11: Final verification (on `main`, after the Task 10 PR merges, no branch, no PR)
 
 - [x] **Step 1: Full suite on merged main, five consecutive runs of the multinode category**
 
@@ -1132,24 +1132,24 @@ rtk git log --oneline -12
 
 Confirm CI on main is green including the multinode step, one merged PR per task (1–10), and every file in the File Structure Overview was touched across those merges.
 
-- [x] **Step 4: Check Task 11 off in the plan** — tick this task's `- [ ]` step checkboxes and update its row in the status table. This task has no PR, so commit the doc edit directly to `main`.
+- [x] **Step 4: Check Task 11 off in the plan**: tick this task's `- [ ]` step checkboxes and update its row in the status table. This task has no PR, so commit the doc edit directly to `main`.
 
 ---
 
 ### Task 12: Publish the multinode release to NuGet and point the demo at it
 
-Until a new package is published, the multinode work (Tasks 1–11) lives only in source and in CI's freshly packed `0.0.0-ci` nupkg. The **published** `Wolverine.MongoDB` (`0.1.0-beta.5` at time of writing) still **hard-throws on `DurabilityMode.Balanced`** — it predates Task 1's guard downgrade — so the demo's "Running multiple instances" runbook only works against a Task-1+ build (e.g. a local pack). This task ships the release that includes multinode/Balanced support and re-points the demo at the published package, so the runbook works for end users, not just CI.
+Until a new package is published, the multinode work (Tasks 1–11) lives only in source and in CI's freshly packed `0.0.0-ci` nupkg. The **published** `Wolverine.MongoDB` (`0.1.0-beta.5` at time of writing) still **hard-throws on `DurabilityMode.Balanced`**: it predates Task 1's guard downgrade, so the demo's "Running multiple instances" runbook only works against a Task-1+ build (e.g. a local pack). This task ships the release that includes multinode/Balanced support and re-points the demo at the published package, so the runbook works for end users, not just CI.
 
 **Files:**
-- Modify: `Directory.Build.props` (version) and `CHANGELOG.md` (release section) — produced by the release agent's gate-2 PR
+- Modify: `Directory.Build.props` (version) and `CHANGELOG.md` (release section), produced by the release agent's gate-2 PR
 - Modify: `demo/Directory.Packages.props` (bump `Wolverine.MongoDB` to the newly published version)
 
-- [x] **Step 1: Cut and publish the release** — invoke the `release` agent (see `CLAUDE.md` → "Versioning & Release"). This is the first release that includes Balanced/multinode support, so it is a notable version bump; per the versioning policy (major tracks WolverineFx 6.x ↔ `0.1.x`), the agent **proposes the version and waits for approval at gate 1**, then opens the CHANGELOG + version-bump PR (gate 2). After you merge gate 2, the agent tags `main`; `publish.yml` packs + pushes to NuGet and creates the GitHub Release; the agent verifies NuGet + the Release before reporting. **Confirm the published package allows Balanced** (the durability-mode guard is now a warning, not a throw — Task 1).
+- [x] **Step 1: Cut and publish the release**: invoke the `release` agent (see `CLAUDE.md` → "Versioning & Release"). This is the first release that includes Balanced/multinode support, so it is a notable version bump; per the versioning policy (major tracks WolverineFx 6.x ↔ `0.1.x`), the agent **proposes the version and waits for approval at gate 1**, then opens the CHANGELOG + version-bump PR (gate 2). After you merge gate 2, the agent tags `main`; `publish.yml` packs + pushes to NuGet and creates the GitHub Release; the agent verifies NuGet + the Release before reporting. **Confirm the published package allows Balanced** (the durability-mode guard is now a warning, not a throw, per Task 1).
 
-- [x] **Step 2: Point the demo at the published version** — in `demo/Directory.Packages.props`, bump `<PackageVersion Include="Wolverine.MongoDB" ... />` from the pre-multinode beta to the version published in Step 1. (CI's `demo` job already consumes the fresh `0.0.0-ci` nupkg; this bump is for local-dev users so the README "Running multiple instances" runbook runs against the published package.)
+- [x] **Step 2: Point the demo at the published version**: in `demo/Directory.Packages.props`, bump `<PackageVersion Include="Wolverine.MongoDB" ... />` from the pre-multinode beta to the version published in Step 1. (CI's `demo` job already consumes the fresh `0.0.0-ci` nupkg; this bump is for local-dev users so the README "Running multiple instances" runbook runs against the published package.)
 
-- [x] **Step 3: Verify the demo against the published package** — from `demo/`: `dotnet build OrderDemo.slnx -c Release && dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release` → PASS. Recommended (Docker + RabbitMQ up): re-run the two-instance Balanced smoke from the README — now that the **published** package supports Balanced, no local pack is needed — and record the outcome in the PR.
+- [x] **Step 3: Verify the demo against the published package**: from `demo/`: `dotnet build OrderDemo.slnx -c Release && dotnet test tests/OrderDemo.IntegrationTests/OrderDemo.IntegrationTests.csproj -c Release` → PASS. Recommended (Docker + RabbitMQ up): re-run the two-instance Balanced smoke from the README (now that the **published** package supports Balanced, no local pack is needed) and record the outcome in the PR.
 
 - [x] **Step 4: Commit, push, open the PR** on branch `demo/use-multinode-release`, title `demo: consume the multinode release of Wolverine.MongoDB`. Follow the per-task PR procedure; watch checks until green.
 
-- [x] **Step 5: Check Task 12 off in the plan** — in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note). The task is not "done" until the doc reflects it.
+- [x] **Step 5: Check Task 12 off in the plan**: in this task's PR, tick this task's `- [ ]` step checkboxes and update its row in the status table (and the merge-order note). The task is not "done" until the doc reflects it.
