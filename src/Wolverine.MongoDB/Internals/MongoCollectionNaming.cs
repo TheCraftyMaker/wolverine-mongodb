@@ -47,14 +47,22 @@ internal readonly record struct MongoCollectionMapping(string CollectionName, bo
 /// were compiled against. This mirrors <see cref="MongoIdentityMapping"/>, which solved the same
 /// codegen-time-plus-runtime problem the same way.</para>
 ///
-/// <para><b>Scoping and idempotency.</b> Both dictionaries are keyed by <b>database name</b>, so two
+/// <para><b>Scoping and idempotency.</b> Both registries are keyed by <b>database name</b>, so two
 /// hosts in one process pointed at different databases never interact — the invariant is only "two
 /// hosts writing to the same database in the same process must agree on naming", which they must
 /// anyway because they share the physical collections. Re-registering the same mapping is a silent
 /// no-op and a type re-claiming a collection it already owns is a silent no-op, so repeated and
 /// concurrent host construction (the compliance suites, the two-in-proc-host multinode fixtures)
-/// costs nothing but a dictionary probe. Genuine disagreement throws rather than letting one host
-/// silently win.</para>
+/// costs nothing but a dictionary probe.</para>
+///
+/// <para><b>What "disagreement" does and does not catch.</b> Two hosts that each configure a mapping
+/// for one type in one database and disagree throw, rather than letting whichever started first win.
+/// A host that configures <i>no</i> mapping is the weaker case: nothing here distinguishes "left at
+/// its default" from "never mentioned", so an unconfigured host silently inherits whichever mapping
+/// another host in the process published for the type. The asymmetry is one-way — a host that
+/// actually <i>resolved</i> the type to its default name first makes the later mapping throw
+/// (<see cref="ApplyMappings"/>) — and the inheriting direction is the benign one, since both hosts
+/// share the database and must therefore share the name. It is still inheritance, not agreement.</para>
 ///
 /// <para><b>Reserved names.</b> Saga mappings must keep the <see cref="MongoConstants.SagaCollectionPrefix"/>
 /// prefix, because <c>IMessageStoreAdmin.ClearAllAsync</c>/<c>RebuildAsync</c> sweep saga collections by
@@ -66,8 +74,24 @@ internal readonly record struct MongoCollectionMapping(string CollectionName, bo
 /// </summary>
 internal static class MongoCollectionNaming
 {
-    private static readonly ConcurrentDictionary<(string Database, Type Type), string> _mappings = new();
+    /// <summary>
+    /// The explicit per-type mappings, held as an immutable snapshot and replaced wholesale. Copy-on-write
+    /// rather than a <see cref="ConcurrentDictionary{TKey,TValue}"/> so that <see cref="ApplyMappings"/> can
+    /// validate a whole set and then make it visible in a single reference assignment: a rejected set is
+    /// never published, not even in part, and no reader can observe half of an accepted one. Readers
+    /// (<see cref="resolve"/>, which the runtime collection accessors reach on every load/upsert/delete)
+    /// take no lock — they read the field once and look up a dictionary that is never mutated again.
+    /// </summary>
+    private static volatile Dictionary<(string Database, Type Type), string> _mappings = new();
+
     private static readonly ConcurrentDictionary<(string Database, string Collection), Type> _claims = new();
+
+    /// <summary>
+    /// Serializes <see cref="ApplyMappings"/> against itself, so validating a set and publishing it is one
+    /// atomic step. Taken only on the cold configuration path — one call per host build — and never by
+    /// <see cref="resolve"/> or <see cref="claim"/>.
+    /// </summary>
+    private static readonly Lock _mappingLock = new();
 
     private static readonly HashSet<string> _reservedNames = new(StringComparer.Ordinal)
     {
@@ -154,43 +178,114 @@ internal static class MongoCollectionNaming
     /// <summary>
     /// Registers the explicit mappings configured for one database. Called synchronously from
     /// <c>UseMongoDbPersistence</c>, before the handler graph is compiled and before any collection
-    /// accessor can run for that host. Re-applying an identical mapping is a no-op.
+    /// accessor can run for that host. Re-applying an identical mapping set is a lock-free no-op.
     /// </summary>
+    /// <remarks>
+    /// <b>All-or-nothing.</b> The entire set is validated before any of it is published, and publication is
+    /// a single reference assignment, so a throw leaves the registry exactly as it was. That matters because
+    /// <see cref="_mappings"/> is process-global and is read on the runtime hot path: a mapping that was
+    /// published and only <i>then</i> rejected would redirect an already-running host — one that built
+    /// successfully because it configured no mapping, and has been reading and writing the default
+    /// collection ever since — to a different, empty collection, orphaning its documents with no exception
+    /// raised anywhere on that host.
+    /// </remarks>
+    /// <param name="databaseName">The database these mappings apply to.</param>
+    /// <param name="mappings">The mappings configured on one <c>MongoDbPersistenceOptions</c>.</param>
+    /// <exception cref="ArgumentException">
+    /// One of the names is empty, illegal for MongoDB, or reserved.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// Another host in this process already mapped the same type in the same database to a different
-    /// collection, or already resolved it to its default name.
+    /// Two types in the set want the same collection, or another host in this process already mapped one of
+    /// the types in the same database to a different collection, or already resolved it to its default name.
     /// </exception>
     internal static void ApplyMappings(string databaseName, IReadOnlyDictionary<Type, MongoCollectionMapping> mappings)
     {
+        if (mappings.Count == 0 || alreadyPublished(databaseName, mappings)) return;
+
+        lock (_mappingLock)
+        {
+            var published = _mappings;
+
+            // Phase 1 — validate the whole set. Nothing in this loop writes to the registry, so a throw
+            // from any iteration leaves it byte-identical to what it was.
+            var namesInSet = new Dictionary<string, Type>(StringComparer.Ordinal);
+
+            foreach (var pair in mappings)
+            {
+                var type = pair.Key;
+                var mapping = pair.Value;
+
+                ValidateMappedName(type, mapping.CollectionName, mapping.IsSaga);
+
+                if (namesInSet.TryGetValue(mapping.CollectionName, out var sibling))
+                {
+                    throw new InvalidOperationException(
+                        $"MongoDB collection '{mapping.CollectionName}' in database '{databaseName}' is mapped " +
+                        $"for both {sibling.FullNameInCode()} and {type.FullNameInCode()} — an explicit mapping " +
+                        "must not recreate the collision it exists to resolve.");
+                }
+
+                namesInSet[mapping.CollectionName] = type;
+
+                if (published.TryGetValue((databaseName, type), out var existing)
+                    && !string.Equals(existing, mapping.CollectionName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"{type.FullNameInCode()} is already mapped to MongoDB collection '{existing}' in database " +
+                        $"'{databaseName}' by another Wolverine host in this process, and cannot also be mapped to " +
+                        $"'{mapping.CollectionName}'. Collection naming is a property of the (process, database) pair: " +
+                        "two hosts writing to the same database must agree on where a type is stored.");
+                }
+
+                var defaultName = DefaultName(type, mapping.IsSaga);
+                if (!string.Equals(defaultName, mapping.CollectionName, StringComparison.Ordinal)
+                    && _claims.TryGetValue((databaseName, defaultName), out var claimant)
+                    && claimant == type)
+                {
+                    throw new InvalidOperationException(
+                        $"{type.FullNameInCode()} has already been resolved to its default MongoDB collection " +
+                        $"'{defaultName}' in database '{databaseName}' earlier in this process, so it cannot now be " +
+                        $"mapped to '{mapping.CollectionName}'. Configure the mapping on every Wolverine host that " +
+                        "persists this type into this database.");
+                }
+            }
+
+            // Phase 2 — publish. Every entry is either absent or already equal to what is being written
+            // (phase 1 proved it), and the lock keeps another ApplyMappings from interleaving, so this
+            // cannot overwrite a mapping somebody else validated against.
+            var updated = new Dictionary<(string Database, Type Type), string>(published);
+            foreach (var pair in mappings)
+            {
+                updated[(databaseName, pair.Key)] = pair.Value.CollectionName;
+            }
+
+            _mappings = updated;
+        }
+    }
+
+    /// <summary>
+    /// Whether every mapping in the set is already published exactly as asked. The lock-free fast path that
+    /// keeps repeated host construction cheap — the compliance suites build many hosts against one database
+    /// and the multinode fixtures build two at once. Skipping validation here cannot skip a check that would
+    /// have failed: a set only becomes visible once it has passed every check, validation is a pure function
+    /// of the (type, name, kind) triple, and once a type is mapped nothing can go on to claim its default
+    /// name.
+    /// </summary>
+    private static bool alreadyPublished(
+        string databaseName, IReadOnlyDictionary<Type, MongoCollectionMapping> mappings)
+    {
+        var published = _mappings;
+
         foreach (var pair in mappings)
         {
-            var type = pair.Key;
-            var mapping = pair.Value;
-
-            ValidateMappedName(type, mapping.CollectionName, mapping.IsSaga);
-
-            var existing = _mappings.GetOrAdd((databaseName, type), mapping.CollectionName);
-            if (!string.Equals(existing, mapping.CollectionName, StringComparison.Ordinal))
+            if (!published.TryGetValue((databaseName, pair.Key), out var current)
+                || !string.Equals(current, pair.Value.CollectionName, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException(
-                    $"{type.FullNameInCode()} is already mapped to MongoDB collection '{existing}' in database " +
-                    $"'{databaseName}' by another Wolverine host in this process, and cannot also be mapped to " +
-                    $"'{mapping.CollectionName}'. Collection naming is a property of the (process, database) pair: " +
-                    "two hosts writing to the same database must agree on where a type is stored.");
-            }
-
-            var defaultName = DefaultName(type, mapping.IsSaga);
-            if (!string.Equals(defaultName, mapping.CollectionName, StringComparison.Ordinal)
-                && _claims.TryGetValue((databaseName, defaultName), out var claimant)
-                && claimant == type)
-            {
-                throw new InvalidOperationException(
-                    $"{type.FullNameInCode()} has already been resolved to its default MongoDB collection " +
-                    $"'{defaultName}' in database '{databaseName}' earlier in this process, so it cannot now be " +
-                    $"mapped to '{mapping.CollectionName}'. Configure the mapping on every Wolverine host that " +
-                    "persists this type into this database.");
+                return false;
             }
         }
+
+        return true;
     }
 
     /// <summary>The default, un-overridden collection name for a type.</summary>

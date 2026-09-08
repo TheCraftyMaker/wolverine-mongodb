@@ -330,6 +330,99 @@ namespace Wolverine.MongoDB.Tests
         }
 
         /// <summary>
+        /// A rejected <c>ApplyMappings</c> must leave the registry exactly as it was. The mapping registry
+        /// is process-global and is read by the runtime collection accessors on every load/upsert/delete,
+        /// so a mapping that was published and only <i>then</i> rejected would redirect an already-running
+        /// host — one that had been reading and writing the default collection all along — to a different,
+        /// empty collection, orphaning its documents with no exception raised anywhere on that host.
+        /// </summary>
+        [Fact]
+        public void a_rejected_mapping_is_not_published()
+        {
+            const string database = "naming_rejected_publication";
+
+            MongoCollectionNaming.ClaimEntity(database, typeof(Naming.RejectedRemap)).ShouldBe("rejectedremap");
+
+            Should.Throw<InvalidOperationException>(() =>
+                MongoCollectionNaming.ApplyMappings(database, new Dictionary<Type, MongoCollectionMapping>
+                {
+                    [typeof(Naming.RejectedRemap)] = new("naming_rejected_remap", IsSaga: false)
+                }));
+
+            // The host that was already using the default must go on resolving to the default.
+            MongoCollectionNaming.ResolveEntity(database, typeof(Naming.RejectedRemap)).ShouldBe("rejectedremap");
+            MongoCollectionNaming.ClaimEntity(database, typeof(Naming.RejectedRemap)).ShouldBe("rejectedremap");
+        }
+
+        /// <summary>
+        /// The whole set is validated before any of it is published, so a set whose second mapping is
+        /// rejected does not leave its first mapping behind. Order-independent: whichever of the two the
+        /// dictionary happens to enumerate first, neither may be visible afterwards.
+        /// </summary>
+        [Fact]
+        public void a_partially_valid_mapping_set_is_all_or_nothing()
+        {
+            const string database = "naming_atomic_set";
+
+            // Makes the AtomicSecond mapping illegal: that type has already been resolved to its default.
+            MongoCollectionNaming.ClaimEntity(database, typeof(Naming.AtomicSecond)).ShouldBe("atomicsecond");
+
+            Should.Throw<InvalidOperationException>(() =>
+                MongoCollectionNaming.ApplyMappings(database, new Dictionary<Type, MongoCollectionMapping>
+                {
+                    [typeof(Naming.AtomicFirst)] = new("naming_atomic_first", IsSaga: false),
+                    [typeof(Naming.AtomicSecond)] = new("naming_atomic_second", IsSaga: false)
+                }));
+
+            MongoCollectionNaming.ResolveEntity(database, typeof(Naming.AtomicFirst)).ShouldBe("atomicfirst");
+            MongoCollectionNaming.ResolveEntity(database, typeof(Naming.AtomicSecond)).ShouldBe("atomicsecond");
+        }
+
+        /// <summary>
+        /// The same all-or-nothing guarantee for a name-legality rejection, which throws
+        /// <see cref="ArgumentException"/> out of <c>ValidateMappedName</c> rather than
+        /// <see cref="InvalidOperationException"/> — a different throw site, the same registry contract.
+        /// </summary>
+        [Fact]
+        public void an_illegal_name_anywhere_in_the_set_publishes_nothing()
+        {
+            const string database = "naming_atomic_illegal";
+
+            Should.Throw<ArgumentException>(() =>
+                MongoCollectionNaming.ApplyMappings(database, new Dictionary<Type, MongoCollectionMapping>
+                {
+                    [typeof(Naming.IllegalSetFirst)] = new("naming_illegal_set_first", IsSaga: false),
+                    [typeof(Naming.IllegalSetSecond)] = new("bad$name", IsSaga: false)
+                }));
+
+            MongoCollectionNaming.ResolveEntity(database, typeof(Naming.IllegalSetFirst))
+                .ShouldBe("illegalsetfirst");
+            MongoCollectionNaming.ResolveEntity(database, typeof(Naming.IllegalSetSecond))
+                .ShouldBe("illegalsetsecond");
+        }
+
+        /// <summary>
+        /// Two types in one set given the same collection name are refused, and neither is published.
+        /// <c>MongoDbPersistenceOptions</c> already blocks this at configuration time; this is the
+        /// resolver holding its own invariant instead of trusting its caller to have held it.
+        /// </summary>
+        [Fact]
+        public void two_types_in_one_set_cannot_share_a_name()
+        {
+            const string database = "naming_set_duplicate";
+
+            Should.Throw<InvalidOperationException>(() =>
+                MongoCollectionNaming.ApplyMappings(database, new Dictionary<Type, MongoCollectionMapping>
+                {
+                    [typeof(NamingLeft.Shared)] = new("naming_shared", IsSaga: false),
+                    [typeof(NamingRight.Shared)] = new("naming_shared", IsSaga: false)
+                }));
+
+            MongoCollectionNaming.ResolveEntity(database, typeof(NamingLeft.Shared)).ShouldBe("shared");
+            MongoCollectionNaming.ResolveEntity(database, typeof(NamingRight.Shared)).ShouldBe("shared");
+        }
+
+        /// <summary>
         /// The <c>TypeLoadMode.Static</c> leg as a deterministic proxy: the collection accessors
         /// (<c>MongoSagaOperations</c>/<c>MongoEntityOperations</c>) take the same claim, so a collision
         /// is still caught when no frame constructor ever runs. The real Static-mode coverage is the
@@ -444,6 +537,41 @@ namespace Wolverine.MongoDB.Tests.Naming
         public string Id { get; set; } = string.Empty;
     }
 
+    /// <summary>Used by the rejected-publication fact.</summary>
+    public class RejectedRemap
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
+    /// <summary>The valid half of the all-or-nothing set.</summary>
+    public class AtomicFirst
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
+    /// <summary>The rejected half of the all-or-nothing set.</summary>
+    public class AtomicSecond
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
+    /// <summary>The valid half of the illegal-name set.</summary>
+    public class IllegalSetFirst
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
+    /// <summary>The illegally named half of the illegal-name set.</summary>
+    public class IllegalSetSecond
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
     /// <summary>An entity whose default name lands inside the saga prefix that rebuilds sweep.</summary>
     public class Wolverine_saga_Trap
     {
@@ -520,6 +648,13 @@ namespace Wolverine.MongoDB.Tests.NamingLeft
         public string Id { get; set; } = string.Empty;
     }
 
+    /// <summary>First half of the same-name-within-one-set pair.</summary>
+    public class Shared
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
     /// <summary>First half of the runtime-leg pair.</summary>
     public class Runtime
     {
@@ -568,6 +703,13 @@ namespace Wolverine.MongoDB.Tests.NamingRight
 
     /// <summary>Second half of the same-mapped-name pair.</summary>
     public class Doubled
+    {
+        /// <summary>Document identity.</summary>
+        public string Id { get; set; } = string.Empty;
+    }
+
+    /// <summary>Second half of the same-name-within-one-set pair.</summary>
+    public class Shared
     {
         /// <summary>Document identity.</summary>
         public string Id { get; set; } = string.Empty;
