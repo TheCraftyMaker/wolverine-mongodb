@@ -8,6 +8,55 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Added
+- **Explicit per-type collection mapping.** `MongoDbPersistenceOptions` gains
+  `MapSagaCollection<TSaga>(name)` / `MapEntityCollection<TEntity>(name)` (plus `Type` overloads, for
+  closed generics and nested types) to override the MongoDB collection a saga or entity type is stored
+  in. This restores parity with Wolverine's RDBMS saga storage, which has always allowed
+  `AddSagaType<T>(tableName: ...)`, and it is the escape hatch that makes the new collision guard
+  actionable. Unlike upstream's RDBMS override — which the runtime saga paths discard by constructing a
+  fresh `SagaTableDefinition(typeof(T), null)` — a mapping here is honoured by *every* consumer: the
+  generated saga and entity frames, `ISagaStoreDiagnostics`, and
+  `IMessageStoreAdmin.ClearAllAsync`/`RebuildAsync`. A saga mapping must keep the `wolverine_saga_`
+  prefix so the admin sweep keeps clearing it; an entity mapping may not sit inside that prefix (a
+  rebuild would drop the application data) or take one of the nine Wolverine system collection names.
+
+  ```csharp
+  opts.UseMongoDbPersistence("appdb", o => o
+      .MapEntityCollection<Billing.Note>("billing_note")
+      .MapSagaCollection<Returns.OrderSaga>("wolverine_saga_returns_ordersaga"));
+  ```
+
+### Fixed
+- **Collection-name collisions are refused at startup instead of silently sharing a collection.**
+  Collection names are derived from `Type.Name.ToLowerInvariant()`, which carries no namespace, no
+  generic arguments and no case — so unrelated types with the same simple name (`Ordering.Note` and
+  `Billing.Note`), types differing only by case, and different closed constructions of one open generic
+  (`Box<int>` and `Box<string>` are both `` box`1 ``) all resolved to one collection. Nothing configures
+  a `_t` discriminator, so the documents are indistinguishable on read, and the entity write path
+  upserts with no version guard, so one type's document silently replaced the other's. For sagas it is
+  worse: a retry after the duplicate-key abort can load the *other* saga type's document, at which point
+  the `Saga.Version` guard matches and certifies the corrupting write. A new handler-graph policy
+  (`MongoDbCollectionNamePolicy`) claims a collection for every saga and entity type this provider will
+  persist; a second, different type wanting the same collection throws an `InvalidOperationException`
+  naming both types in full, the shared collection, the database, and the exact mapping call to add. The
+  policy runs inside `HandlerGraph.Compile` — before any listener starts, and in `TypeLoadMode.Static`
+  too, where frame constructors never run — so a misconfiguration fails the deploy rather than the
+  traffic. The runtime collection accessors take the same claim as defence in depth.
+  - **Default names are unchanged for every non-conflicting type**, including closed generics and
+    nested types. Nothing is renamed and no data is migrated; `MongoConstants.SagaCollectionName` and
+    `MongoConstants.EntityCollectionName` keep their exact signatures and their exact output. Porting
+    Wolverine's own generic/nested alias sanitizer as the default was rejected for that reason and is
+    tracked in `FOLLOWUPS.md` as a possible opt-in.
+  - **Breaking for a host that is already colliding:** it will now fail to start. Such a host is already
+    mixing or clobbering documents; add an explicit mapping (and move or accept the loss of whatever was
+    already mixed — the library never moves data). Two narrower new refusals come with it, both of them
+    silently destructive today: an entity type whose default name lands inside the `wolverine_saga_`
+    prefix (every `RebuildAsync` drops it) and one whose default name is a Wolverine system collection.
+  - **Not covered, by construction:** an overlap between a Wolverine-managed entity collection and a
+    collection the application's own repositories own (`GetCollection<T>("orders")`) is invisible to a
+    handler-graph walk. `MapEntityCollection` is the remedy; see the README.
+
 ## [1.0.1] - 2026-07-28
 
 ### Added
