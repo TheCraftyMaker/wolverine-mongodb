@@ -41,16 +41,21 @@ The major version tracks Wolverine's major version.
     destination and the replays do not collapse onto a single inbox key.
   - **Compatibility.** Dead letters written before this change have no `envelopeId` and stored the
     envelope Guid directly in `_id`; they stay queryable, discardable, replayable and editable via
-    a compatibility branch on the Guid-facing filter. `MigrateAsync()` (run at startup whenever
-    `AutoBuildMessageStorageOnStartup != AutoCreate.None`) and `RebuildAsync()` backfill
+    a compatibility branch on the Guid-facing filter. `MigrateAsync()` — run at startup whenever
+    `AutoBuildMessageStorageOnStartup != AutoCreate.None`, and callable on demand — backfills
     `envelopeId` from `_id` so those documents also move onto the new `envelopeId` index; the
-    backfill uses an aggregation-pipeline update and therefore needs MongoDB 4.2 or later. No
-    operator action is required in either mode.
+    backfill uses an aggregation-pipeline update and therefore needs MongoDB 4.2 or later. It is
+    the only non-destructive migration path: `RebuildAsync()` is a full store reset
+    (`ClearAllAsync()` then `EnsureIndexesAsync()`), so it deletes every dead letter and every
+    pending inbox/outbox envelope and has nothing left to backfill. No operator action is required
+    in either mode.
   - **One wrinkle, `IdAndDestination` only:** an envelope that already had a pre-upgrade dead letter
     and fails again lands at the new derived `_id` instead of replacing the old document, so it can
-    show two rows — one legacy, one current — until the legacy one is discarded or `RebuildAsync()`
-    is run. This only affects a mode that was previously losing the data outright, and both rows are
-    visible, replayable and discardable.
+    show two rows — one legacy, one current. Nothing merges them, but both are visible, replayable
+    and discardable, and the Guid-addressed admin operations (`ReplayAsync`/`DiscardAsync` with that
+    id in `MessageIds`) act on both at once — so the legacy row is cleared through the normal
+    dead-letter admin surface. It is **not** a reason to run `RebuildAsync()`, which would delete the
+    entire store. This only affects a mode that was previously losing the data outright.
   - **API:** `DeadLetterMessage`'s constructor and `ForUnserializableEnvelope` now take the document
     key as an explicit `Guid` parameter (deliberately not defaulted — a default of `envelope.Id`
     would be silently wrong in `IdAndDestination`). The parameterless constructor and every property

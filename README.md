@@ -166,8 +166,13 @@ addresses dead letters only by `Guid`:
 
 Upgrading is transparent: dead letters written by earlier versions stay
 queryable, discardable, replayable and editable, and the next startup that runs
-storage migration (or an explicit `RebuildAsync()`) backfills them with the new
-`envelopeId` field. That backfill needs MongoDB 4.2 or later.
+storage migration backfills them with the new `envelopeId` field. The backfill is
+non-destructive — it only copies `_id` into `envelopeId` on documents that lack
+it — and it needs MongoDB 4.2 or later. To run it on demand, call
+`IMessageStoreAdmin.MigrateAsync()`. Do **not** reach for `RebuildAsync()`: that
+is a full reset, not a migration — it deletes every dead letter and every pending
+inbox/outbox envelope before recreating the indexes, so there is nothing left to
+backfill.
 
 ### The registered `IMongoDatabase`
 

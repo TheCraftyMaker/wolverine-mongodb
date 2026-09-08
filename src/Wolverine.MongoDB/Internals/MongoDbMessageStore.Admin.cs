@@ -79,9 +79,15 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
     /// Correctness does not depend on this — <c>ForEnvelopeIds</c> keeps un-backfilled documents
     /// addressable — but it moves them onto the <c>envelopeId</c> index and drains the legacy
     /// shape so the compatibility branch can eventually be dropped. Idempotent: once a document
-    /// carries a real <c>envelopeId</c> the filter no longer matches it. Runs from
-    /// <c>MigrateAsync</c> (startup storage migration) and <c>RebuildAsync</c>. The
-    /// aggregation-pipeline update needs MongoDB 4.2 or later.
+    /// carries a real <c>envelopeId</c> the filter no longer matches it. The aggregation-pipeline
+    /// update needs MongoDB 4.2 or later.
+    /// </para>
+    /// <para>
+    /// <see cref="MigrateAsync"/> — the startup storage migration, and the operator-facing entry
+    /// point — is the only path that actually migrates anything. <see cref="RebuildAsync"/> reaches
+    /// this method too, but only after <c>ClearAllAsync</c> has deleted every dead letter,
+    /// so it is a destructive full reset rather than a migration and there is nothing left to
+    /// backfill. Never recommend it as an upgrade step.
     /// </para>
     /// </summary>
     private Task BackfillDeadLetterEnvelopeIdsAsync()

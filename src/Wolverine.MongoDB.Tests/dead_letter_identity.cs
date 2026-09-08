@@ -20,8 +20,12 @@ namespace Wolverine.MongoDB.Tests;
 [Collection("mongodb")]
 public class dead_letter_identity
 {
-    private static readonly Uri DestinationOne = new("rabbitmq://queue/one");
-    private static readonly Uri DestinationTwo = new("rabbitmq://queue/two");
+    // Named so the two sort unambiguously by receivedAt: "aaa-..." always precedes "zzz-...".
+    // DeadLetterSameIdAtTwoDestinations deliberately writes DestinationTwo's document FIRST, so
+    // document order and receivedAt order disagree and the sort in DeadLetterEnvelopeByIdAsync is
+    // load-bearing rather than accidentally satisfied.
+    private static readonly Uri DestinationOne = new("rabbitmq://queue/aaa-one");
+    private static readonly Uri DestinationTwo = new("rabbitmq://queue/zzz-two");
 
     private readonly AppFixture _fixture;
     public dead_letter_identity(AppFixture fixture) => _fixture = fixture;
@@ -40,6 +44,36 @@ public class dead_letter_identity
             .ShouldBe([DestinationOne.ToString(), DestinationTwo.ToString()]);
         results.Envelopes.Select(x => x.Id).Distinct().ShouldBe([first.Id]);
         results.Envelopes.Select(x => x.ExceptionMessage).OrderBy(x => x).ShouldBe(["boom-one", "boom-two"]);
+    }
+
+    /// <summary>
+    /// <c>DeadLetterEnvelopeByIdAsync</c> can only return one of the several dead letters an
+    /// envelope Guid has in <c>IdAndDestination</c> mode, so which one it returns must be a
+    /// promise rather than whatever the server happens to hand back first. The helper writes the
+    /// later-sorting destination first, so the ascending <c>receivedAt</c> sort in
+    /// <c>MongoDbMessageStore.DeadLetters.cs</c> is what makes this pass.
+    /// </summary>
+    [Fact]
+    public async Task by_id_returns_the_dead_letter_that_sorts_first_by_received_at()
+    {
+        var store = BuildIdAndDestinationStore();
+        await store.Admin.RebuildAsync();
+        var (first, _) = await DeadLetterSameIdAtTwoDestinations(store);
+
+        // The promised answer, derived from the data rather than hard-coded: the whole set for
+        // this Guid, ordered by receivedAt, taking the first.
+        var all = await store.DeadLetters.QueryAsync(
+            new DeadLetterEnvelopeQuery { MessageIds = [first.Id] }, CancellationToken.None);
+        all.TotalCount.ShouldBe(2);
+        var expected = all.Envelopes.OrderBy(x => x.ReceivedAt, StringComparer.Ordinal).First();
+        expected.ReceivedAt.ShouldBe(DestinationOne.ToString());
+
+        var byId = await store.DeadLetters.DeadLetterEnvelopeByIdAsync(first.Id);
+
+        byId.ShouldNotBeNull();
+        byId!.ReceivedAt.ShouldBe(expected.ReceivedAt);
+        byId.ExceptionMessage.ShouldBe(expected.ExceptionMessage);
+        byId.ExceptionMessage.ShouldBe("boom-one");
     }
 
     [Fact]
@@ -234,8 +268,9 @@ public class dead_letter_identity
         second.OwnerId = MongoConstants.AnyNode;
         await store.Inbox.StoreIncomingAsync(second);
 
-        await store.Inbox.MoveToDeadLetterStorageAsync(first, new InvalidOperationException("boom-one"));
+        // Written in reverse receivedAt order on purpose — see the DestinationOne/Two comment.
         await store.Inbox.MoveToDeadLetterStorageAsync(second, new InvalidOperationException("boom-two"));
+        await store.Inbox.MoveToDeadLetterStorageAsync(first, new InvalidOperationException("boom-one"));
 
         return (first, second);
     }

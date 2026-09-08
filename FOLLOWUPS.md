@@ -136,7 +136,9 @@ Promote to GitHub issues before the first public release.
   automatically, and `EnsureIndexesAsync` only creates, never drops. **Decision: harmless,
   deferred.** The old indexes remain valid (just suboptimal for the new query patterns) and impose
   no correctness issue; a `RebuildAsync` (which recreates all indexes from scratch) is an
-  acceptable manual remedy if desired. This was originally framed as a "before 1.0" checkpoint —
+  acceptable manual remedy if desired — but note it is destructive: it calls `ClearAllAsync` first,
+  deleting every inbox, outbox, dead-letter and node document and dropping every saga collection.
+  This was originally framed as a "before 1.0" checkpoint —
   the package shipped [1.0.0] on 2026-07-06 with no migration step added, so this is now a
   standing post-1.0 decision, not a lapsed pre-1.0 TODO. **If revisited:** add an explicit
   `Admin.MigrateAsync()` step that drops the specific superseded index names before
@@ -161,10 +163,12 @@ Promote to GitHub issues before the first public release.
   `ForEnvelopeIds` (`MongoDbMessageStore.DeadLetters.cs`) carries an `$or` branch matching
   documents written before the dead-letter identity split: `_id` in the requested ids **and**
   `envelopeId` missing or `Guid.Empty`. `DeadLetterMessage.ResolvedEnvelopeId` has the matching
-  fallback. `EnsureIndexesAsync`'s backfill (reached from `MigrateAsync`/`RebuildAsync`) drains the
-  legacy shape, but the branch must stay while `AutoCreate.None` deployments can still hold
-  un-migrated documents. **If revisited:** drop the branch, the `ResolvedEnvelopeId` fallback and
-  the backfill together at the next major, along with the regression test
+  fallback. `EnsureIndexesAsync`'s backfill drains the legacy shape, but it only runs from
+  `MigrateAsync` (`RebuildAsync` also reaches `EnsureIndexesAsync`, but only after `ClearAllAsync`
+  has deleted every dead letter, so it migrates nothing), and the branch must stay while
+  `AutoCreate.None` deployments can still hold un-migrated documents. **If revisited:** drop the
+  branch, the `ResolvedEnvelopeId` fallback and the backfill together at the next major, along with
+  the regression test
   `legacy_document_without_envelope_id_stays_addressable_by_guid`
   (`src/Wolverine.MongoDB.Tests/dead_letter_identity.cs`), which is the fact that goes red if the
   branch is removed early.
