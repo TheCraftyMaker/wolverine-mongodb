@@ -48,6 +48,14 @@ public static class WolverineMongoDbExtensions
         var persistenceOptions = new MongoDbPersistenceOptions();
         configure?.Invoke(persistenceOptions);
 
+        // Publish the explicit per-type collection mappings to the naming resolver before anything can
+        // resolve a collection for this database, then register the policy that claims a collection for
+        // every saga/entity type this provider will persist. The policy runs inside HandlerGraph.Compile
+        // — before any listener starts, and in TypeLoadMode.Static too — so a collection-name collision
+        // fails the deploy instead of silently mixing two types' documents. See MongoCollectionNaming.
+        MongoCollectionNaming.ApplyMappings(databaseName, persistenceOptions.CollectionMappings);
+        options.Policies.Add(new MongoDbCollectionNamePolicy(databaseName));
+
         options.Services.AddSingleton<IMessageStore>(sp =>
         {
             var client = sp.GetRequiredService<IMongoClient>();

@@ -81,8 +81,14 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
         // above are fixed, but saga collections are created on demand per saga type, so they must
         // be enumerated. Dropping (rather than DeleteMany) also clears their indexes. Without this,
         // saga documents leak between compliance facts on the shared fixture database.
+        //
+        // The sweep stays PREFIX-coupled rather than resolver-coupled, and MongoCollectionNaming keeps
+        // that correct from the other end: MapSagaCollection requires a saga name to stay inside the
+        // prefix (so an explicitly mapped saga is still swept) and MapEntityCollection forbids an entity
+        // name inside it (so application data is never dropped here). Both sides use the one predicate
+        // below, so the two cannot drift apart.
         var sagaCollections = await (await _database.ListCollectionNamesAsync()).ToListAsync();
-        foreach (var name in sagaCollections.Where(n => n.StartsWith(MongoConstants.SagaCollectionPrefix)))
+        foreach (var name in sagaCollections.Where(MongoCollectionNaming.IsSagaCollectionName))
         {
             await _database.DropCollectionAsync(name);
         }

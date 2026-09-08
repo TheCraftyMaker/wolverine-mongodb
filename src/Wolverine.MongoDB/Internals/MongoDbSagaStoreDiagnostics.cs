@@ -107,7 +107,7 @@ internal sealed class MongoDbSagaStoreDiagnostics : ISagaStoreDiagnostics
         where TSaga : class
     {
         var collection = _client.GetDatabase(_databaseName)
-            .GetCollection<TSaga>(MongoConstants.SagaCollectionName(typeof(TSaga)));
+            .GetCollection<TSaga>(MongoCollectionNaming.ResolveSaga(_databaseName, typeof(TSaga)));
 
         var saga = await collection
             .Find(Builders<TSaga>.Filter.Eq("_id", identity))
@@ -166,7 +166,7 @@ internal sealed class MongoDbSagaStoreDiagnostics : ISagaStoreDiagnostics
     {
         var sagaType = typeof(TSaga);
         var collection = _client.GetDatabase(_databaseName)
-            .GetCollection<TSaga>(MongoConstants.SagaCollectionName(sagaType));
+            .GetCollection<TSaga>(MongoCollectionNaming.ResolveSaga(_databaseName, sagaType));
 
         var sagas = await collection
             .Find(FilterDefinition<TSaga>.Empty)

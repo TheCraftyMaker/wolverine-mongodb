@@ -259,6 +259,24 @@ wolverine_saga_<lowercased-type-name>
 For example, `OrderFulfillmentSaga` → `wolverine_saga_orderfulfillmentsaga`. Collections
 are created automatically on startup.
 
+The name comes from the **simple** type name, so it carries no namespace, no generic
+arguments and no case. Two saga types called `OrderSaga` in different namespaces, two
+differing only in case, or two closed constructions of one open generic
+(`Box<int>` and `Box<string>` are both `` box`1 ``) would therefore resolve to the same
+collection and silently mix their documents. Wolverine.MongoDB detects that while it
+compiles the handler graph and **refuses to start the host**, naming both types, the shared
+collection and the mapping call to add. Resolve it with an explicit mapping:
+
+```csharp
+opts.UseMongoDbPersistence("appdb", o =>
+    o.MapSagaCollection<Returns.OrderSaga>("wolverine_saga_returns_ordersaga"));
+```
+
+A saga mapping must keep the `wolverine_saga_` prefix — `IMessageStoreAdmin.ClearAllAsync`
+and `RebuildAsync` sweep saga collections by that prefix, so a saga stored outside it would
+silently stop being cleared. Mapping a type does not move documents that were already
+written elsewhere.
+
 ### Atomicity with the outbox
 
 The saga state write and any outbox entries produced in the handler commit inside the same
@@ -305,6 +323,27 @@ public static Update<OrderNote> Handle(EditOrderNoteCommand cmd, [Entity("NoteId
   `wolverine_saga_` sagas, because entity collections are application-owned data, not a
   Wolverine system collection. `IMessageStoreAdmin.ClearAllAsync`/`RebuildAsync` never
   touch them.
+
+  As for sagas, the name comes from the **simple** type name — no namespace, no generic
+  arguments, no case — so `Ordering.Note` and `Billing.Note`, `Metric` and `METRIC`, and
+  `Box<int>` and `Box<string>` all resolve to one collection. There is no type
+  discriminator and entity writes upsert without a version guard, so such types would
+  silently overwrite each other. Wolverine.MongoDB detects this while it compiles the
+  handler graph and **refuses to start the host**. Resolve it with an explicit mapping:
+
+  ```csharp
+  opts.UseMongoDbPersistence("appdb", o =>
+      o.MapEntityCollection<Billing.Note>("billing_note"));
+  ```
+
+  Because entity collections are deliberately un-prefixed, they also share the
+  application's own collection namespace. If your repositories already own the lowercased
+  type name — or already hold the same aggregate under a differently-cased or pluralised
+  name, e.g. `GetCollection<Order>("orders")` next to an `[Entity] Order` that resolves to
+  `order` — map the entity explicitly. **The startup check cannot see this case:** an
+  application's own `GetCollection<T>("...")` literal is not in the handler graph. Entity
+  mappings may not sit inside the `wolverine_saga_` prefix (an administrative rebuild would
+  drop that data) or take one of Wolverine's system collection names.
 - **Write semantics: upsert, no optimistic concurrency.** `Insert`/`Update`/`Store` all
   compile to the same upserting write (`ReplaceOneAsync` with `IsUpsert = true`); `Delete`
   removes by the entity's id. Plain entities do not carry a `Saga.Version`-style guard, so
