@@ -124,11 +124,43 @@ includes `IMongoDatabase`, `IMongoClient`, `IMongoCollection<T>`,
 ### Write durability
 
 The message store internally pins **`w:majority` (journaled) write concern** and
-**majority read concern** on all envelope collections. This is independent of
-how the consumer's `MongoClient` is configured: a `w:1` client does not weaken
-the durability of the inbox/outbox writes. The app-facing `IMongoDatabase`
-registered by `UseMongoDbPersistence` is **not** modified; domain write concerns
-remain the application's choice.
+**majority read concern** on all envelope collections, independent of how the
+consumer's `MongoClient` is configured.
+
+That handle-level pin covers the *sessionless* writes only. MongoDB **discards**
+collection- and database-level concerns for anything run inside a transaction:
+the individual writes are never acknowledged on their own, only
+`commitTransaction` is, and that command's concern comes from the transaction
+options — falling back to the consumer's `MongoClient` settings when none are
+supplied. So every transaction this library opens **restates** the pin
+(`MongoTransactionOptions.Durable`): the code-generated handler/outbox
+transaction, the batch inbox store, and the dead-letter move. A `w:1` client
+therefore weakens neither the sessionless inbox/outbox writes nor the
+transactional ones.
+
+One consequence is deliberate and worth knowing: the handler transaction is
+shared with the application's own enlisted writes — `MongoDbUnitOfWork`, a raw
+`IClientSessionHandle`, saga and entity documents — and a transaction has
+exactly one write concern, so those commit at `w:majority, j:true` too. A
+handler that enlists in the outbox transaction opts into its commit semantics.
+Writes the application makes **outside** that transaction, through the
+app-facing `IMongoDatabase` (which is still **not** modified), remain entirely
+the application's choice.
+
+Two read paths are honestly *not* covered: a read-only `[Entity]` load that
+resolves no session falls back to a session-less read on the unpinned app-facing
+handle, and `MongoDbSagaStoreDiagnostics` acquires its own unpinned handle. Both
+are reads, and neither is part of the durability guarantee.
+
+The transaction concern is a single non-configurable constant today — there is
+no per-host override (see `FOLLOWUPS.md`). It imposes no new availability floor:
+a replica set that cannot satisfy `w:majority` already cannot serve this store,
+because every non-transactional inbox/outbox/recovery write goes through the
+pinned handle.
+
+> **Upgrading:** the frame's generated code changed. Consumers running
+> `TypeLoadMode.Static` with pre-generated handler code checked in must
+> regenerate before the handler transaction picks this up.
 
 ### Dead-letter retention
 
