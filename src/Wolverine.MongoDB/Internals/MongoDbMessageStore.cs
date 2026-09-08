@@ -16,6 +16,7 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     private readonly WolverineOptions _options;
     private readonly IMongoDatabase _database;
     private readonly Func<Envelope, string> _inboxIdentity;
+    private readonly Func<Envelope, Guid> _deadLetterKey;
     private readonly MongoDbPersistenceOptions _persistenceOptions;
 
     internal IMongoCollection<IncomingMessage> Incoming { get; }
@@ -47,6 +48,14 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
             ? e => e.Id.ToString()
             : e => $"{e.Id}|{e.Destination?.ToString().Replace(":/", "").TrimEnd('/')}";
 
+        // The dead-letter document key follows the same identity unit as the inbox, but stays a
+        // Guid so the BSON type of _id never changes. Capture the local rather than the field so
+        // the dependency between the two assignments is explicit.
+        var inboxIdentity = _inboxIdentity;
+        _deadLetterKey = options.Durability.MessageIdentity == MessageIdentity.IdOnly
+            ? e => e.Id
+            : e => DeadLetterIdentity.Derive(inboxIdentity(e));
+
         Incoming = _database.GetCollection<IncomingMessage>(MongoConstants.IncomingCollection);
         Outgoing = _database.GetCollection<OutgoingMessage>(MongoConstants.OutgoingCollection);
         DeadLetterDocs = _database.GetCollection<DeadLetterMessage>(MongoConstants.DeadLetterCollection);
@@ -75,6 +84,18 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     public void DemoteToAncillary() => Role = MessageStoreRole.Ancillary;
 
     internal string InboxIdentity(Envelope envelope) => _inboxIdentity(envelope);
+
+    /// <summary>
+    /// The dead-letter document key. In the default <see cref="MessageIdentity.IdOnly"/> mode this
+    /// is the envelope Guid itself, so the stored <c>_id</c> is byte-identical to every release
+    /// before the identity split. In <see cref="MessageIdentity.IdAndDestination"/> mode the
+    /// identity unit is the <c>(envelope id, destination)</c> pair — exactly as it already is for
+    /// the inbox (<see cref="InboxIdentity"/>), and as it is for the RDBMS providers, whose
+    /// dead-letter table adds <c>received_at</c> to its primary key in that mode
+    /// (<c>Wolverine.Postgresql/Schema/DeadLettersTable.cs:19-26</c>). The framework-facing
+    /// envelope Guid lives in <see cref="DeadLetterMessage.EnvelopeId"/>.
+    /// </summary>
+    internal Guid DeadLetterKey(Envelope envelope) => _deadLetterKey(envelope);
 
     public void Initialize(IWolverineRuntime runtime) => WarnOnBalancedMode(runtime);
 
