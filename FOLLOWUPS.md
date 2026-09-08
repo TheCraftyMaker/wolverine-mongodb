@@ -214,6 +214,15 @@ Promote to GitHub issues before the first public release.
   reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
   (test or app) reads the `agentUri` field directly first.
 
+- **Upstream: RavenDb and Cosmos ignore `nodeId` in `RemoveAssignmentAsync` too.** Both
+  (`Wolverine.RavenDb/Internals/RavenDbMessageStore.NodeAgents.cs`,
+  `Wolverine.CosmosDb/Internals/CosmosDbMessageStore.NodeAgents.cs`) delete the agent-assignment
+  document by agent URI alone, the same unscoped delete this provider fixed under `## [Unreleased]`
+  in `CHANGELOG.md`; all five RDBMS providers filter on `id` **and** `node_id`. Nothing about a
+  document store makes the predicate hard, so this reads as a plain omission rather than a
+  deliberate trade-off. Raise a one-line PR against each when this provider is contributed upstream
+  (same moment as the `ISagaStoreDiagnostics` internals note above).
+
 ## Untested-but-inspected paths (add deterministic coverage later)
 
 - Bulk `StoreIncomingAsync` non-duplicate-error rethrow branch (no clean way to

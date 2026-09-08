@@ -8,6 +8,27 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- **Agent-assignment removal now honours the node id.** `RemoveAssignmentAsync(nodeId, agentUri, …)`
+  deleted the `wolverine_node_assignments` document by agent URI alone, ignoring `nodeId`. That
+  collection holds exactly one document per agent URI and ownership transfers by *overwriting* the
+  document's `nodeId`, so a removal issued by a node that no longer owns the agent destroyed the row
+  belonging to the node that now legitimately owned it. On this provider the missing row is worse
+  than a lost fact: `LoadAllNodesAsync` attributes a URI to exactly one node, so the agent reads as
+  unassigned, the leader can start a second copy elsewhere, and the resulting duplicate is invisible
+  to Wolverine's split-brain detection (which needs the same URI reported by two nodes). The delete
+  now filters on `_id` **and** `nodeId`, matching all five RDBMS providers (Postgres:
+  `delete from … where id = :id and node_id = :node`); a mismatch is a silent no-op, exactly as it
+  is there. This is **defence in depth against a contract violation, not a fix for a reproduced
+  outage**: under WolverineFx 6.21.0 the ordinary ownership-transfer path is protected by ordering
+  (`ReassignAgent` awaits the old owner's `StopAgent` before returning `AssignAgent`), and a stop
+  that arrives late is discarded by the handler pipeline because the request/reply envelope carries
+  a 60-second `DeliverWithin`. What the predicate guards is the shape the parameter exists for:
+  `NodeAgentController.StopAgentAsync` always passes its own `UniqueNodeId` ("remove *my* claim")
+  and issues the removal even when the node was never running the agent. The write side is
+  unchanged — `AddAssignmentAsync`/`AssignAgentsAsync` still upsert by agent URI and overwrite
+  `nodeId`, which is how ownership transfers. No schema, index or API change.
+
 ## [1.0.1] - 2026-07-28
 
 ### Added
