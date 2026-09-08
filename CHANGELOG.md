@@ -8,6 +8,25 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- **A scheduled message rescheduled mid-poll no longer fires early.** The durability agent's
+  scheduled-message poll captures one `now`, selects the due documents
+  (`Status == Scheduled && ExecutionTime <= now`) in a single round trip, then claims each one with
+  a separate `FindOneAndUpdate` — but that claim was filtered only on
+  `(_id, Status == Scheduled)`. `IScheduledMessages.RescheduleAsync` writes only `ExecutionTime`
+  and deliberately leaves the status alone, so a reschedule committing between the batch select and
+  a given document's claim did not invalidate the claim: the message was flipped to `Incoming` and
+  enqueued for immediate execution while carrying its new, future execution time (nothing
+  downstream of the durable local scheduled queue re-checks it). The operator saw a reschedule that
+  appeared to succeed and a handler that ran anyway — and because the document was then `Incoming`,
+  every later `RescheduleAsync` for it was a silent no-op and it disappeared from
+  `IScheduledMessages.QueryAsync`. The claim filter now also carries `ExecutionTime <= now`, using
+  the same instant the select captured. This only narrows the filter, so it cannot affect
+  exactly-once across competing nodes — the `Status == Scheduled` guard remains the sole arbiter —
+  and a refused claim is simply re-selected on a later tick once the message is due again. Known
+  residual, unchanged and shared by every sibling provider: a reschedule that lands *after* a
+  message has been claimed still does not take effect and is not reported back to the caller.
+
 ## [1.0.1] - 2026-07-28
 
 ### Added

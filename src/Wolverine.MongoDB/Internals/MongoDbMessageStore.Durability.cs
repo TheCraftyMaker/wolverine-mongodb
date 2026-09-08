@@ -112,24 +112,14 @@ public partial class MongoDbMessageStore
 
         foreach (var message in due)
         {
-            // Atomically claim each due message by flipping Scheduled -> Incoming only if it is
-            // still Scheduled. The Status==Scheduled guard means a competing node (or a prior
-            // pass) cannot also claim it, so a due message is published exactly once. If the
-            // claim returns null another node already took it, so skip. A crash after the flip
-            // but before enqueue leaves the doc Incoming owned by this node's number. The
-            // orphan-recovery loop only matches OwnerId == AnyNode, so the doc is NOT re-picked
-            // while owned; it is rescued at the next Solo-mode startup, which releases all
-            // ownership (NodeAgentController.StartLocally). Balanced-mode recovery of this
-            // window is part of the multinode plan.
-            var claimed = await Incoming.FindOneAndUpdateAsync(
-                Builders<IncomingMessage>.Filter.And(
-                    Builders<IncomingMessage>.Filter.Eq(x => x.Id, message.Id),
-                    Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Scheduled)),
-                Builders<IncomingMessage>.Update
-                    .Set(x => x.Status, EnvelopeStatus.Incoming)
-                    .Set(x => x.OwnerId, ownerId),
-                new FindOneAndUpdateOptions<IncomingMessage> { ReturnDocument = ReturnDocument.After },
-                token);
+            // Claim each selected document atomically, re-asserting the SELECT predicate against
+            // the same `now`. A refused claim is simply skipped and re-selected on a later tick.
+            // A crash after the flip but before enqueue leaves the doc Incoming owned by this
+            // node's number. The orphan-recovery loop only matches OwnerId == AnyNode, so the doc
+            // is NOT re-picked while owned; it is rescued at the next Solo-mode startup, which
+            // releases all ownership (NodeAgentController.StartLocally). Balanced-mode recovery of
+            // this window is part of the multinode plan.
+            var claimed = await TryClaimDueScheduledMessageAsync(message.Id, ownerId, now, token);
 
             if (claimed is null)
             {
@@ -141,6 +131,53 @@ public partial class MongoDbMessageStore
             envelope.OwnerId = ownerId;
             await localQueue.EnqueueAsync(envelope);
         }
+    }
+
+    /// <summary>
+    /// Atomically claims ONE due scheduled document: flips Scheduled -&gt; Incoming owned by
+    /// <paramref name="ownerId" />, but only while the document is <em>still</em> Scheduled AND
+    /// <em>still</em> due as of <paramref name="now" />. Returns the post-update document, or
+    /// <c>null</c> when the claim was refused.
+    /// <para>
+    /// Both conjuncts are load-bearing, and they guarantee DIFFERENT properties:
+    /// </para>
+    /// <para>
+    /// <c>Status == Scheduled</c> gives exactly-once across competing nodes — <c>findAndModify</c>
+    /// is atomic per document, so only one claimer flips it. It also absorbs a concurrent
+    /// <c>IScheduledMessages.CancelAsync</c>, which DELETES the document
+    /// (<c>MongoDbMessageStore.ScheduledMessages.cs</c>), leaving nothing to match.
+    /// </para>
+    /// <para>
+    /// <c>ExecutionTime &lt;= now</c> is NOT redundant with the caller's select, even though the
+    /// select asserted the same thing on the same <paramref name="now" />. It exists because
+    /// <c>IScheduledMessages.RescheduleAsync</c> writes only <c>ExecutionTime</c> and deliberately
+    /// leaves <c>Status == Scheduled</c>: a reschedule committing between the batch select and
+    /// this document's claim would otherwise still satisfy the status guard, and the message would
+    /// be enqueued for immediate execution while carrying its new future time. Do not delete this
+    /// conjunct, and if the per-document loop is ever collapsed into a set-based
+    /// <c>UpdateMany</c>, carry it into the batch filter.
+    /// </para>
+    /// <para>
+    /// <paramref name="now" /> must be the instant the select captured, never a fresh
+    /// <c>DateTimeOffset.UtcNow</c>: the same value through the same member serializer truncates
+    /// identically to <c>ExecutionTime</c>'s millisecond-precision BSON Date, so the claim is an
+    /// exact re-assertion of the select predicate with no boundary edge case.
+    /// </para>
+    /// </summary>
+    internal async Task<IncomingMessage?> TryClaimDueScheduledMessageAsync(
+        string id, int ownerId, DateTimeOffset now, CancellationToken token)
+    {
+        var b = Builders<IncomingMessage>.Filter;
+        return await Incoming.FindOneAndUpdateAsync(
+            b.And(
+                b.Eq(x => x.Id, id),
+                b.Eq(x => x.Status, EnvelopeStatus.Scheduled),
+                b.Lte(x => x.ExecutionTime, now)),
+            Builders<IncomingMessage>.Update
+                .Set(x => x.Status, EnvelopeStatus.Incoming)
+                .Set(x => x.OwnerId, ownerId),
+            new FindOneAndUpdateOptions<IncomingMessage> { ReturnDocument = ReturnDocument.After },
+            token);
     }
 
     /// <summary>
