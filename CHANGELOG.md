@@ -8,6 +8,55 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- **Dead letters are keyed by the message-identity unit, not the bare envelope Guid.** In
+  `MessageIdentity.IdAndDestination` mode two failed deliveries of one envelope Guid to different
+  destinations are distinct units of work — that is the whole point of the mode — but
+  `MoveToDeadLetterStorageAsync` upserted both onto the same `_id`
+  (`Filter.Eq(x => x.Id, dlq.Id)` with `IsUpsert = true`), while the incoming delete two lines below
+  correctly used the identity-aware key. The second failure therefore **silently replaced the
+  first**: its body, `receivedAt` and exception vanished with no error and no duplicate-key.
+  `QueryAsync` filtered by the first endpoint returned nothing, `SummarizeAllAsync` and
+  `FetchCountsAsync` undercounted, and replay restored only one of the two deliveries — message
+  loss, not deduplication. The document key now follows the same `(envelope id, destination)` unit
+  the inbox already uses, matching the RDBMS providers, whose dead-letter table adds `received_at`
+  to its primary key in exactly this mode
+  (`Wolverine.Postgresql/Schema/DeadLettersTable.cs:19-26`).
+  - **No change in the default `IdOnly` mode**, where the derived key *is* the envelope Guid: the
+    stored `_id` is byte-identical to previous releases. In `IdAndDestination` mode the key is a
+    deterministic SHA-256-derived Guid of the identity string.
+  - **`_id` stays a BSON Binary Guid on purpose.** Re-typing it to a string — the literal
+    `IncomingMessage` shape — would throw `Cannot deserialize a 'String' from BsonType 'Binary'` on
+    every pre-existing document, inside cursor deserialization, so it would fail whole result sets
+    rather than one row: `QueryAsync`, `DeadLetterEnvelopeByIdAsync` and every
+    `ReplayDeadLettersAsync` tick of the durability agent. No document written by any earlier
+    release fails to deserialize after this change.
+  - The document now carries an `envelopeId` element alongside `_id`, mirroring `IncomingMessage`,
+    and the Guid-addressed API keys on it: `DeadLetterEnvelopeByIdAsync` returns the first match
+    (ordered by `receivedAt` so the choice is deterministic), while `MessageIds` queries, discard,
+    replay and `EditAndReplayAsync` apply to **every** document for that Guid — the semantics of the
+    RDBMS reference (`MessageDatabase.DeadLetters.cs:9-26`,
+    `MessageDatabase.DeadLetterAdminService.cs:176-221`). `EditAndReplayAsync` re-serializes the
+    edited body per document rather than copying one blob, so each dead letter keeps its own
+    destination and the replays do not collapse onto a single inbox key.
+  - **Compatibility.** Dead letters written before this change have no `envelopeId` and stored the
+    envelope Guid directly in `_id`; they stay queryable, discardable, replayable and editable via
+    a compatibility branch on the Guid-facing filter. `MigrateAsync()` (run at startup whenever
+    `AutoBuildMessageStorageOnStartup != AutoCreate.None`) and `RebuildAsync()` backfill
+    `envelopeId` from `_id` so those documents also move onto the new `envelopeId` index; the
+    backfill uses an aggregation-pipeline update and therefore needs MongoDB 4.2 or later. No
+    operator action is required in either mode.
+  - **One wrinkle, `IdAndDestination` only:** an envelope that already had a pre-upgrade dead letter
+    and fails again lands at the new derived `_id` instead of replacing the old document, so it can
+    show two rows — one legacy, one current — until the legacy one is discarded or `RebuildAsync()`
+    is run. This only affects a mode that was previously losing the data outright, and both rows are
+    visible, replayable and discardable.
+  - **API:** `DeadLetterMessage`'s constructor and `ForUnserializableEnvelope` now take the document
+    key as an explicit `Guid` parameter (deliberately not defaulted — a default of `envelope.Id`
+    would be silently wrong in `IdAndDestination`). The parameterless constructor and every property
+    keep their names and types, so object-initializer use is unaffected. `MongoDbMessageStore` gains
+    `internal Guid DeadLetterKey(Envelope)` beside `InboxIdentity`.
+
 ## [1.0.1] - 2026-07-28
 
 ### Added

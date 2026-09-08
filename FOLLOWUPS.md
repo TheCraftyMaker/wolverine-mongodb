@@ -157,6 +157,18 @@ Promote to GitHub issues before the first public release.
   bounded nuspec while leaving the version file on single plain versions), not in the shared
   `Directory.Packages.props`.
 
+- **Legacy dead-letter compatibility branch — remove in a future major (2026-09-08).**
+  `ForEnvelopeIds` (`MongoDbMessageStore.DeadLetters.cs`) carries an `$or` branch matching
+  documents written before the dead-letter identity split: `_id` in the requested ids **and**
+  `envelopeId` missing or `Guid.Empty`. `DeadLetterMessage.ResolvedEnvelopeId` has the matching
+  fallback. `EnsureIndexesAsync`'s backfill (reached from `MigrateAsync`/`RebuildAsync`) drains the
+  legacy shape, but the branch must stay while `AutoCreate.None` deployments can still hold
+  un-migrated documents. **If revisited:** drop the branch, the `ResolvedEnvelopeId` fallback and
+  the backfill together at the next major, along with the regression test
+  `legacy_document_without_envelope_id_stays_addressable_by_guid`
+  (`src/Wolverine.MongoDB.Tests/dead_letter_identity.cs`), which is the fact that goes red if the
+  branch is removed early.
+
 ## Deferred from saga persistence (S6–S14)
 
 - **`ISagaStoreDiagnostics` — implemented (T2.1, PR #131), with an upstream-contribution caveat.**

@@ -51,10 +51,17 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.MessageType)),
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.ExceptionType)),
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.Replayable)),
+            // The Guid-facing dead-letter operations (DeadLetterEnvelopeByIdAsync, MessageIds
+            // queries, EditAndReplayAsync) key on envelopeId rather than _id, which follows the
+            // message-identity unit. Mirrors the incoming envelopeId index above; without it every
+            // dead-letter id lookup collection-scans.
+            new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.EnvelopeId)),
             new CreateIndexModel<DeadLetterMessage>(
                 Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.ExpirationTime),
                 new CreateIndexOptions { ExpireAfter = TimeSpan.Zero })
         });
+
+        await BackfillDeadLetterEnvelopeIdsAsync();
 
         // Node-event records: retain two weeks, then let TTL discard them.
         await RecordDocs.Indexes.CreateManyAsync(new[]
@@ -63,6 +70,30 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
                 Builders<NodeRecordDocument>.IndexKeys.Ascending(x => x.Timestamp),
                 new CreateIndexOptions { ExpireAfter = TimeSpan.FromDays(14) })
         });
+    }
+
+    /// <summary>
+    /// Copies <c>_id</c> into <c>envelopeId</c> for dead-letter documents written before the
+    /// identity split, whose <c>_id</c> WAS the envelope Guid.
+    /// <para>
+    /// Correctness does not depend on this — <c>ForEnvelopeIds</c> keeps un-backfilled documents
+    /// addressable — but it moves them onto the <c>envelopeId</c> index and drains the legacy
+    /// shape so the compatibility branch can eventually be dropped. Idempotent: once a document
+    /// carries a real <c>envelopeId</c> the filter no longer matches it. Runs from
+    /// <c>MigrateAsync</c> (startup storage migration) and <c>RebuildAsync</c>. The
+    /// aggregation-pipeline update needs MongoDB 4.2 or later.
+    /// </para>
+    /// </summary>
+    private Task BackfillDeadLetterEnvelopeIdsAsync()
+    {
+        var b = Builders<DeadLetterMessage>.Filter;
+        var preSplit = b.Or(b.Exists(x => x.EnvelopeId, false), b.Eq(x => x.EnvelopeId, Guid.Empty));
+
+        var copyIdAcross = new PipelineUpdateDefinition<DeadLetterMessage>(
+            PipelineDefinition<DeadLetterMessage, DeadLetterMessage>.Create(
+                new BsonDocument("$set", new BsonDocument("envelopeId", "$_id"))));
+
+        return DeadLetterDocs.UpdateManyAsync(preSplit, copyIdAcross);
     }
 
     public async Task ClearAllAsync()

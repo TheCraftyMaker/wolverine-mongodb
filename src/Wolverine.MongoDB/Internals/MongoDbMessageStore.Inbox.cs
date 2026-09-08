@@ -222,19 +222,38 @@ public partial class MongoDbMessageStore : IMessageInbox
         }
     }
 
+    /// <summary>
+    /// Moves a failed envelope out of the inbox and into <c>wolverine_dead_letters</c>.
+    /// <para>
+    /// The dead-letter key follows the store's message-identity unit
+    /// (<see cref="DeadLetterKey"/>), not the bare envelope Guid: in
+    /// <see cref="MessageIdentity.IdAndDestination"/> mode two failed deliveries of one Guid to
+    /// different destinations are distinct units of work and must survive as two documents, or the
+    /// id-keyed upsert below silently replaces one with the other.
+    /// </para>
+    /// <para>
+    /// This method also serves send-side failures (<c>SendingEnvelopeLifecycle</c>,
+    /// <c>MessageContext</c>), where the incoming delete is a no-op; the derived key then embeds
+    /// the sending destination. That matches the RDBMS providers, which populate the same
+    /// <c>received_at</c> primary-key column from <c>envelope.Destination</c> for send-side dead
+    /// letters too.
+    /// </para>
+    /// </summary>
     public async Task MoveToDeadLetterStorageAsync(Envelope envelope, Exception? exception)
     {
+        var dlqId = DeadLetterKey(envelope);
+
         // Guard body serialization: a poison message whose envelope fails to serialize must
         // still leave the inbox. Build the DLQ doc with a safe/empty body in that case rather
         // than letting the move throw and strand the message in incoming forever.
         DeadLetterMessage dlq;
         try
         {
-            dlq = new DeadLetterMessage(envelope, exception);
+            dlq = new DeadLetterMessage(envelope, exception, dlqId);
         }
         catch (Exception serializeFailure)
         {
-            dlq = DeadLetterMessage.ForUnserializableEnvelope(envelope, exception, serializeFailure);
+            dlq = DeadLetterMessage.ForUnserializableEnvelope(envelope, exception, serializeFailure, dlqId);
         }
 
         // Wolverine semantics: dead letters are retained forever unless the application

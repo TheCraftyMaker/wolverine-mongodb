@@ -144,6 +144,31 @@ When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op: documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
 
+### Dead letters and `MessageIdentity`
+
+With Wolverine's default `opts.Durability.MessageIdentity = MessageIdentity.IdOnly`
+nothing here needs your attention: one envelope id means one dead letter, and the
+document's `_id` is the envelope's own `Guid`.
+
+If your app opts into `MessageIdentity.IdAndDestination` — the modular-monolith
+case, where the same message id arrives on several listening endpoints and each
+delivery is processed separately — then each failed delivery gets **its own**
+dead-letter document, distinguished by `receivedAt`, the same way the inbox
+already keeps one document per destination. Because the `IDeadLetters` API
+addresses dead letters only by `Guid`:
+
+- `QueryAsync` and `SummarizeAllAsync` show every delivery, one entry per
+  destination.
+- `DeadLetterEnvelopeByIdAsync(id)` can only return one; it returns the first
+  ordered by `receivedAt`.
+- Discard, replay and `EditAndReplayAsync` by message id affect **every**
+  delivery of that id. This matches the RDBMS providers.
+
+Upgrading is transparent: dead letters written by earlier versions stay
+queryable, discardable, replayable and editable, and the next startup that runs
+storage migration (or an explicit `RebuildAsync()`) backfills them with the new
+`envelopeId` field. That backfill needs MongoDB 4.2 or later.
+
 ### The registered `IMongoDatabase`
 
 `UseMongoDbPersistence("my_database")` registers a single **unkeyed**
