@@ -49,9 +49,12 @@ The major version tracks Wolverine's major version.
   rollback path inherits the same concern. No new availability floor — a replica set that cannot
   satisfy `w:majority` already could not serve this store, because every non-transactional
   inbox/outbox/recovery write goes through the pinned handle.
-- **Upgrade note:** the code-generated handler text changed. Consumers running
-  `TypeLoadMode.Static` with pre-generated handler code checked in must **regenerate** before the
-  handler transaction picks the fix up. No stored-data, index, or collection-name change; nothing
+- **Upgrade note:** the code-generated handler text changed. Any consumer with pre-generated
+  handler code compiled into the application assembly must **regenerate** before the handler
+  transaction picks the fix up — `TypeLoadMode.Static` *and* `TypeLoadMode.Auto` (Auto also
+  attaches a pre-generated handler type by name when one is present, with no staleness check
+  against the current frame output). The two store-side transactions are not generated code and
+  are pinned regardless of codegen mode. No stored-data, index, or collection-name change; nothing
   to migrate.
 
 ## [1.0.1] - 2026-07-28

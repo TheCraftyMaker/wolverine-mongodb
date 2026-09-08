@@ -158,9 +158,15 @@ a replica set that cannot satisfy `w:majority` already cannot serve this store,
 because every non-transactional inbox/outbox/recovery write goes through the
 pinned handle.
 
-> **Upgrading:** the frame's generated code changed. Consumers running
-> `TypeLoadMode.Static` with pre-generated handler code checked in must
-> regenerate before the handler transaction picks this up.
+> **Upgrading:** the frame's generated code changed. Any consumer with
+> pre-generated handler code compiled into the application assembly must
+> **regenerate** before the handler transaction picks this up — that means
+> `TypeLoadMode.Static` *and* `TypeLoadMode.Auto`, which also attaches a
+> pre-generated handler type by name when it finds one and never compares it
+> against the current frame output. Until then the stale handler keeps the
+> option-less `StartTransaction()` and commits at the client default. The two
+> store-side transactions (inbox batch, dead-letter move) are not generated
+> code and are pinned regardless of codegen mode.
 
 ### Dead-letter retention
 
