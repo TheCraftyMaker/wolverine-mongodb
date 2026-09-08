@@ -71,7 +71,11 @@ internal class TransactionalFrame : AsyncFrame, IFlushesMessages
         writer.WriteComment("Open a MongoDB session and transaction for the outbox unit of work");
         writer.Write(
             $"using var {Session.Usage} = await {_client!.Usage}.{nameof(IMongoClient.StartSessionAsync)}(cancellationToken: {_cancellation!.Usage}).ConfigureAwait(false);");
-        writer.Write($"{Session.Usage}.{nameof(IClientSessionHandle.StartTransaction)}();");
+        // The options are NOT optional: MongoDB discards the store's handle-level write and
+        // read concern for in-transaction operations, so an option-less StartTransaction()
+        // would commit at the consumer's MongoClient default. See MongoTransactionOptions.
+        writer.Write(
+            $"{Session.Usage}.{nameof(IClientSessionHandle.StartTransaction)}({typeof(MongoTransactionOptions).FullNameInCode()}.{nameof(MongoTransactionOptions.Durable)});");
 
         writer.WriteComment("Session-bound unit of work for handlers that take MongoDbUnitOfWork");
         writer.Write(

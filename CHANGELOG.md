@@ -8,6 +8,55 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Fixed
+- **Every transaction the library opens now carries the store's `w:majority` (journaled) write
+  concern and majority read concern.** MongoDB discards collection- and database-level concerns
+  for operations run inside a transaction: the individual writes are never acknowledged on their
+  own, only `commitTransaction` is, and that command's concern resolves transaction options →
+  the session's default transaction options → the consumer's `MongoClient` settings. The store's
+  durability pin lives on its database handle, so it did not survive into a transaction. Two of
+  the three transaction sites were missing options and silently committed at the consumer's
+  client default (`{w: 1}` for a `w:1` client, and never `j:true`): the **code-generated
+  handler/outbox transaction** (`TransactionalFrame`) and **`MoveToDeadLetterStorageAsync`**. The
+  batch inbox store (`StoreIncomingAsync(IReadOnlyList<Envelope>)`) already had them. The options
+  now live in one place — `MongoTransactionOptions.Durable` — reached through a single store-side
+  `MongoDbMessageStore.InTransactionAsync` funnel and referenced by name from the generated
+  handler code.
+  - This corrects the scope of the 1.0.0 claim that "a `w:1` client no longer weakens inbox/outbox
+    durability": it was true for the sessionless writes, and is now also true for the
+    transactional ones.
+  - Proven by `transaction_write_concern.cs`, which observes the emitted `commitTransaction` /
+    `startTransaction` commands through `CommandStartedEvent` monitoring on a deliberately weak
+    (`WriteConcern.W1` / `ReadConcern.Local`) client. Asserting collection or database settings
+    cannot see this — those are exactly the values the driver throws away inside a transaction.
+
+### Changed
+- **Application writes enlisted in the Wolverine handler transaction now commit at
+  `w:majority, j:true` as well.** A transaction has exactly one write concern, so pinning the
+  handler/outbox transaction necessarily governs the application's own enlisted writes —
+  `MongoDbUnitOfWork`, a raw `IClientSessionHandle`, saga documents and `[Entity]` documents.
+  This is intended: a handler that enlists in the outbox transaction opts into its commit
+  semantics. Note the application never had a per-collection choice inside that transaction
+  either (MongoDB strips handle-level concerns there); what changes is that the app's
+  *client-level* default no longer governs it. Writes made **outside** the Wolverine transaction,
+  through the app-facing `IMongoDatabase`, are untouched and remain unpinned.
+- **Handler transactions now read at `readConcern: majority`.** Previously they read at the
+  consumer's client setting. This makes the in-session eager idempotency probe consistent with
+  the sessionless `ExistsAsync(Envelope, CancellationToken)` probe, which already read at
+  majority through the pinned database handle.
+- **Cost:** one majority-replication + journal-fsync round trip per handler commit (and per
+  dead-letter move) for consumers previously committing below majority; `abortTransaction` on the
+  rollback path inherits the same concern. No new availability floor — a replica set that cannot
+  satisfy `w:majority` already could not serve this store, because every non-transactional
+  inbox/outbox/recovery write goes through the pinned handle.
+- **Upgrade note:** the code-generated handler text changed. Any consumer with pre-generated
+  handler code compiled into the application assembly must **regenerate** before the handler
+  transaction picks the fix up — `TypeLoadMode.Static` *and* `TypeLoadMode.Auto` (Auto also
+  attaches a pre-generated handler type by name when one is present, with no staleness check
+  against the current frame output). The two store-side transactions are not generated code and
+  are pinned regardless of codegen mode. No stored-data, index, or collection-name change; nothing
+  to migrate.
+
 ## [1.0.1] - 2026-07-28
 
 ### Added
