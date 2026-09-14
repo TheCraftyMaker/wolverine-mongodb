@@ -157,6 +157,28 @@ Promote to GitHub issues before the first public release.
   bounded nuspec while leaving the version file on single plain versions), not in the shared
   `Directory.Packages.props`.
 
+- **Set-based scheduled claim — efficiency, deferred.** `PublishDueScheduledMessagesAsync`
+  (`MongoDbMessageStore.Durability.cs`) claims one document per `FindOneAndUpdate` inside a
+  `foreach`, so a full batch costs `RecoveryBatchSize` sequential round trips while the
+  scheduled-job lock is held; SQL Server and Postgres each do a single set-based reassign. The
+  idiom already exists in the same file — `RecoverOrphanedOutgoingAsync` does an `UpdateMany` with
+  a CAS guard and then re-reads which ids it actually won. **Deferred** because the per-document
+  form is what yields the `ReturnDocument.After` document the enqueue path consumes; a batched form
+  would need an extra re-read round trip to recover it. ⚠️ **If taken, the `ExecutionTime <= now`
+  conjunct MUST be carried into the batch filter**, or the mid-poll reschedule fix is silently
+  undone.
+
+- **Post-claim due-time re-check — defence in depth, deferred.** The execution-time conjunct on the
+  claim closes the select→claim window, but a reschedule landing *after* a document is claimed is
+  still lost: the document is already `Incoming`, so `RescheduleAsync`'s own `Status == Scheduled`
+  guard makes it a no-op, the envelope is already in the in-memory local queue, and the upstream
+  `Task`-returning signature surfaces no matched count. The claimed document already carries what
+  is needed to detect this — `IncomingMessage.Read()` copies the (possibly rescheduled)
+  `ExecutionTime` into `envelope.ScheduledTime` — so an `IsScheduledForLater(now)` check before
+  `EnqueueAsync` could catch it. **Deferred:** it must hand the document back
+  (`Status = Scheduled`, `OwnerId = AnyNode`) rather than drop it, which is a second write path
+  with its own failure modes and tests. The residual is shared by every sibling provider.
+
 ## Deferred from saga persistence (S6–S14)
 
 - **`ISagaStoreDiagnostics` — implemented (T2.1, PR #131), with an upstream-contribution caveat.**
@@ -220,3 +242,6 @@ Promote to GitHub issues before the first public release.
   force a non-duplicate bulk write error against a real Mongo).
 - `MoveToDeadLetterStorageAsync` poison-message serialization-failure path (hard
   to force a serialization failure on a real envelope).
+- The reschedule-after-claim residual (see "Post-claim due-time re-check" above) has
+  no test, because it is not fixed. `scheduled_claim_recheck.cs` covers only the
+  select→claim window that the `ExecutionTime <= now` conjunct closes.
