@@ -18,18 +18,6 @@ public partial class MongoDbMessageStore : IMessageInbox
         }
     }
 
-    /// <summary>
-    /// MongoDB ignores collection/database-level write concern for operations inside a
-    /// transaction — the commit is governed by the transaction's own write concern. The store's
-    /// durability pin (<see cref="MongoDbMessageStore"/> ctor: w:majority + j:true) lives on the
-    /// database handle and does NOT survive into a transaction, so wrapping a write without
-    /// explicit options would silently downgrade it to the consumer's client default (often w:1).
-    /// These options restate the pin.
-    /// </summary>
-    private static readonly TransactionOptions InboxTransactionOptions = new(
-        readConcern: ReadConcern.Majority,
-        writeConcern: WriteConcern.WMajority.With(journal: true));
-
     private const int DuplicateKeyErrorCode = 11000;
 
     /// <summary>
@@ -49,19 +37,13 @@ public partial class MongoDbMessageStore : IMessageInbox
         if (envelopes.Count == 0) return;
         var docs = envelopes.Select(e => new IncomingMessage(e, InboxIdentity(e))).ToList();
 
-        // WithTransactionAsync transparently retries TransientTransactionError /
-        // UnknownTransactionCommitResult and aborts automatically if the body throws.
-        using var session = await _client.StartSessionAsync();
         try
         {
-            await session.WithTransactionAsync(async (s, ct) =>
-            {
-                // IsOrdered = false is inert with respect to error handling here — inside a
-                // transaction the server aborts on the FIRST write error regardless. It is kept
-                // for the success path's batching behavior.
-                await Incoming.InsertManyAsync(s, docs, new InsertManyOptions { IsOrdered = false }, ct);
-                return true;
-            }, InboxTransactionOptions);
+            // IsOrdered = false is inert with respect to error handling here — inside a
+            // transaction the server aborts on the FIRST write error regardless. It is kept
+            // for the success path's batching behavior.
+            await InTransactionAsync((s, ct) =>
+                Incoming.InsertManyAsync(s, docs, new InsertManyOptions { IsOrdered = false }, ct));
         }
         catch (Exception e) when (isDuplicateKeyFailure(e))
         {
@@ -222,19 +204,38 @@ public partial class MongoDbMessageStore : IMessageInbox
         }
     }
 
+    /// <summary>
+    /// Moves a failed envelope out of the inbox and into <c>wolverine_dead_letters</c>.
+    /// <para>
+    /// The dead-letter key follows the store's message-identity unit
+    /// (<see cref="DeadLetterKey"/>), not the bare envelope Guid: in
+    /// <see cref="MessageIdentity.IdAndDestination"/> mode two failed deliveries of one Guid to
+    /// different destinations are distinct units of work and must survive as two documents, or the
+    /// id-keyed upsert below silently replaces one with the other.
+    /// </para>
+    /// <para>
+    /// This method also serves send-side failures (<c>SendingEnvelopeLifecycle</c>,
+    /// <c>MessageContext</c>), where the incoming delete is a no-op; the derived key then embeds
+    /// the sending destination. That matches the RDBMS providers, which populate the same
+    /// <c>received_at</c> primary-key column from <c>envelope.Destination</c> for send-side dead
+    /// letters too.
+    /// </para>
+    /// </summary>
     public async Task MoveToDeadLetterStorageAsync(Envelope envelope, Exception? exception)
     {
+        var dlqId = DeadLetterKey(envelope);
+
         // Guard body serialization: a poison message whose envelope fails to serialize must
         // still leave the inbox. Build the DLQ doc with a safe/empty body in that case rather
         // than letting the move throw and strand the message in incoming forever.
         DeadLetterMessage dlq;
         try
         {
-            dlq = new DeadLetterMessage(envelope, exception);
+            dlq = new DeadLetterMessage(envelope, exception, dlqId);
         }
         catch (Exception serializeFailure)
         {
-            dlq = DeadLetterMessage.ForUnserializableEnvelope(envelope, exception, serializeFailure);
+            dlq = DeadLetterMessage.ForUnserializableEnvelope(envelope, exception, serializeFailure, dlqId);
         }
 
         // Wolverine semantics: dead letters are retained forever unless the application
@@ -249,11 +250,7 @@ public partial class MongoDbMessageStore : IMessageInbox
 
         // Wrap the DLQ upsert and incoming delete in a single replica-set transaction so a crash
         // between them cannot duplicate the dead letter or strand the incoming envelope.
-        // WithTransactionAsync transparently retries TransientTransactionError /
-        // UnknownTransactionCommitResult (e.g. write conflicts under concurrency), and aborts
-        // automatically if the body throws.
-        using var session = await _client.StartSessionAsync();
-        await session.WithTransactionAsync(async (s, ct) =>
+        await InTransactionAsync(async (s, ct) =>
         {
             await DeadLetterDocs.ReplaceOneAsync(s,
                 Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, dlq.Id),
@@ -261,8 +258,6 @@ public partial class MongoDbMessageStore : IMessageInbox
 
             await Incoming.DeleteOneAsync(s, Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
                 cancellationToken: ct);
-
-            return true;
         });
     }
 
