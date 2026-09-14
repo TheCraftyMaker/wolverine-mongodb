@@ -207,6 +207,19 @@ dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolv
 
 Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required.
 
+**`Directory.Build.rsp` — temporary NU1902 workaround, delete at the Wolverine upgrade.** The
+repo-root response file downgrades NU1902 (moderate NuGet audit finding) from error to warning for
+every MSBuild-driven `dotnet` command. It exists only because the pinned Wolverine submodule
+(V6.21.0) sets `TreatWarningsAsErrors=true` and pins `Microsoft.SourceLink.GitHub 8.0.0`, which
+resolves `Microsoft.Build.Tasks.Git 8.0.0` — CVE-2026-62900, with **no patched release on the 8.0.x
+line**. The reference is redundant on SDK 8+ (the SDK bundles SourceLink, which is why this repo's
+own projects audit clean), but the version lives in the submodule's own `Directory.Packages.props`
+and nothing here can reach it. Upstream fixed it in **V6.36.0** (bumped to 10.0.401; V6.35.0 and
+earlier still carry 8.0.0). **Removal trigger: when the submodule pin and `WolverineFx` move to
+≥ 6.36.0, delete `Directory.Build.rsp`, this note, and the `FOLLOWUPS.md` entry.** Until then
+NU1901/NU1903/NU1904 still break the build and findings are still printed; the flagged package is a
+`developmentDependency` with no `lib/` assets and never ships.
+
 **CI:** the `library` job checks out with `submodules: recursive` (the Wolverine source is the
 `external/wolverine` submodule, pinned to the `V6.21.0` commit — keep the pin in sync with
 `WolverineFx` in `Directory.Packages.props`), runs the compliance suite in two steps
