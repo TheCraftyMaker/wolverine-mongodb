@@ -372,9 +372,16 @@ clocks are required (not a throw; the host starts normally).
 - **Leader election:** a lock document in `wolverine_locks` is claimed via
   `findAndModify` (compare-and-swap). Any healthy node can become leader; the
   first to atomically claim an expired or absent lock wins.
-- **Scheduled messages:** claimed exactly-once via `FindOneAndUpdate` CAS
-  (`Status == Scheduled && ExecutionTime <= now`), so two nodes competing for the
-  same due message produce at most one execution.
+- **Scheduled messages:** claimed via `FindOneAndUpdate` CAS
+  (`Status == Scheduled && ExecutionTime <= now`, re-asserting the same predicate and
+  the same instant the batch select used). The two conjuncts buy two different
+  guarantees: the status check makes two nodes competing for the same due message
+  produce at most one execution, and the execution-time check means a message
+  rescheduled while a poll is already in flight is left alone rather than executed
+  early — it is simply picked up again once its new time arrives. Caveat: a
+  reschedule issued *after* a message has already been claimed does not take effect,
+  and `IScheduledMessages.RescheduleAsync` returns no matched count, so the caller is
+  not told.
 - **Dead-node recovery:** on each recovery tick, each node releases envelope
   ownership held by node numbers with no live node document (crashed nodes), then
   recovers those orphaned envelopes. Envelopes owned by live nodes are never touched.
