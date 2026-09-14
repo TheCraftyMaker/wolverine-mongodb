@@ -18,18 +18,6 @@ public partial class MongoDbMessageStore : IMessageInbox
         }
     }
 
-    /// <summary>
-    /// MongoDB ignores collection/database-level write concern for operations inside a
-    /// transaction — the commit is governed by the transaction's own write concern. The store's
-    /// durability pin (<see cref="MongoDbMessageStore"/> ctor: w:majority + j:true) lives on the
-    /// database handle and does NOT survive into a transaction, so wrapping a write without
-    /// explicit options would silently downgrade it to the consumer's client default (often w:1).
-    /// These options restate the pin.
-    /// </summary>
-    private static readonly TransactionOptions InboxTransactionOptions = new(
-        readConcern: ReadConcern.Majority,
-        writeConcern: WriteConcern.WMajority.With(journal: true));
-
     private const int DuplicateKeyErrorCode = 11000;
 
     /// <summary>
@@ -49,19 +37,13 @@ public partial class MongoDbMessageStore : IMessageInbox
         if (envelopes.Count == 0) return;
         var docs = envelopes.Select(e => new IncomingMessage(e, InboxIdentity(e))).ToList();
 
-        // WithTransactionAsync transparently retries TransientTransactionError /
-        // UnknownTransactionCommitResult and aborts automatically if the body throws.
-        using var session = await _client.StartSessionAsync();
         try
         {
-            await session.WithTransactionAsync(async (s, ct) =>
-            {
-                // IsOrdered = false is inert with respect to error handling here — inside a
-                // transaction the server aborts on the FIRST write error regardless. It is kept
-                // for the success path's batching behavior.
-                await Incoming.InsertManyAsync(s, docs, new InsertManyOptions { IsOrdered = false }, ct);
-                return true;
-            }, InboxTransactionOptions);
+            // IsOrdered = false is inert with respect to error handling here — inside a
+            // transaction the server aborts on the FIRST write error regardless. It is kept
+            // for the success path's batching behavior.
+            await InTransactionAsync((s, ct) =>
+                Incoming.InsertManyAsync(s, docs, new InsertManyOptions { IsOrdered = false }, ct));
         }
         catch (Exception e) when (isDuplicateKeyFailure(e))
         {
@@ -249,11 +231,7 @@ public partial class MongoDbMessageStore : IMessageInbox
 
         // Wrap the DLQ upsert and incoming delete in a single replica-set transaction so a crash
         // between them cannot duplicate the dead letter or strand the incoming envelope.
-        // WithTransactionAsync transparently retries TransientTransactionError /
-        // UnknownTransactionCommitResult (e.g. write conflicts under concurrency), and aborts
-        // automatically if the body throws.
-        using var session = await _client.StartSessionAsync();
-        await session.WithTransactionAsync(async (s, ct) =>
+        await InTransactionAsync(async (s, ct) =>
         {
             await DeadLetterDocs.ReplaceOneAsync(s,
                 Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, dlq.Id),
@@ -261,8 +239,6 @@ public partial class MongoDbMessageStore : IMessageInbox
 
             await Incoming.DeleteOneAsync(s, Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
                 cancellationToken: ct);
-
-            return true;
         });
     }
 

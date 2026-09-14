@@ -5,6 +5,36 @@ Promote to GitHub issues before the first public release.
 
 ## Deferred from the post-review hardening pass
 
+- **Per-host configurability of the transaction write concern — document/defer.** Every
+  transaction the library opens carries the single constant `MongoTransactionOptions.Durable`
+  (majority + journaled writes, majority reads); there is no per-host override. **Why deferred:**
+  `MongoDbPersistenceOptions` cannot reach the code-generated frame — upstream
+  `GenerationRulesExtensions.InsertFirstPersistenceStrategy<T>()` is `new()`-constrained and
+  `MongoDbPersistenceFrameProvider` declares no constructor, and the options instance created in
+  `UseMongoDbPersistence` is captured only in the `IMessageStore` factory closure, never
+  registered in DI. A frame-level override would inject a new dependency into *every* generated
+  handler class — the same high-blast-radius codegen change that produced the T4.3
+  "document, don't switch to keyed registration" decision. **Why it is safe to defer:** the pin
+  imposes no new availability floor. The store's database handle is already pinned, so every
+  non-transactional inbox/outbox/recovery write already requires majority; a cluster that cannot
+  satisfy it already cannot serve this store. **Extension point if revisited:** register
+  `MongoDbPersistenceOptions` as a singleton in `UseMongoDbPersistence` and resolve it in
+  `TransactionalFrame.FindVariables`, or set `ClientSessionOptions.DefaultTransactionOptions` at
+  `StartSessionAsync` (which would also cover any transaction an application starts on the same
+  session — deliberately not a guarantee this library makes silently today).
+
+- **Commit-result ambiguity on the code-generated transaction — deferred hardening.**
+  `CommitMongoTransactionFrame` (`TransactionalFrame.cs`) emits a bare `CommitTransactionAsync`
+  with no `UnknownTransactionCommitResult` retry and no `maxCommitTime`, unlike the two
+  store-side sites which get the driver's transparent retry through `WithTransactionAsync`. A
+  commit that succeeded server-side but errored client-side is caught by the frame's try/catch,
+  rolled back (a no-op once the driver has marked it committed) and rethrown, so Wolverine
+  retries or dead-letters a message whose saga/entity write and inbox `Handled` marker already
+  committed. Raising the transaction's write concern to `w:majority, j:true` makes that window
+  *more frequent*; it does not create it (it exists at `w:1` too). **Fix shape if taken:** retry
+  the commit on the `UnknownTransactionCommitResult` error label, or set an explicit
+  `maxCommitTime` with a documented policy. Needs its own test.
+
 - **`INodeAgentPersistence.ClearAllAsync` scope — resolved (T4.4, 2026-07-05: documented as
   intentionally narrow).** It clears only the node and assignment collections
   (`MongoDbMessageStore.NodeAgents.cs`) — the operational surface `INodeAgentPersistence`
