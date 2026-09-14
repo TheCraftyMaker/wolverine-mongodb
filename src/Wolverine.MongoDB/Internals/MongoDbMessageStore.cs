@@ -92,6 +92,18 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     internal string InboxIdentity(Envelope envelope) => _inboxIdentity(envelope);
 
     /// <summary>
+    /// The dead-letter document key. In the default <see cref="MessageIdentity.IdOnly"/> mode this
+    /// is the envelope Guid itself, so the stored <c>_id</c> is byte-identical to every release
+    /// before the identity split. In <see cref="MessageIdentity.IdAndDestination"/> mode the
+    /// identity unit is the <c>(envelope id, destination)</c> pair — exactly as it already is for
+    /// the inbox (<see cref="InboxIdentity"/>), and as it is for the RDBMS providers, whose
+    /// dead-letter table adds <c>received_at</c> to its primary key in that mode
+    /// (<c>Wolverine.Postgresql/Schema/DeadLettersTable.cs:19-26</c>). The framework-facing
+    /// envelope Guid lives in <see cref="DeadLetterMessage.EnvelopeId"/>.
+    /// </summary>
+    internal Guid DeadLetterKey(Envelope envelope) => _deadLetterKey(envelope);
+
+    /// <summary>
     /// The ONLY place this store opens a session + transaction. Centralised so
     /// <see cref="MongoTransactionOptions.Durable"/> can never be forgotten at a new call site:
     /// MongoDB discards the handle-level write/read concern pinned above for anything run inside a
