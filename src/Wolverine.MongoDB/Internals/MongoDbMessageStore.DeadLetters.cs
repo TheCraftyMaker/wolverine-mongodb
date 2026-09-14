@@ -10,11 +10,34 @@ namespace Wolverine.MongoDB.Internals;
 
 public partial class MongoDbMessageStore : IDeadLetters
 {
+    /// <summary>
+    /// Matches every dead-letter document belonging to the given envelope ids.
+    /// <para>
+    /// Current documents carry the envelope Guid in <c>envelopeId</c> and an identity-derived
+    /// <c>_id</c>, so one Guid can legitimately match several documents — which is the shape the
+    /// Guid-addressed <see cref="IDeadLetters"/> surface expects, and what the RDBMS providers
+    /// return. Documents written before the identity split have no <c>envelopeId</c> and stored
+    /// the envelope Guid directly in <c>_id</c>; the second branch keeps those addressable until
+    /// <c>MigrateAsync</c> backfills them. That branch cannot capture a current document, because
+    /// a current document's <c>envelopeId</c> is present and non-empty.
+    /// </para>
+    /// </summary>
+    private static FilterDefinition<DeadLetterMessage> ForEnvelopeIds(IEnumerable<Guid> ids)
+    {
+        var b = Builders<DeadLetterMessage>.Filter;
+        var list = ids as IReadOnlyCollection<Guid> ?? ids.ToList();
+        var preSplit = b.Or(b.Exists(x => x.EnvelopeId, false), b.Eq(x => x.EnvelopeId, Guid.Empty));
+        return b.Or(b.In(x => x.EnvelopeId, list), b.And(b.In(x => x.Id, list), preSplit));
+    }
+
     private FilterDefinition<DeadLetterMessage> DlqFilter(DeadLetterEnvelopeQuery query)
     {
         var b = Builders<DeadLetterMessage>.Filter;
         var filter = b.Empty;
-        if (query.MessageIds is { Length: > 0 }) return b.In(x => x.Id, query.MessageIds);
+        // MessageIds takes precedence over every other option (DeadLetterEnvelopeQuery.cs:32-35),
+        // and matches all documents for those envelope ids — so DiscardAsync deletes all of them
+        // and ReplayAsync flags all of them, matching MessageDatabase.DeadLetterAdminService.
+        if (query.MessageIds is { Length: > 0 }) return ForEnvelopeIds(query.MessageIds);
         if (query.Range?.From.HasValue == true) filter &= b.Gte(x => x.SentAt, query.Range.From!.Value);
         if (query.Range?.To.HasValue == true) filter &= b.Lte(x => x.SentAt, query.Range.To!.Value);
         if (query.ExceptionType.IsNotEmpty()) filter &= b.Eq(x => x.ExceptionType, query.ExceptionType);
@@ -25,9 +48,17 @@ public partial class MongoDbMessageStore : IDeadLetters
         return filter;
     }
 
+    /// <summary>
+    /// Returns one dead letter for the envelope id. The signature admits only one, and the RDBMS
+    /// reference reads the first matching row (<c>MessageDatabase.DeadLetters.cs:9-26</c>); when an
+    /// envelope has a dead letter per destination the sort makes which one deterministic. Use
+    /// <see cref="QueryAsync"/> to see them all.
+    /// </summary>
     public async Task<DeadLetterEnvelope?> DeadLetterEnvelopeByIdAsync(Guid id, string? tenantId = null)
     {
-        var doc = await DeadLetterDocs.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, id)).FirstOrDefaultAsync();
+        var doc = await DeadLetterDocs.Find(ForEnvelopeIds([id]))
+            .Sort(Builders<DeadLetterMessage>.Sort.Ascending(x => x.ReceivedAt))
+            .FirstOrDefaultAsync();
         return doc?.ToEnvelope();
     }
 
@@ -83,15 +114,32 @@ public partial class MongoDbMessageStore : IDeadLetters
         => DeadLetterDocs.UpdateManyAsync(DlqFilter(query),
             Builders<DeadLetterMessage>.Update.Set(x => x.Replayable, true), cancellationToken: token);
 
+    /// <summary>
+    /// Applies the new body to every dead letter for the envelope id and flags them replayable,
+    /// matching the RDBMS reference, which updates every row sharing the id
+    /// (<c>MessageDatabase.DeadLetterAdminService.cs:201-221</c>).
+    /// <para>
+    /// The body is re-serialized per document rather than copying one blob across all of them: a
+    /// MongoDB dead letter's body carries its own <c>Destination</c>, so a shared blob would make
+    /// every replayed envelope resolve to the same inbox identity and collapse into one document.
+    /// </para>
+    /// </summary>
     public async Task EditAndReplayAsync(Guid envelopeId, byte[] newBody, CancellationToken token)
     {
-        var doc = await DeadLetterDocs.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelopeId)).FirstOrDefaultAsync(token);
-        if (doc is null) return;
+        var docs = await DeadLetterDocs.Find(ForEnvelopeIds([envelopeId])).ToListAsync(token);
 
-        var envelope = doc.ToEnvelope().Envelope;
-        envelope.Data = newBody;
-        doc.Body = EnvelopeSerializer.Serialize(envelope);
-        doc.Replayable = true;
-        await DeadLetterDocs.ReplaceOneAsync(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelopeId), doc, cancellationToken: token);
+        foreach (var doc in docs)
+        {
+            var envelope = doc.ToEnvelope().Envelope;
+            envelope.Data = newBody;
+            doc.Body = EnvelopeSerializer.Serialize(envelope);
+            doc.Replayable = true;
+            // The whole document is rewritten anyway, so bring a pre-split one up to the current
+            // shape while we are here instead of writing an empty envelopeId back.
+            doc.EnvelopeId = doc.ResolvedEnvelopeId;
+            // Keyed on the document _id, which round-trips correctly for pre-split documents too.
+            await DeadLetterDocs.ReplaceOneAsync(
+                Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, doc.Id), doc, cancellationToken: token);
+        }
     }
 }
