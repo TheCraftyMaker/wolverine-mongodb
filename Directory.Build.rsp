@@ -1,0 +1,51 @@
+# TEMPORARY -- remove when the Wolverine submodule pin moves to V6.36.0 or later.
+# See the "Remove at the Wolverine upgrade" entry in FOLLOWUPS.md.
+#
+# MSBuild auto-response file: every switch below is prepended to each MSBuild-driven dotnet
+# command (build / restore / test / pack) run anywhere in this repository. MSBuild looks for
+# Directory.Build.rsp in the project directory and each parent, so this needs no CI or
+# developer opt-in.
+#
+# What it works around
+# --------------------
+# The vendored Wolverine source at external/wolverine (submodule, pinned to V6.21.0) sets
+# TreatWarningsAsErrors=true and pins Microsoft.SourceLink.GitHub 8.0.0 in its own
+# Directory.Packages.props. That resolves Microsoft.Build.Tasks.Git 8.0.0, flagged moderate by
+# CVE-2026-62900 / GHSA-23fw-v26w-5fgq (published 2026-09-08). The NuGet audit therefore fails
+# the restore of every submodule project, which fails every build and test run that uses
+# -p:UseWolverineSource=true.
+#
+# Why this is a stopgap and not the fix
+# -------------------------------------
+# The fix is to stop resolving the flagged package, and it is not available from this repo:
+#
+#   * Microsoft.Build.Tasks.Git 8.0.0 has no patched release on its line (the advisory reports
+#     first_patched_version: none for 8.0.0). Only the 10.0.x line is clear -- 10.0.111+ or
+#     10.0.303+; latest stable 10.0.401.
+#   * The reference is redundant anyway: the .NET 8+ SDK bundles SourceLink
+#     (Microsoft.NET.Sdk.SourceLink.props imports Microsoft.Build.Tasks.Git from inside the SDK,
+#     with no PackageReference), which is why this repo's own projects audit clean while setting
+#     PublishRepositoryUrl / EmbedUntrackedSources without referencing SourceLink at all.
+#   * But the version lives in the submodule's own Directory.Packages.props. Nothing here can
+#     change it: this repo's Directory.Build.props never reaches those projects
+#     (external/wolverine/Directory.Build.props stops MSBuild's upward traversal), and
+#     AdditionalProperties on the ProjectReference into the submodule is not honoured by the
+#     restore graph walk. Both were tried and measured.
+#   * Upstream has already fixed it -- JasperFx/wolverine bumped the pin to
+#     Microsoft.SourceLink.GitHub 10.0.401. Bisected: V6.35.0 and earlier still carry 8.0.0,
+#     V6.36.0 and later carry 10.0.401. Taking that fix means moving the submodule pin (and
+#     WolverineFx / WolverineFx.ComplianceTests in Directory.Packages.props) to >= V6.36.0,
+#     which is deferred to the planned Wolverine upgrade.
+#
+# Exposure in the meantime is nil: Microsoft.Build.Tasks.Git is a developmentDependency with no
+# lib/ assets, referenced PrivateAssets="All". It runs SourceLink's git-info task on the build
+# machine and is never shipped in Wolverine.MongoDB.nupkg or in any application output.
+#
+# Scope is deliberately one code: findings are still printed on every build, and NU1901 /
+# NU1903 / NU1904 (low / high / critical) still break the build, ours and the submodule's alike.
+#
+# Both switches are required. -p covers `dotnet restore` and the build itself; -restoreProperty
+# covers the implicit restore that `dotnet build` / `dotnet test` run as a separate MSBuild
+# submission, which does not inherit -p from a response file.
+-p:WarningsNotAsErrors=NU1902
+-restoreProperty:WarningsNotAsErrors=NU1902

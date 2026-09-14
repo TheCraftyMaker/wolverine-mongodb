@@ -5,6 +5,36 @@ Promote to GitHub issues before the first public release.
 
 ## Deferred from the post-review hardening pass
 
+- **Per-host configurability of the transaction write concern — document/defer.** Every
+  transaction the library opens carries the single constant `MongoTransactionOptions.Durable`
+  (majority + journaled writes, majority reads); there is no per-host override. **Why deferred:**
+  `MongoDbPersistenceOptions` cannot reach the code-generated frame — upstream
+  `GenerationRulesExtensions.InsertFirstPersistenceStrategy<T>()` is `new()`-constrained and
+  `MongoDbPersistenceFrameProvider` declares no constructor, and the options instance created in
+  `UseMongoDbPersistence` is captured only in the `IMessageStore` factory closure, never
+  registered in DI. A frame-level override would inject a new dependency into *every* generated
+  handler class — the same high-blast-radius codegen change that produced the T4.3
+  "document, don't switch to keyed registration" decision. **Why it is safe to defer:** the pin
+  imposes no new availability floor. The store's database handle is already pinned, so every
+  non-transactional inbox/outbox/recovery write already requires majority; a cluster that cannot
+  satisfy it already cannot serve this store. **Extension point if revisited:** register
+  `MongoDbPersistenceOptions` as a singleton in `UseMongoDbPersistence` and resolve it in
+  `TransactionalFrame.FindVariables`, or set `ClientSessionOptions.DefaultTransactionOptions` at
+  `StartSessionAsync` (which would also cover any transaction an application starts on the same
+  session — deliberately not a guarantee this library makes silently today).
+
+- **Commit-result ambiguity on the code-generated transaction — deferred hardening.**
+  `CommitMongoTransactionFrame` (`TransactionalFrame.cs`) emits a bare `CommitTransactionAsync`
+  with no `UnknownTransactionCommitResult` retry and no `maxCommitTime`, unlike the two
+  store-side sites which get the driver's transparent retry through `WithTransactionAsync`. A
+  commit that succeeded server-side but errored client-side is caught by the frame's try/catch,
+  rolled back (a no-op once the driver has marked it committed) and rethrown, so Wolverine
+  retries or dead-letters a message whose saga/entity write and inbox `Handled` marker already
+  committed. Raising the transaction's write concern to `w:majority, j:true` makes that window
+  *more frequent*; it does not create it (it exists at `w:1` too). **Fix shape if taken:** retry
+  the commit on the `UnknownTransactionCommitResult` error label, or set an explicit
+  `maxCommitTime` with a documented policy. Needs its own test.
+
 - **`INodeAgentPersistence.ClearAllAsync` scope — resolved (T4.4, 2026-07-05: documented as
   intentionally narrow).** It clears only the node and assignment collections
   (`MongoDbMessageStore.NodeAgents.cs`) — the operational surface `INodeAgentPersistence`
@@ -172,6 +202,62 @@ Promote to GitHub issues before the first public release.
   `legacy_document_without_envelope_id_stays_addressable_by_guid`
   (`src/Wolverine.MongoDB.Tests/dead_letter_identity.cs`), which is the fact that goes red if the
   branch is removed early.
+- **Set-based scheduled claim — efficiency, deferred.** `PublishDueScheduledMessagesAsync`
+  (`MongoDbMessageStore.Durability.cs`) claims one document per `FindOneAndUpdate` inside a
+  `foreach`, so a full batch costs `RecoveryBatchSize` sequential round trips while the
+  scheduled-job lock is held; SQL Server and Postgres each do a single set-based reassign. The
+  idiom already exists in the same file — `RecoverOrphanedOutgoingAsync` does an `UpdateMany` with
+  a CAS guard and then re-reads which ids it actually won. **Deferred** because the per-document
+  form is what yields the `ReturnDocument.After` document the enqueue path consumes; a batched form
+  would need an extra re-read round trip to recover it. ⚠️ **If taken, the `ExecutionTime <= now`
+  conjunct MUST be carried into the batch filter**, or the mid-poll reschedule fix is silently
+  undone.
+
+- **Post-claim due-time re-check — defence in depth, deferred.** The execution-time conjunct on the
+  claim closes the select→claim window, but a reschedule landing *after* a document is claimed is
+  still lost: the document is already `Incoming`, so `RescheduleAsync`'s own `Status == Scheduled`
+  guard makes it a no-op, the envelope is already in the in-memory local queue, and the upstream
+  `Task`-returning signature surfaces no matched count. The claimed document already carries what
+  is needed to detect this — `IncomingMessage.Read()` copies the (possibly rescheduled)
+  `ExecutionTime` into `envelope.ScheduledTime` — so an `IsScheduledForLater(now)` check before
+  `EnqueueAsync` could catch it. **Deferred:** it must hand the document back
+  (`Status = Scheduled`, `OwnerId = AnyNode`) rather than drop it, which is a second write path
+  with its own failure modes and tests. The residual is shared by every sibling provider.
+
+## Remove at the Wolverine upgrade
+
+- **`Directory.Build.rsp` NU1902 workaround — delete when the submodule pin reaches V6.36.0
+  (added 2026-09-14).** The repo-root response file passes `-p:WarningsNotAsErrors=NU1902` and
+  `-restoreProperty:WarningsNotAsErrors=NU1902` (both needed — `-p` alone does not reach the
+  implicit restore that `dotnet build`/`dotnet test` run as a separate MSBuild submission) so that
+  CVE-2026-62900 / GHSA-23fw-v26w-5fgq no longer fails every restore. **This is a stopgap, agreed
+  as such:** the Wolverine upgrade that actually removes the flagged package is planned separately.
+  - **Cause.** `external/wolverine` (pinned V6.21.0) sets `TreatWarningsAsErrors=true` and pins
+    `Microsoft.SourceLink.GitHub 8.0.0` → `Microsoft.Build.Tasks.Git 8.0.0`, which has **no patched
+    release on its line** (advisory reports `first_patched_version: none` for 8.0.0; only 10.0.111+
+    / 10.0.303+ are clear).
+  - **Why it cannot be fixed from this repo.** The version lives in the submodule's own
+    `Directory.Packages.props`. A `NuGetAuditSuppress` item or `NoWarn` in this repo's
+    `Directory.Build.props` never reaches those projects (the submodule's own
+    `Directory.Build.props` stops MSBuild's upward traversal), and `AdditionalProperties` on the
+    `ProjectReference` into the submodule is not honoured by the restore graph walk — both were
+    tried and measured. A global property is the only lever that crosses the boundary.
+  - **The package is redundant anyway.** The .NET 8+ SDK bundles SourceLink
+    (`Microsoft.NET.Sdk.SourceLink.props` imports `Microsoft.Build.Tasks.Git` from inside the SDK,
+    with no PackageReference) — which is why this repo's own projects audit clean while setting
+    `PublishRepositoryUrl`/`EmbedUntrackedSources` without referencing SourceLink.
+  - **Action at the upgrade.** Upstream bumped to `Microsoft.SourceLink.GitHub 10.0.401`; bisected,
+    V6.35.0 and earlier still carry 8.0.0, **V6.36.0** and later carry the fix. When the submodule
+    pin and `WolverineFx`/`WolverineFx.ComplianceTests` move to ≥ 6.36.0, delete
+    `Directory.Build.rsp`, the note in `CLAUDE.md`, the reminder comment in
+    `Directory.Packages.props`, and this entry — then confirm a clean restore with no NU1902.
+  - **Risk accepted meanwhile.** A genuinely vulnerable *moderate* package anywhere in the graph
+    would warn rather than fail. NU1901/NU1903/NU1904 and the Trivy scan in `security.yml` are
+    unaffected. Exposure from the flagged package itself is nil: `developmentDependency`, no `lib/`
+    assets, `PrivateAssets="All"`, never shipped.
+  - **Related:** `WolverineFx.ComplianceTests` is now published on NuGet (6.24.1+, latest 6.37.0),
+    so the upgrade can also retire the submodule entirely — see the `UseWolverineSource` TODO in
+    `Directory.Build.props`.
 
 ## Deferred from saga persistence (S6–S14)
 
@@ -230,9 +316,21 @@ Promote to GitHub issues before the first public release.
   reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
   (test or app) reads the `agentUri` field directly first.
 
+- **Upstream: RavenDb and Cosmos ignore `nodeId` in `RemoveAssignmentAsync` too.** Both
+  (`Wolverine.RavenDb/Internals/RavenDbMessageStore.NodeAgents.cs`,
+  `Wolverine.CosmosDb/Internals/CosmosDbMessageStore.NodeAgents.cs`) delete the agent-assignment
+  document by agent URI alone, the same unscoped delete this provider fixed under `## [Unreleased]`
+  in `CHANGELOG.md`; all five RDBMS providers filter on `id` **and** `node_id`. Nothing about a
+  document store makes the predicate hard, so this reads as a plain omission rather than a
+  deliberate trade-off. Raise a one-line PR against each when this provider is contributed upstream
+  (same moment as the `ISagaStoreDiagnostics` internals note above).
+
 ## Untested-but-inspected paths (add deterministic coverage later)
 
 - Bulk `StoreIncomingAsync` non-duplicate-error rethrow branch (no clean way to
   force a non-duplicate bulk write error against a real Mongo).
 - `MoveToDeadLetterStorageAsync` poison-message serialization-failure path (hard
   to force a serialization failure on a real envelope).
+- The reschedule-after-claim residual (see "Post-claim due-time re-check" above) has
+  no test, because it is not fixed. `scheduled_claim_recheck.cs` covers only the
+  select→claim window that the `ExecutionTime <= now` conjunct closes.
