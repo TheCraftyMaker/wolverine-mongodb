@@ -24,6 +24,18 @@ public static class MongoConstants
     // lets ClearAllAsync drop every saga collection by prefix between compliance facts.
     public const string SagaCollectionPrefix = "wolverine_saga_";
 
+    /// <summary>
+    /// The <b>default</b> collection name for a saga type: <c>wolverine_saga_</c> plus the lowercased
+    /// simple type name.
+    /// </summary>
+    /// <remarks>
+    /// This is a pure function of the type and is deliberately frozen — changing it would silently
+    /// rename live collections. Note its precondition: <c>Type.Name</c> carries no namespace, no
+    /// generic arguments and no case, so two saga types with the same simple name resolve here to the
+    /// same collection. <c>MongoCollectionNaming</c> is the resolution point that layers explicit
+    /// per-type mappings (<c>MongoDbPersistenceOptions.MapSagaCollection</c>) and startup collision
+    /// detection over this default; library code resolves through it, never through this method.
+    /// </remarks>
     public static string SagaCollectionName(Type sagaType)
         => $"{SagaCollectionPrefix}{sagaType.Name.ToLowerInvariant()}";
 
@@ -34,6 +46,19 @@ public static class MongoConstants
     // (MongoEntityOperations) and any test/demo direct readers MUST resolve the name through this
     // method — never a hard-coded literal — so the write and read sides stay coupled. Because the
     // name is un-prefixed, ClearAllAsync's "wolverine_saga_" sweep never touches entity collections.
+    /// <summary>
+    /// The <b>default</b> collection name for a generic (non-saga) entity type: the lowercased simple
+    /// type name, deliberately un-prefixed.
+    /// </summary>
+    /// <remarks>
+    /// This is a pure function of the type and is deliberately frozen — changing it would silently
+    /// rename live collections. Note its precondition: <c>Type.Name</c> carries no namespace, no
+    /// generic arguments and no case, so two entity types with the same simple name resolve here to the
+    /// same collection. Because the name is also un-prefixed it shares the application's own collection
+    /// namespace. <c>MongoCollectionNaming</c> is the resolution point that layers explicit per-type
+    /// mappings (<c>MongoDbPersistenceOptions.MapEntityCollection</c>) and startup collision detection
+    /// over this default; library code resolves through it, never through this method.
+    /// </remarks>
     public static string EntityCollectionName(Type entityType)
         => entityType.Name.ToLowerInvariant();
 }

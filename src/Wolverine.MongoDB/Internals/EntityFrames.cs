@@ -41,11 +41,18 @@ public static class MongoEntityOperations
     /// so no frame constructor runs at all. Codegen-time-only alignment would therefore be silently
     /// absent from pre-generated/AOT deployments — a mode-dependent variant of the very corruption
     /// this guards against. Cost is one lock-free dictionary probe against a network round-trip.</para>
+    ///
+    /// <para>It is also where the collection <i>name</i> is resolved, through
+    /// <see cref="MongoCollectionNaming"/> rather than <see cref="MongoConstants"/> directly, so an
+    /// explicit <c>MongoDbPersistenceOptions.Map*Collection</c> mapping is honoured here as well as at
+    /// codegen, and a collection-name collision is claimed here too. The eager guard is
+    /// <c>MongoDbCollectionNamePolicy</c>, which runs at <c>HandlerGraph.Compile</c>; this claim is
+    /// defence in depth for any shape that walk misses.</para>
     /// </summary>
     private static IMongoCollection<T> entityCollection<T>(IMongoDatabase database) where T : class
     {
         MongoIdentityMapping.EnsureIdMember(typeof(T));
-        return database.GetCollection<T>(MongoConstants.EntityCollectionName(typeof(T)));
+        return database.GetCollection<T>(MongoCollectionNaming.ClaimEntity(database, typeof(T)));
     }
 
     /// <summary>
