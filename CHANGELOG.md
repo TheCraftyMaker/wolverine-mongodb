@@ -28,6 +28,7 @@ The major version tracks Wolverine's major version.
   ```
 
 ### Fixed
+
 - **Collection-name collisions are refused at startup instead of silently sharing a collection.**
   Collection names are derived from `Type.Name.ToLowerInvariant()`, which carries no namespace, no
   generic arguments and no case — so unrelated types with the same simple name (`Ordering.Note` and
@@ -56,6 +57,140 @@ The major version tracks Wolverine's major version.
   - **Not covered, by construction:** an overlap between a Wolverine-managed entity collection and a
     collection the application's own repositories own (`GetCollection<T>("orders")`) is invisible to a
     handler-graph walk. `MapEntityCollection` is the remedy; see the README.
+
+- **Dead letters are keyed by the message-identity unit, not the bare envelope Guid.** In
+  `MessageIdentity.IdAndDestination` mode two failed deliveries of one envelope Guid to different
+  destinations are distinct units of work — that is the whole point of the mode — but
+  `MoveToDeadLetterStorageAsync` upserted both onto the same `_id`
+  (`Filter.Eq(x => x.Id, dlq.Id)` with `IsUpsert = true`), while the incoming delete two lines below
+  correctly used the identity-aware key. The second failure therefore **silently replaced the
+  first**: its body, `receivedAt` and exception vanished with no error and no duplicate-key.
+  `QueryAsync` filtered by the first endpoint returned nothing, `SummarizeAllAsync` and
+  `FetchCountsAsync` undercounted, and replay restored only one of the two deliveries — message
+  loss, not deduplication. The document key now follows the same `(envelope id, destination)` unit
+  the inbox already uses, matching the RDBMS providers, whose dead-letter table adds `received_at`
+  to its primary key in exactly this mode
+  (`Wolverine.Postgresql/Schema/DeadLettersTable.cs:19-26`).
+  - **No change in the default `IdOnly` mode**, where the derived key *is* the envelope Guid: the
+    stored `_id` is byte-identical to previous releases. In `IdAndDestination` mode the key is a
+    deterministic SHA-256-derived Guid of the identity string.
+  - **`_id` stays a BSON Binary Guid on purpose.** Re-typing it to a string — the literal
+    `IncomingMessage` shape — would throw `Cannot deserialize a 'String' from BsonType 'Binary'` on
+    every pre-existing document, inside cursor deserialization, so it would fail whole result sets
+    rather than one row: `QueryAsync`, `DeadLetterEnvelopeByIdAsync` and every
+    `ReplayDeadLettersAsync` tick of the durability agent. No document written by any earlier
+    release fails to deserialize after this change.
+  - The document now carries an `envelopeId` element alongside `_id`, mirroring `IncomingMessage`,
+    and the Guid-addressed API keys on it: `DeadLetterEnvelopeByIdAsync` returns the first match
+    (ordered by `receivedAt` so the choice is deterministic), while `MessageIds` queries, discard,
+    replay and `EditAndReplayAsync` apply to **every** document for that Guid — the semantics of the
+    RDBMS reference (`MessageDatabase.DeadLetters.cs:9-26`,
+    `MessageDatabase.DeadLetterAdminService.cs:176-221`). `EditAndReplayAsync` re-serializes the
+    edited body per document rather than copying one blob, so each dead letter keeps its own
+    destination and the replays do not collapse onto a single inbox key.
+  - **Compatibility.** Dead letters written before this change have no `envelopeId` and stored the
+    envelope Guid directly in `_id`; they stay queryable, discardable, replayable and editable via
+    a compatibility branch on the Guid-facing filter. `MigrateAsync()` — run at startup whenever
+    `AutoBuildMessageStorageOnStartup != AutoCreate.None`, and callable on demand — backfills
+    `envelopeId` from `_id` so those documents also move onto the new `envelopeId` index; the
+    backfill uses an aggregation-pipeline update and therefore needs MongoDB 4.2 or later. It is
+    the only non-destructive migration path: `RebuildAsync()` is a full store reset
+    (`ClearAllAsync()` then `EnsureIndexesAsync()`), so it deletes every dead letter and every
+    pending inbox/outbox envelope and has nothing left to backfill. No operator action is required
+    in either mode.
+  - **One wrinkle, `IdAndDestination` only:** an envelope that already had a pre-upgrade dead letter
+    and fails again lands at the new derived `_id` instead of replacing the old document, so it can
+    show two rows — one legacy, one current. Nothing merges them, but both are visible, replayable
+    and discardable, and the Guid-addressed admin operations (`ReplayAsync`/`DiscardAsync` with that
+    id in `MessageIds`) act on both at once — so the legacy row is cleared through the normal
+    dead-letter admin surface. It is **not** a reason to run `RebuildAsync()`, which would delete the
+    entire store. This only affects a mode that was previously losing the data outright.
+  - **API:** `DeadLetterMessage`'s constructor and `ForUnserializableEnvelope` now take the document
+    key as an explicit `Guid` parameter (deliberately not defaulted — a default of `envelope.Id`
+    would be silently wrong in `IdAndDestination`). The parameterless constructor and every property
+    keep their names and types, so object-initializer use is unaffected. `MongoDbMessageStore` gains
+    `internal Guid DeadLetterKey(Envelope)` beside `InboxIdentity`.
+- **Every transaction the library opens now carries the store's `w:majority` (journaled) write
+  concern and majority read concern.** MongoDB discards collection- and database-level concerns
+  for operations run inside a transaction: the individual writes are never acknowledged on their
+  own, only `commitTransaction` is, and that command's concern resolves transaction options →
+  the session's default transaction options → the consumer's `MongoClient` settings. The store's
+  durability pin lives on its database handle, so it did not survive into a transaction. Two of
+  the three transaction sites were missing options and silently committed at the consumer's
+  client default (`{w: 1}` for a `w:1` client, and never `j:true`): the **code-generated
+  handler/outbox transaction** (`TransactionalFrame`) and **`MoveToDeadLetterStorageAsync`**. The
+  batch inbox store (`StoreIncomingAsync(IReadOnlyList<Envelope>)`) already had them. The options
+  now live in one place — `MongoTransactionOptions.Durable` — reached through a single store-side
+  `MongoDbMessageStore.InTransactionAsync` funnel and referenced by name from the generated
+  handler code.
+  - This corrects the scope of the 1.0.0 claim that "a `w:1` client no longer weakens inbox/outbox
+    durability": it was true for the sessionless writes, and is now also true for the
+    transactional ones.
+  - Proven by `transaction_write_concern.cs`, which observes the emitted `commitTransaction` /
+    `startTransaction` commands through `CommandStartedEvent` monitoring on a deliberately weak
+    (`WriteConcern.W1` / `ReadConcern.Local`) client. Asserting collection or database settings
+    cannot see this — those are exactly the values the driver throws away inside a transaction.
+- **Application writes enlisted in the Wolverine handler transaction now commit at
+  `w:majority, j:true` as well.** A transaction has exactly one write concern, so pinning the
+  handler/outbox transaction necessarily governs the application's own enlisted writes —
+  `MongoDbUnitOfWork`, a raw `IClientSessionHandle`, saga documents and `[Entity]` documents.
+  This is intended: a handler that enlists in the outbox transaction opts into its commit
+  semantics. Note the application never had a per-collection choice inside that transaction
+  either (MongoDB strips handle-level concerns there); what changes is that the app's
+  *client-level* default no longer governs it. Writes made **outside** the Wolverine transaction,
+  through the app-facing `IMongoDatabase`, are untouched and remain unpinned.
+- **Handler transactions now read at `readConcern: majority`.** Previously they read at the
+  consumer's client setting. This makes the in-session eager idempotency probe consistent with
+  the sessionless `ExistsAsync(Envelope, CancellationToken)` probe, which already read at
+  majority through the pinned database handle.
+- **Cost:** one majority-replication + journal-fsync round trip per handler commit (and per
+  dead-letter move) for consumers previously committing below majority; `abortTransaction` on the
+  rollback path inherits the same concern. No new availability floor — a replica set that cannot
+  satisfy `w:majority` already could not serve this store, because every non-transactional
+  inbox/outbox/recovery write goes through the pinned handle.
+- **Upgrade note:** the code-generated handler text changed. Any consumer with pre-generated
+  handler code compiled into the application assembly must **regenerate** before the handler
+  transaction picks the fix up — `TypeLoadMode.Static` *and* `TypeLoadMode.Auto` (Auto also
+  attaches a pre-generated handler type by name when one is present, with no staleness check
+  against the current frame output). The two store-side transactions are not generated code and
+  are pinned regardless of codegen mode. No stored-data, index, or collection-name change; nothing
+  to migrate.
+- **Agent-assignment removal now honours the node id.** `RemoveAssignmentAsync(nodeId, agentUri, …)`
+  deleted the `wolverine_node_assignments` document by agent URI alone, ignoring `nodeId`. That
+  collection holds exactly one document per agent URI and ownership transfers by *overwriting* the
+  document's `nodeId`, so a removal issued by a node that no longer owns the agent destroyed the row
+  belonging to the node that now legitimately owned it. On this provider the missing row is worse
+  than a lost fact: `LoadAllNodesAsync` attributes a URI to exactly one node, so the agent reads as
+  unassigned, the leader can start a second copy elsewhere, and the resulting duplicate is invisible
+  to Wolverine's split-brain detection (which needs the same URI reported by two nodes). The delete
+  now filters on `_id` **and** `nodeId`, matching all five RDBMS providers (Postgres:
+  `delete from … where id = :id and node_id = :node`); a mismatch is a silent no-op, exactly as it
+  is there. This is **defence in depth against a contract violation, not a fix for a reproduced
+  outage**: under WolverineFx 6.21.0 the ordinary ownership-transfer path is protected by ordering
+  (`ReassignAgent` awaits the old owner's `StopAgent` before returning `AssignAgent`), and a stop
+  that arrives late is discarded by the handler pipeline because the request/reply envelope carries
+  a 60-second `DeliverWithin`. What the predicate guards is the shape the parameter exists for:
+  `NodeAgentController.StopAgentAsync` always passes its own `UniqueNodeId` ("remove *my* claim")
+  and issues the removal even when the node was never running the agent. The write side is
+  unchanged — `AddAssignmentAsync`/`AssignAgentsAsync` still upsert by agent URI and overwrite
+  `nodeId`, which is how ownership transfers. No schema, index or API change.
+- **A scheduled message rescheduled mid-poll no longer fires early.** The durability agent's
+  scheduled-message poll captures one `now`, selects the due documents
+  (`Status == Scheduled && ExecutionTime <= now`) in a single round trip, then claims each one with
+  a separate `FindOneAndUpdate` — but that claim was filtered only on
+  `(_id, Status == Scheduled)`. `IScheduledMessages.RescheduleAsync` writes only `ExecutionTime`
+  and deliberately leaves the status alone, so a reschedule committing between the batch select and
+  a given document's claim did not invalidate the claim: the message was flipped to `Incoming` and
+  enqueued for immediate execution while carrying its new, future execution time (nothing
+  downstream of the durable local scheduled queue re-checks it). The operator saw a reschedule that
+  appeared to succeed and a handler that ran anyway — and because the document was then `Incoming`,
+  every later `RescheduleAsync` for it was a silent no-op and it disappeared from
+  `IScheduledMessages.QueryAsync`. The claim filter now also carries `ExecutionTime <= now`, using
+  the same instant the select captured. This only narrows the filter, so it cannot affect
+  exactly-once across competing nodes — the `Status == Scheduled` guard remains the sole arbiter —
+  and a refused claim is simply re-selected on a later tick once the message is due again. Known
+  residual, unchanged and shared by every sibling provider: a reschedule that lands *after* a
+  message has been claimed still does not take effect and is not reported back to the caller.
 
 ## [1.0.1] - 2026-07-28
 

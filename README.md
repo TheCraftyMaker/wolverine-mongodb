@@ -124,11 +124,49 @@ includes `IMongoDatabase`, `IMongoClient`, `IMongoCollection<T>`,
 ### Write durability
 
 The message store internally pins **`w:majority` (journaled) write concern** and
-**majority read concern** on all envelope collections. This is independent of
-how the consumer's `MongoClient` is configured: a `w:1` client does not weaken
-the durability of the inbox/outbox writes. The app-facing `IMongoDatabase`
-registered by `UseMongoDbPersistence` is **not** modified; domain write concerns
-remain the application's choice.
+**majority read concern** on all envelope collections, independent of how the
+consumer's `MongoClient` is configured.
+
+That handle-level pin covers the *sessionless* writes only. MongoDB **discards**
+collection- and database-level concerns for anything run inside a transaction:
+the individual writes are never acknowledged on their own, only
+`commitTransaction` is, and that command's concern comes from the transaction
+options — falling back to the consumer's `MongoClient` settings when none are
+supplied. So every transaction this library opens **restates** the pin
+(`MongoTransactionOptions.Durable`): the code-generated handler/outbox
+transaction, the batch inbox store, and the dead-letter move. A `w:1` client
+therefore weakens neither the sessionless inbox/outbox writes nor the
+transactional ones.
+
+One consequence is deliberate and worth knowing: the handler transaction is
+shared with the application's own enlisted writes — `MongoDbUnitOfWork`, a raw
+`IClientSessionHandle`, saga and entity documents — and a transaction has
+exactly one write concern, so those commit at `w:majority, j:true` too. A
+handler that enlists in the outbox transaction opts into its commit semantics.
+Writes the application makes **outside** that transaction, through the
+app-facing `IMongoDatabase` (which is still **not** modified), remain entirely
+the application's choice.
+
+Two read paths are honestly *not* covered: a read-only `[Entity]` load that
+resolves no session falls back to a session-less read on the unpinned app-facing
+handle, and `MongoDbSagaStoreDiagnostics` acquires its own unpinned handle. Both
+are reads, and neither is part of the durability guarantee.
+
+The transaction concern is a single non-configurable constant today — there is
+no per-host override (see `FOLLOWUPS.md`). It imposes no new availability floor:
+a replica set that cannot satisfy `w:majority` already cannot serve this store,
+because every non-transactional inbox/outbox/recovery write goes through the
+pinned handle.
+
+> **Upgrading:** the frame's generated code changed. Any consumer with
+> pre-generated handler code compiled into the application assembly must
+> **regenerate** before the handler transaction picks this up — that means
+> `TypeLoadMode.Static` *and* `TypeLoadMode.Auto`, which also attaches a
+> pre-generated handler type by name when it finds one and never compares it
+> against the current frame output. Until then the stale handler keeps the
+> option-less `StartTransaction()` and commits at the client default. The two
+> store-side transactions (inbox batch, dead-letter move) are not generated
+> code and are pinned regardless of codegen mode.
 
 ### Dead-letter retention
 
@@ -143,6 +181,36 @@ opts.Durability.DeadLetterQueueExpiration = TimeSpan.FromDays(10); // default
 When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op: documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
+
+### Dead letters and `MessageIdentity`
+
+With Wolverine's default `opts.Durability.MessageIdentity = MessageIdentity.IdOnly`
+nothing here needs your attention: one envelope id means one dead letter, and the
+document's `_id` is the envelope's own `Guid`.
+
+If your app opts into `MessageIdentity.IdAndDestination` — the modular-monolith
+case, where the same message id arrives on several listening endpoints and each
+delivery is processed separately — then each failed delivery gets **its own**
+dead-letter document, distinguished by `receivedAt`, the same way the inbox
+already keeps one document per destination. Because the `IDeadLetters` API
+addresses dead letters only by `Guid`:
+
+- `QueryAsync` and `SummarizeAllAsync` show every delivery, one entry per
+  destination.
+- `DeadLetterEnvelopeByIdAsync(id)` can only return one; it returns the first
+  ordered by `receivedAt`.
+- Discard, replay and `EditAndReplayAsync` by message id affect **every**
+  delivery of that id. This matches the RDBMS providers.
+
+Upgrading is transparent: dead letters written by earlier versions stay
+queryable, discardable, replayable and editable, and the next startup that runs
+storage migration backfills them with the new `envelopeId` field. The backfill is
+non-destructive — it only copies `_id` into `envelopeId` on documents that lack
+it — and it needs MongoDB 4.2 or later. To run it on demand, call
+`IMessageStoreAdmin.MigrateAsync()`. Do **not** reach for `RebuildAsync()`: that
+is a full reset, not a migration — it deletes every dead letter and every pending
+inbox/outbox envelope before recreating the indexes, so there is nothing left to
+backfill.
 
 ### The registered `IMongoDatabase`
 
@@ -411,9 +479,16 @@ clocks are required (not a throw; the host starts normally).
 - **Leader election:** a lock document in `wolverine_locks` is claimed via
   `findAndModify` (compare-and-swap). Any healthy node can become leader; the
   first to atomically claim an expired or absent lock wins.
-- **Scheduled messages:** claimed exactly-once via `FindOneAndUpdate` CAS
-  (`Status == Scheduled && ExecutionTime <= now`), so two nodes competing for the
-  same due message produce at most one execution.
+- **Scheduled messages:** claimed via `FindOneAndUpdate` CAS
+  (`Status == Scheduled && ExecutionTime <= now`, re-asserting the same predicate and
+  the same instant the batch select used). The two conjuncts buy two different
+  guarantees: the status check makes two nodes competing for the same due message
+  produce at most one execution, and the execution-time check means a message
+  rescheduled while a poll is already in flight is left alone rather than executed
+  early — it is simply picked up again once its new time arrives. Caveat: a
+  reschedule issued *after* a message has already been claimed does not take effect,
+  and `IScheduledMessages.RescheduleAsync` returns no matched count, so the caller is
+  not told.
 - **Dead-node recovery:** on each recovery tick, each node releases envelope
   ownership held by node numbers with no live node document (crashed nodes), then
   recovers those orphaned envelopes. Envelopes owned by live nodes are never touched.
