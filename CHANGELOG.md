@@ -10,16 +10,10 @@ The major version tracks Wolverine's major version.
 
 ### Added
 - **Explicit per-type collection mapping.** `MongoDbPersistenceOptions` gains
-  `MapSagaCollection<TSaga>(name)` / `MapEntityCollection<TEntity>(name)` (plus `Type` overloads, for
-  closed generics and nested types) to override the MongoDB collection a saga or entity type is stored
-  in. This restores parity with Wolverine's RDBMS saga storage, which has always allowed
-  `AddSagaType<T>(tableName: ...)`, and it is the escape hatch that makes the new collision guard
-  actionable. Unlike upstream's RDBMS override — which the runtime saga paths discard by constructing a
-  fresh `SagaTableDefinition(typeof(T), null)` — a mapping here is honoured by *every* consumer: the
-  generated saga and entity frames, `ISagaStoreDiagnostics`, and
-  `IMessageStoreAdmin.ClearAllAsync`/`RebuildAsync`. A saga mapping must keep the `wolverine_saga_`
-  prefix so the admin sweep keeps clearing it; an entity mapping may not sit inside that prefix (a
-  rebuild would drop the application data) or take one of the nine Wolverine system collection names.
+  `MapSagaCollection<TSaga>(name)` and `MapEntityCollection<TEntity>(name)` (plus `Type`
+  overloads) to override which collection a saga or entity is stored in. A mapping is honoured
+  by the generated frames, `ISagaStoreDiagnostics` and the admin sweep alike. Saga names must
+  keep the `wolverine_saga_` prefix; entity names may not use it, or a system collection name.
 
   ```csharp
   opts.UseMongoDbPersistence("appdb", o => o
@@ -28,379 +22,135 @@ The major version tracks Wolverine's major version.
   ```
 
 ### Fixed
+- **Collection-name collisions are refused at startup instead of silently sharing a
+  collection.** Names come from `Type.Name.ToLowerInvariant()`, so two types with the same
+  simple name — different namespaces, differing only in case, or two closed constructions of
+  one generic — resolved to one collection and mixed their documents undetectably. Host start
+  now fails, naming both types and the mapping call to add. Default names are unchanged;
+  nothing is renamed or migrated. **Breaking** for a host that is already colliding.
 
-- **Collection-name collisions are refused at startup instead of silently sharing a collection.**
-  Collection names are derived from `Type.Name.ToLowerInvariant()`, which carries no namespace, no
-  generic arguments and no case — so unrelated types with the same simple name (`Ordering.Note` and
-  `Billing.Note`), types differing only by case, and different closed constructions of one open generic
-  (`Box<int>` and `Box<string>` are both `` box`1 ``) all resolved to one collection. Nothing configures
-  a `_t` discriminator, so the documents are indistinguishable on read, and the entity write path
-  upserts with no version guard, so one type's document silently replaced the other's. For sagas it is
-  worse: a retry after the duplicate-key abort can load the *other* saga type's document, at which point
-  the `Saga.Version` guard matches and certifies the corrupting write. A new handler-graph policy
-  (`MongoDbCollectionNamePolicy`) claims a collection for every saga and entity type this provider will
-  persist; a second, different type wanting the same collection throws an `InvalidOperationException`
-  naming both types in full, the shared collection, the database, and the exact mapping call to add. The
-  policy runs inside `HandlerGraph.Compile` — before any listener starts, and in `TypeLoadMode.Static`
-  too, where frame constructors never run — so a misconfiguration fails the deploy rather than the
-  traffic. The runtime collection accessors take the same claim as defence in depth.
-  - **Default names are unchanged for every non-conflicting type**, including closed generics and
-    nested types. Nothing is renamed and no data is migrated; `MongoConstants.SagaCollectionName` and
-    `MongoConstants.EntityCollectionName` keep their exact signatures and their exact output. Porting
-    Wolverine's own generic/nested alias sanitizer as the default was rejected for that reason and is
-    tracked in `FOLLOWUPS.md` as a possible opt-in.
-  - **Breaking for a host that is already colliding:** it will now fail to start. Such a host is already
-    mixing or clobbering documents; add an explicit mapping (and move or accept the loss of whatever was
-    already mixed — the library never moves data). Two narrower new refusals come with it, both of them
-    silently destructive today: an entity type whose default name lands inside the `wolverine_saga_`
-    prefix (every `RebuildAsync` drops it) and one whose default name is a Wolverine system collection.
-  - **Not covered, by construction:** an overlap between a Wolverine-managed entity collection and a
-    collection the application's own repositories own (`GetCollection<T>("orders")`) is invisible to a
-    handler-graph walk. `MapEntityCollection` is the remedy; see the README.
+- **Dead letters are keyed by the message-identity unit, not the bare envelope Guid.** Under
+  `MessageIdentity.IdAndDestination` two failed deliveries of one Guid to different
+  destinations overwrote each other — message loss, not deduplication. Documents now carry a
+  separate `envelopeId`. Existing data stays queryable and `MigrateAsync()` backfills it
+  (MongoDB 4.2+). No change under the default `IdOnly`.
 
-- **Dead letters are keyed by the message-identity unit, not the bare envelope Guid.** In
-  `MessageIdentity.IdAndDestination` mode two failed deliveries of one envelope Guid to different
-  destinations are distinct units of work — that is the whole point of the mode — but
-  `MoveToDeadLetterStorageAsync` upserted both onto the same `_id`
-  (`Filter.Eq(x => x.Id, dlq.Id)` with `IsUpsert = true`), while the incoming delete two lines below
-  correctly used the identity-aware key. The second failure therefore **silently replaced the
-  first**: its body, `receivedAt` and exception vanished with no error and no duplicate-key.
-  `QueryAsync` filtered by the first endpoint returned nothing, `SummarizeAllAsync` and
-  `FetchCountsAsync` undercounted, and replay restored only one of the two deliveries — message
-  loss, not deduplication. The document key now follows the same `(envelope id, destination)` unit
-  the inbox already uses, matching the RDBMS providers, whose dead-letter table adds `received_at`
-  to its primary key in exactly this mode
-  (`Wolverine.Postgresql/Schema/DeadLettersTable.cs:19-26`).
-  - **No change in the default `IdOnly` mode**, where the derived key *is* the envelope Guid: the
-    stored `_id` is byte-identical to previous releases. In `IdAndDestination` mode the key is a
-    deterministic SHA-256-derived Guid of the identity string.
-  - **`_id` stays a BSON Binary Guid on purpose.** Re-typing it to a string — the literal
-    `IncomingMessage` shape — would throw `Cannot deserialize a 'String' from BsonType 'Binary'` on
-    every pre-existing document, inside cursor deserialization, so it would fail whole result sets
-    rather than one row: `QueryAsync`, `DeadLetterEnvelopeByIdAsync` and every
-    `ReplayDeadLettersAsync` tick of the durability agent. No document written by any earlier
-    release fails to deserialize after this change.
-  - The document now carries an `envelopeId` element alongside `_id`, mirroring `IncomingMessage`,
-    and the Guid-addressed API keys on it: `DeadLetterEnvelopeByIdAsync` returns the first match
-    (ordered by `receivedAt` so the choice is deterministic), while `MessageIds` queries, discard,
-    replay and `EditAndReplayAsync` apply to **every** document for that Guid — the semantics of the
-    RDBMS reference (`MessageDatabase.DeadLetters.cs:9-26`,
-    `MessageDatabase.DeadLetterAdminService.cs:176-221`). `EditAndReplayAsync` re-serializes the
-    edited body per document rather than copying one blob, so each dead letter keeps its own
-    destination and the replays do not collapse onto a single inbox key.
-  - **Compatibility.** Dead letters written before this change have no `envelopeId` and stored the
-    envelope Guid directly in `_id`; they stay queryable, discardable, replayable and editable via
-    a compatibility branch on the Guid-facing filter. `MigrateAsync()` — run at startup whenever
-    `AutoBuildMessageStorageOnStartup != AutoCreate.None`, and callable on demand — backfills
-    `envelopeId` from `_id` so those documents also move onto the new `envelopeId` index; the
-    backfill uses an aggregation-pipeline update and therefore needs MongoDB 4.2 or later. It is
-    the only non-destructive migration path: `RebuildAsync()` is a full store reset
-    (`ClearAllAsync()` then `EnsureIndexesAsync()`), so it deletes every dead letter and every
-    pending inbox/outbox envelope and has nothing left to backfill. No operator action is required
-    in either mode.
-  - **One wrinkle, `IdAndDestination` only:** an envelope that already had a pre-upgrade dead letter
-    and fails again lands at the new derived `_id` instead of replacing the old document, so it can
-    show two rows — one legacy, one current. Nothing merges them, but both are visible, replayable
-    and discardable, and the Guid-addressed admin operations (`ReplayAsync`/`DiscardAsync` with that
-    id in `MessageIds`) act on both at once — so the legacy row is cleared through the normal
-    dead-letter admin surface. It is **not** a reason to run `RebuildAsync()`, which would delete the
-    entire store. This only affects a mode that was previously losing the data outright.
-  - **API:** `DeadLetterMessage`'s constructor and `ForUnserializableEnvelope` now take the document
-    key as an explicit `Guid` parameter (deliberately not defaulted — a default of `envelope.Id`
-    would be silently wrong in `IdAndDestination`). The parameterless constructor and every property
-    keep their names and types, so object-initializer use is unaffected. `MongoDbMessageStore` gains
-    `internal Guid DeadLetterKey(Envelope)` beside `InboxIdentity`.
-- **Every transaction the library opens now carries the store's `w:majority` (journaled) write
-  concern and majority read concern.** MongoDB discards collection- and database-level concerns
-  for operations run inside a transaction: the individual writes are never acknowledged on their
-  own, only `commitTransaction` is, and that command's concern resolves transaction options →
-  the session's default transaction options → the consumer's `MongoClient` settings. The store's
-  durability pin lives on its database handle, so it did not survive into a transaction. Two of
-  the three transaction sites were missing options and silently committed at the consumer's
-  client default (`{w: 1}` for a `w:1` client, and never `j:true`): the **code-generated
-  handler/outbox transaction** (`TransactionalFrame`) and **`MoveToDeadLetterStorageAsync`**. The
-  batch inbox store (`StoreIncomingAsync(IReadOnlyList<Envelope>)`) already had them. The options
-  now live in one place — `MongoTransactionOptions.Durable` — reached through a single store-side
-  `MongoDbMessageStore.InTransactionAsync` funnel and referenced by name from the generated
-  handler code.
-  - This corrects the scope of the 1.0.0 claim that "a `w:1` client no longer weakens inbox/outbox
-    durability": it was true for the sessionless writes, and is now also true for the
-    transactional ones.
-  - Proven by `transaction_write_concern.cs`, which observes the emitted `commitTransaction` /
-    `startTransaction` commands through `CommandStartedEvent` monitoring on a deliberately weak
-    (`WriteConcern.W1` / `ReadConcern.Local`) client. Asserting collection or database settings
-    cannot see this — those are exactly the values the driver throws away inside a transaction.
-- **Application writes enlisted in the Wolverine handler transaction now commit at
-  `w:majority, j:true` as well.** A transaction has exactly one write concern, so pinning the
-  handler/outbox transaction necessarily governs the application's own enlisted writes —
-  `MongoDbUnitOfWork`, a raw `IClientSessionHandle`, saga documents and `[Entity]` documents.
-  This is intended: a handler that enlists in the outbox transaction opts into its commit
-  semantics. Note the application never had a per-collection choice inside that transaction
-  either (MongoDB strips handle-level concerns there); what changes is that the app's
-  *client-level* default no longer governs it. Writes made **outside** the Wolverine transaction,
-  through the app-facing `IMongoDatabase`, are untouched and remain unpinned.
-- **Handler transactions now read at `readConcern: majority`.** Previously they read at the
-  consumer's client setting. This makes the in-session eager idempotency probe consistent with
-  the sessionless `ExistsAsync(Envelope, CancellationToken)` probe, which already read at
-  majority through the pinned database handle.
-- **Cost:** one majority-replication + journal-fsync round trip per handler commit (and per
-  dead-letter move) for consumers previously committing below majority; `abortTransaction` on the
-  rollback path inherits the same concern. No new availability floor — a replica set that cannot
-  satisfy `w:majority` already could not serve this store, because every non-transactional
-  inbox/outbox/recovery write goes through the pinned handle.
-- **Upgrade note:** the code-generated handler text changed. Any consumer with pre-generated
-  handler code compiled into the application assembly must **regenerate** before the handler
-  transaction picks the fix up — `TypeLoadMode.Static` *and* `TypeLoadMode.Auto` (Auto also
-  attaches a pre-generated handler type by name when one is present, with no staleness check
-  against the current frame output). The two store-side transactions are not generated code and
-  are pinned regardless of codegen mode. No stored-data, index, or collection-name change; nothing
-  to migrate.
-- **Agent-assignment removal now honours the node id.** `RemoveAssignmentAsync(nodeId, agentUri, …)`
-  deleted the `wolverine_node_assignments` document by agent URI alone, ignoring `nodeId`. That
-  collection holds exactly one document per agent URI and ownership transfers by *overwriting* the
-  document's `nodeId`, so a removal issued by a node that no longer owns the agent destroyed the row
-  belonging to the node that now legitimately owned it. On this provider the missing row is worse
-  than a lost fact: `LoadAllNodesAsync` attributes a URI to exactly one node, so the agent reads as
-  unassigned, the leader can start a second copy elsewhere, and the resulting duplicate is invisible
-  to Wolverine's split-brain detection (which needs the same URI reported by two nodes). The delete
-  now filters on `_id` **and** `nodeId`, matching all five RDBMS providers (Postgres:
-  `delete from … where id = :id and node_id = :node`); a mismatch is a silent no-op, exactly as it
-  is there. This is **defence in depth against a contract violation, not a fix for a reproduced
-  outage**: under WolverineFx 6.21.0 the ordinary ownership-transfer path is protected by ordering
-  (`ReassignAgent` awaits the old owner's `StopAgent` before returning `AssignAgent`), and a stop
-  that arrives late is discarded by the handler pipeline because the request/reply envelope carries
-  a 60-second `DeliverWithin`. What the predicate guards is the shape the parameter exists for:
-  `NodeAgentController.StopAgentAsync` always passes its own `UniqueNodeId` ("remove *my* claim")
-  and issues the removal even when the node was never running the agent. The write side is
-  unchanged — `AddAssignmentAsync`/`AssignAgentsAsync` still upsert by agent URI and overwrite
-  `nodeId`, which is how ownership transfers. No schema, index or API change.
-- **A scheduled message rescheduled mid-poll no longer fires early.** The durability agent's
-  scheduled-message poll captures one `now`, selects the due documents
-  (`Status == Scheduled && ExecutionTime <= now`) in a single round trip, then claims each one with
-  a separate `FindOneAndUpdate` — but that claim was filtered only on
-  `(_id, Status == Scheduled)`. `IScheduledMessages.RescheduleAsync` writes only `ExecutionTime`
-  and deliberately leaves the status alone, so a reschedule committing between the batch select and
-  a given document's claim did not invalidate the claim: the message was flipped to `Incoming` and
-  enqueued for immediate execution while carrying its new, future execution time (nothing
-  downstream of the durable local scheduled queue re-checks it). The operator saw a reschedule that
-  appeared to succeed and a handler that ran anyway — and because the document was then `Incoming`,
-  every later `RescheduleAsync` for it was a silent no-op and it disappeared from
-  `IScheduledMessages.QueryAsync`. The claim filter now also carries `ExecutionTime <= now`, using
-  the same instant the select captured. This only narrows the filter, so it cannot affect
-  exactly-once across competing nodes — the `Status == Scheduled` guard remains the sole arbiter —
-  and a refused claim is simply re-selected on a later tick once the message is due again. Known
-  residual, unchanged and shared by every sibling provider: a reschedule that lands *after* a
-  message has been claimed still does not take effect and is not reported back to the caller.
+- **Every transaction the library opens now commits at `w:majority` (journaled) and reads at
+  majority.** MongoDB discards handle-level concerns inside a transaction, so the
+  code-generated handler/outbox transaction and the dead-letter move had been committing at
+  the consumer's client default. Writes the application enlists in the handler transaction
+  inherit the same concern. **Upgrade:** regenerate pre-generated handler code —
+  `TypeLoadMode.Static` *and* `Auto` — to pick this up.
+
+- **Agent-assignment removal now honours the node id.** `RemoveAssignmentAsync` deleted by
+  agent URI alone, so a removal issued by a node that no longer owned an agent destroyed the
+  row belonging to the node that did: the agent then read as unassigned and a duplicate start
+  was invisible to split-brain detection. The delete now filters on node id too, matching the
+  RDBMS providers. Defence in depth against a contract violation, not a reproduced outage.
+
+- **A scheduled message rescheduled mid-poll no longer fires early.** The per-document claim
+  filtered only on `(_id, Status == Scheduled)`, so a `RescheduleAsync` landing between the
+  batch select and the claim did not invalidate it — the message ran immediately while
+  carrying a future execution time, then disappeared from `QueryAsync`. The claim now
+  re-asserts `ExecutionTime <= now` against the instant the select captured.
 
 ## [1.0.1] - 2026-07-28
 
 ### Added
-- **`CustomerFeedback` demo entity — non-`Id` identity-convention coverage.** Alongside the
-  existing `OrderNote` entity, the demo now has `CustomerFeedback` (keyed by
-  `CustomerFeedbackId`, the `{TypeName}Id` convention, no member literally named `Id`), with
-  `Insert<CustomerFeedback>` + `[Entity("FeedbackId")]`-load handlers in
-  `CustomerFeedbackHandler.cs`. `CustomerFeedbackFlowTests.cs` asserts directly against MongoDB
-  that the document's raw `_id` field is a native BSON `Guid` equal to `CustomerFeedbackId`,
-  proving the entity identity-mapping fix end-to-end through the packaged nupkg, not just the
-  library's own test project.
+- **`CustomerFeedback` demo entity — non-`Id` identity coverage.** The demo now persists an
+  entity keyed by `CustomerFeedbackId` (the `{TypeName}Id` convention, with no member named
+  `Id`) and asserts against MongoDB that the stored `_id` is a native BSON `Guid`, proving the
+  identity-mapping fix end to end through the packaged nupkg rather than only in-repo.
 
 ### Fixed
-- **Generic entity loads and writes now agree on the same identity member.** The `[Entity]` load
-  frame filtered `_id` with the value of the member *Wolverine* resolved
-  (`[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`), while
-  `Insert`/`Update`/`Store`/`Delete<T>` keyed `_id` off whatever the *driver* mapped
-  (`Id`/`id`/`_id`, plus `[BsonId]`). When the two named different members, writes landed under one
-  key and reads probed another: an entity keyed only on e.g. `ShipmentId` had no mapped `_id` at
-  all (the write threw "has no mapped _id member"), and the review's poisoned shape (an entity
-  carrying **both** `{TypeName}Id` and `Id`) worked only for as long as the application kept the two
-  members equal. Every entity frame constructor (plus `DetermineStorageActionFrame`, which builds a
-  bare `MethodCall` and so has no constructor to hook) now calls the same
-  `MongoIdentityMapping.EnsureIdMember` the saga frames use, and every runtime operation goes
-  through a single collection accessor that aligns first (required because `TypeLoadMode.Static`
-  attaches pre-generated handlers without ever constructing frames).
-  - **Entities whose identity member is named `Id` are completely unaffected — on disk and in the
-    BSON registry**, whether that member is declared on the type or inherited from a base class,
-    as are `[BsonId]`-annotated members at any level. `MongoEntityOperations.IdOf` is unchanged:
-    once the class map is aligned, the driver's mapped id member *is* Wolverine's resolved one.
-  - The same two unalignable shapes the saga frames reject now also fail with an actionable
-    `InvalidOperationException` **at host build** for entities: an identity member declared on a
-    base type, and a different, base-declared member already occupying `_id`.
-- **A non-saga handler returning `Delete<TSaga>` or `IStorageAction<TSaga>` now fails at host build
-  instead of writing to the wrong collection.** Nothing upstream guards those paths: they are
-  gated only by `CanPersist`, which this provider hardcodes `true`, so both compiled cleanly and
-  then targeted the un-prefixed **entity** collection (`orderfulfillmentsaga`) rather than
-  `wolverine_saga_orderfulfillmentsaga`, with no `Saga.Version` guard. The write appeared to
-  succeed and affected nothing the saga machinery reads. Routing them to the saga frames was
-  rejected: without a `SagaChain` there is no captured `oldVersion`, which would trade a visible
-  bug for silent optimistic-concurrency corruption inside the saga collection. Sagas are completed
-  with `MarkCompleted()` from a saga handler; no sibling provider supports this path either.
-- **Incoming recovery claims are destination-scoped in `MessageIdentity.IdAndDestination` mode.**
-  `ReassignIncomingAsync` filtered on the raw envelope `Guid`, but in `IdAndDestination` mode the
-  inbox identity unit is the `(envelope id, destination)` pair; one Guid legitimately has a
-  document per destination. Claiming a recovery page for one listener therefore also claimed every
-  sibling destination's document, stranding it: owned by a node that never enqueued it for that
-  listener, and invisible to future orphan recovery (which only reclaims `OwnerId == AnyNode`).
-  Both the claim and `RecoverOrphanedIncomingAsync`'s post-claim CAS re-read now key on the
-  document `_id` (`InboxIdentity(envelope)`), and the re-read maps winners back through an
-  `_id`-keyed dictionary; the envelope Guid is not unique per destination, so it could not have
-  mapped winners back unambiguously either.
-  - **No change in the default `IdOnly` mode**, where `InboxIdentity(e) == e.Id.ToString()`: the
-    `_id` *is* the Guid string, so the filter values are byte-identical to before.
-  - `RescheduleAsync` stays `EnvelopeId`-keyed (its upstream signature takes a bare `Guid`, so
-    "every document for this envelope id" follows from the contract), and the `envelopeId` index is
-    retained for it and the scheduled-message queries.
-- **Dead-node ownership release can no longer strip a live node's in-flight envelopes.**
-  `ReleaseDeadNodeOwnershipAsync` read the live node numbers, then released everything *not* in that
-  snapshot (`Filter.Nin(liveSnapshot)`). The `Nin` is a blacklist over a stale read: a node that
-  registered and claimed between the read and the write matched it, so its in-flight envelopes were
-  released to `AnyNode` and could be processed a second time by another node. The method's own doc
-  comment asserted the opposite ("a live node always has a node document, so its in-flight work is
-  never touched"). That invariant was false.
-  - The release is now **two-tick-confirmed**: each tick computes the node numbers that are *owned*
-    in the incoming/outgoing collections but have no live node document, and releases only the
-    numbers that were **also** dead on the previous tick. The write names them positively
-    (`Filter.In(confirmed)`), so a number that appeared after the reads cannot be released at all.
-  - The owned set is read **before** the live set, which is load-bearing: "owned but not live" then
-    means the node document existed at the earlier instant and was gone at the later one, a
-    shutdown deletion, never a mid-registration node. Combined with monotonic never-reused node
-    numbers, a confirmed number was dead for the whole interval between the two ticks. The full
-    four-step soundness argument is on the method.
-  - **Behavior-timing change:** a crashed node's envelopes are now rescued one recovery interval
-    (`Durability.ScheduledJobPollingTime`) later than before. Graceful shutdown is unaffected: it
-    releases ownership directly rather than through this path.
-  - Ticks that find nothing confirmed now issue **no** write at all, where the previous
-    implementation ran two unconditional `UpdateMany` calls every tick.
+- **Sagas keyed by any identity convention other than `Id` now persist and load correctly.**
+  Wolverine resolves the identity member by its own convention while the driver recognises only
+  `Id`/`id`/`_id` and `[BsonId]`. Nothing reconciled the two, so a saga keyed on e.g.
+  `ShipmentId` was written with a server-generated `ObjectId`: every load returned `null` and
+  every start accumulated another unfindable orphan. `MongoIdentityMapping` now aligns them at
+  codegen *and* at runtime. Sagas keyed on `Id`, declared or inherited, are unaffected.
+
+- **Generic entity loads and writes now agree on the same identity member.** The `[Entity]`
+  load filtered `_id` with Wolverine's resolved member while `Insert`/`Update`/`Store`/`Delete`
+  keyed off the driver's, so writes landed under one key and reads probed another. All entity
+  frames and runtime operations now align first. Entities keyed on `Id` are unaffected; the two
+  shapes the driver cannot align fail at host build with an actionable message.
+
+- **Unresolvable saga identity members now fail loudly instead of being invented.**
+  `UpdateSagaFrame` fell back to `?? "Id"`, emitting generated code that referenced a member
+  which might not exist — surfacing as a cryptic compile error inside the *generated* source.
+  Resolution now funnels through one path that throws a clear `ArgumentException`.
+
+- **A non-saga handler returning `Delete<TSaga>` or `IStorageAction<TSaga>` now fails at host
+  build.** Both compiled cleanly and then wrote to the un-prefixed entity collection instead of
+  `wolverine_saga_*`, with no `Saga.Version` guard, so the write appeared to succeed and
+  affected nothing the saga machinery reads. Complete a saga with `MarkCompleted()` instead.
+
+- **Incoming recovery claims are destination-scoped under `MessageIdentity.IdAndDestination`.**
+  `ReassignIncomingAsync` filtered on the raw envelope Guid, so claiming a recovery page for one
+  listener also claimed every sibling destination's document — stranding it, owned by a node
+  that never enqueued it and invisible to orphan recovery. Claims now key on the document
+  `_id`. No change under the default `IdOnly`.
+
+- **Dead-node ownership release can no longer strip a live node's in-flight envelopes.** The
+  release used `Filter.Nin(liveSnapshot)`, a blacklist over a stale read: a node that registered
+  between the read and the write matched it, and its in-flight envelopes were released for
+  reprocessing. Release is now two-tick-confirmed and names nodes positively. **Timing change:**
+  a crashed node's envelopes are rescued one recovery interval later than before.
+
 - **A batch `StoreIncomingAsync` containing a duplicate no longer strands the batch's fresh
-  envelopes.** The unordered `InsertManyAsync` committed every non-duplicate document before the
-  duplicate-key error surfaced. `DurableReceiver` then re-posted the whole batch through its
-  per-envelope path, which *completes* a duplicate at the listener **without enqueuing it**, so
-  each fresh envelope that had already persisted was left in the inbox owned by this live node,
-  never handled, and invisible to orphan recovery (which only reclaims `OwnerId == AnyNode`). The
-  batch insert is now wrapped in a replica-set transaction, making it all-or-nothing and restoring
-  the RDBMS provider's contract.
-  - The transaction carries **explicit** options (`w:majority` + `j:true`, `readConcern:majority`)
-    because MongoDB ignores database-handle write concern inside a transaction; without them the
-    store's durability pin would have silently degraded to the consumer's client default.
-  - `DuplicateIncomingEnvelopeException`'s duplicate list is now built from a single post-abort
-    `_id` existence probe, so it is complete and precise rather than limited to what the fail-fast
-    server reported (verified: an in-transaction duplicate yields exactly one write error, at the
-    first offending index). An intra-batch duplicate (no pre-existing document) falls back to
-    grouping the batch by inbox identity; a failure explained by neither rethrows unchanged, as
-    does any non-duplicate write error.
-  - The **single-envelope** `StoreIncomingAsync` overload is unchanged: no session, no transaction.
-- **Sagas keyed by any Wolverine identity convention other than `Id` now persist and load
-  correctly.** Wolverine resolves a saga's identity member by its own convention
-  (`[SagaIdentity]` → `{TypeName}Id` → `{Name-minus-Saga}Id` → `SagaId` → `Id`), while the MongoDB
-  driver only recognises `Id`/`id`/`_id` (plus `[BsonId]`). Nothing reconciled the two, so a saga
-  keyed on e.g. `ShipmentId` was written with a **server-generated `ObjectId` `_id`**: every load
-  returned `null`, every "start" silently accumulated another unfindable orphan document, and no
-  continuation or completion ever found the saga. `MongoIdentityMapping` now aligns the two at
-  codegen time (from all four saga frame constructors) *and* at runtime (via
-  `MongoSagaOperations`' collection accessor, required because `TypeLoadMode.Static` attaches
-  pre-generated handlers without ever constructing frames).
-  - **Sagas whose identity member is named `Id` are completely unaffected — on disk and in the
-    BSON registry.** The helper first asks what the driver will actually resolve, walking the
-    type's base chain, and does nothing at all when that already matches Wolverine's answer. That
-    covers `Id` declared on the saga *and* `Id` inherited from a base class, plus any
-    `[BsonId]`-annotated member at any level.
-  - Two shapes the driver makes unalignable now fail with an actionable
-    `InvalidOperationException` **at codegen** instead of corrupting data or failing on a first
-    write: an identity member declared on a **base** type (the driver will not let a subclass's
-    class map claim it, remedy: `[BsonId]` on that member, or register a class map for the
-    declaring type, either of which fixes every subclass at once), and a **different**,
-    base-declared member already occupying `_id`.
-- **Unresolvable saga identity members now fail loudly instead of inventing one.**
-  `UpdateSagaFrame` previously fell back to `?? "Id"` / `?? typeof(string)`, emitting generated
-  code that referenced a member which may not exist, surfacing as a cryptic compile error inside
-  the *generated* source. All identity resolution now funnels through
-  `MongoIdentityMapping.ResolveIdMember`, which throws the same `ArgumentException`
-  `DetermineSagaIdType` already threw; `DetermineSagaIdType` delegates to it, so there is one code
-  path and one message.
-- `MongoDbSagaStoreDiagnostics.ReadSagaAsync` now coerces the caller-supplied identity to the
-  saga's native id type (`Guid`/`int`/`long`/`string`) before querying, per the
-  `ISagaStoreDiagnostics` contract, mirrors `MartenSagaStoreDiagnostics.coerceIdentity`. A
-  string handed in for a `Guid`/`int`/`long`-keyed saga (e.g. an id rehydrated from a URL or JSON
-  payload) previously always returned "not found"; an unparseable/mismatched identity still
-  returns "not found" rather than throwing. Along the way, the filter value is now dispatched
-  through a generic `TId` parameter instead of a boxed `object`, so `Guid`-keyed sagas resolve via
-  the collection's own class-map serializer instead of failing with
-  `GuidSerializer cannot serialize a Guid when GuidRepresentation is Unspecified`.
-- `EditAndReplayAsync` no longer throws `EndOfStreamException` when editing a body-less poison
-  dead letter (one stored via `DeadLetterMessage.ForUnserializableEnvelope`, e.g. an envelope
-  whose body could not be serialized). It now reconstructs the envelope through
-  `DeadLetterMessage.ToEnvelope()` (which already guards `Body is { Length: > 0 }`) before
-  applying the edited body, instead of calling `EnvelopeSerializer.Deserialize` directly on an
-  empty byte array.
-- **`MongoDbDurabilityAgent.StopAsync` now actually awaits its recovery/scheduled-job loops
-  instead of returning immediately.** It called `_recoveryTask?.SafeDispose()` /
-  `_scheduledJob?.SafeDispose()` on tasks that were, in the general case, still running:
-  `SafeDispose` swallows the `InvalidOperationException` `Task.Dispose()` throws for an
-  incomplete task, so this was a no-op, and neither `CancellationTokenSource` was ever disposed.
-  `StopAsync` is now `async`: it cancels, then awaits both loops via
-  `Task.WhenAll(...).WaitAsync(...)` bounded by an internal 5-second timeout, swallowing the
-  expected `OperationCanceledException` and logging a warning (not throwing) if the timeout is
-  hit, then disposes `_combined` before `_cancellation` and only then reports `Stopped`. A second
-  call is a no-op: an interlocked flag guards re-entry, since the CTSes are now disposed after
-  the first call. This shrinks, but per the documented upstream ordering
-  (`WolverineRuntime.HostService.StopAsync` releases ownership before tearing down agents) cannot
-  fully close, the window where a still-running recovery tick issues a claim write after the
-  node's ownership has already been released.
+  envelopes.** The unordered insert committed every non-duplicate document before the
+  duplicate-key error surfaced; redelivery then completed the duplicate without enqueuing it,
+  leaving the fresh envelopes persisted, owned, never handled and invisible to orphan recovery.
+  The batch insert is now a transaction, all-or-nothing. The single-envelope overload is
+  unchanged.
+
+- **`MongoDbSagaStoreDiagnostics.ReadSagaAsync` coerces the supplied identity** to the saga's
+  native id type (`Guid`/`int`/`long`/`string`) before querying, per the `ISagaStoreDiagnostics`
+  contract. A string handed in for a `Guid`-keyed saga — an id rehydrated from a URL or JSON —
+  previously always returned "not found".
+
+- **`EditAndReplayAsync` no longer throws `EndOfStreamException` on a body-less poison dead
+  letter.** It now rebuilds the envelope through `DeadLetterMessage.ToEnvelope()`, which guards
+  against an empty body, instead of deserializing an empty byte array directly.
+
+- **`MongoDbDurabilityAgent.StopAsync` now awaits its recovery and scheduled-job loops** rather
+  than calling `SafeDispose` on still-running tasks — a silent no-op that also leaked both
+  `CancellationTokenSource`s. It cancels, awaits both loops under a 5-second timeout, then
+  disposes. This shrinks the window in which a recovery tick writes after ownership is released.
+
 ### Documentation
-- Post-1.0.0 truth sweep on `CLAUDE.md`: package version reference, the versioning-policy
-  wording, the index-migration follow-up's "before 1.0" framing (now a standing post-1.0
-  decision, mirrored in `FOLLOWUPS.md`), and the `ClearAllAsync`/`RebuildAsync` collection count
-  (nine system collections, not six, also fixed the mirroring comment in
-  `MongoDbMessageStore.NodeAgents.cs`). No behavior changes.
+- Post-1.0.0 accuracy sweep on `CLAUDE.md` and `FOLLOWUPS.md`: the package version reference,
+  the versioning-policy wording, the index-migration follow-up's "before 1.0" framing, and the
+  `ClearAllAsync`/`RebuildAsync` collection count (nine system collections, not six). No
+  behavior changes.
 
 ### Changed
-- **Deduplicated inbox/outbox write definitions — behavior-preserving.**
-  `MarkIncomingEnvelopeAsHandledAsync(Envelope)` now delegates to the list overload instead of
-  duplicating its update definition; `ScheduleExecutionAsync` and
-  `RescheduleExistingEnvelopeForRetryAsync` share one scheduling `UpdateDefinition` builder;
-  `DiscardAndReassignOutgoingAsync` calls `DeleteOutgoingAsync` instead of inlining its body. Every
-  bare owner-id `0` literal and the one direct `TransportConstants.AnyNode` use now read
-  `MongoConstants.AnyNode`, so a future change to the sentinel only has one spelling to update.
-  No document-schema change: `AgentAssignmentDocument`'s `Id`/`AgentUri` duplication is recorded
-  in `FOLLOWUPS.md` instead of folded into this refactor.
-- **Store efficiency sweep — behavior-preserving.** `ReplayDeadLettersAsync` now caps its
-  `Find` with `.Limit(Durability.RecoveryBatchSize)` like every sibling recovery path, and
-  replays the fetched batch with one `StoreIncomingAsync(list)` + one `DeleteManyAsync` instead
-  of a `StoreIncomingAsync`/`DeleteOneAsync` pair per letter. Because batch `StoreIncomingAsync`
-  is all-or-nothing, a duplicate anywhere in the batch (the crash-window shape: a previous pass
-  re-inserted the envelope but didn't finish deleting its DLQ doc) makes the batch throw
-  `DuplicateIncomingEnvelopeException`; the method now catches that and falls back to the
-  original per-letter path so every other letter in the batch still replays and the documented
-  idempotent-replay behavior is preserved. `MongoDbMessageStore.NodeAgents.cs`: the
-  `NodeDocs`/`AssignmentDocs`/`RecordDocs`/`RestrictionDocs`/`Counters` collection handles are now
-  cached in the constructor instead of resolved on every call (matching `Incoming`/`Outgoing`);
-  `LoadAllNodesAsync` fetches nodes and assignments concurrently via `Task.WhenAll` and joins them
-  with a `ToLookup`; `PersistAgentRestrictionsAsync` issues one `BulkWriteAsync` (mixing
-  `DeleteOneModel`/`ReplaceOneModel`) instead of one round trip per restriction, mirroring
-  `AssignAgentsAsync`.
-- Upgraded `WolverineFx`/`WolverineFx.ComplianceTests` from 6.9.0 to 6.21.0 and re-pinned the
-  `external/wolverine` submodule to `V6.21.0`. Full compliance suite and multinode suite
-  re-verified green on both net9.0 and net10.0; no provider code changes required. Demo's
-  `WolverineFx`/`WolverineFx.RabbitMQ`/`WolverineFx.RuntimeCompilation` bumped to match
-  (6.13.1 → 6.21.0). **6.21.0, not the latest 6.22.0:** 6.22.0 adds a `bool? Replayable` filter to
-  `DeadLetterEnvelopeQuery` plus a `DeadLetterAdminCompliance.query_by_replayable_flag` fact that
-  this provider does not yet satisfy; the upgrade is scoped separately in
-  `docs/superpowers/plans/2026-07-26-wolverine-6.22-upgrade.md`.
+- **Upgraded `WolverineFx` from 6.9.0 to 6.21.0** and re-pinned the `external/wolverine`
+  submodule to match. No provider code changes were needed; the compliance and multinode suites
+  are green on net9.0 and net10.0. Not 6.22.0 — it adds a `DeadLetterAdminCompliance` fact this
+  provider does not yet satisfy, scoped as separate work.
+
 - **One version per package across both solutions.** The library and the demo are separate
-  dependabot ecosystems, so their pins had drifted apart. `MongoDB.Driver` was `3.9.0` (a range
-  floor) in the library and `3.10.0` in the demo; `Microsoft.NET.Test.Sdk` was 18.8.1 vs 18.6.0
-  and `Testcontainers.MongoDb` 4.13.0 vs 4.12.0. Every shared package now names a single
-  plain version (the latest) in both `Directory.Packages.props` files. The bracketed
-  major-version ranges added during the post-1.0.0 hardening pass (never released) are gone
-  with them: the packed nuspec declares the ordinary open-ended `>= x.y.z` again, matching how
-  Wolverine's own repo pins its store drivers (`Marten`, `Microsoft.Azure.Cosmos`,
-  `RavenDB.Client` are all plain versions).
-- Dropped the explicit `Microsoft.SourceLink.GitHub` `PackageReference`. The .NET SDK has
-  bundled SourceLink since 8.0 and imports `Microsoft.SourceLink.GitHub` automatically for a
-  GitHub origin; an explicit reference sets `SuppressImplicitGitSourceLink` and shadows the
-  SDK-bundled copy with a NuGet-restored one. Verified equivalent: the packed `.snupkg` PDB
-  still carries the `raw.githubusercontent.com/TheCraftyMaker/wolverine-mongodb/<commit>/*`
-  document mapping, and the nuspec still carries `<repository>` metadata from
-  `PublishRepositoryUrl`. Removes a recurring dependabot bump with no behavior change.
+  dependabot ecosystems, so their pins had drifted (`MongoDB.Driver` 3.9.0 vs 3.10.0, and
+  others). Every shared package now names a single plain version in both
+  `Directory.Packages.props`, and the never-released bracketed major-version ranges are gone
+  with them.
+
+- **Deduplicated inbox/outbox write definitions — behavior-preserving.** Shared update
+  definitions are built once instead of being inlined per call site, and every bare owner-id
+  `0` literal now reads `MongoConstants.AnyNode`. No document-schema change.
+
+- **Store efficiency sweep — behavior-preserving.** `ReplayDeadLettersAsync` is batch-limited
+  and replays a whole batch at a time, falling back to the per-letter path on a duplicate so
+  idempotent replay still holds. Node-agent collection handles are cached in the constructor,
+  `LoadAllNodesAsync` fetches nodes and assignments concurrently, and
+  `PersistAgentRestrictionsAsync` issues one `BulkWriteAsync`.
+
+- **Dropped the explicit `Microsoft.SourceLink.GitHub` reference.** The SDK has bundled
+  SourceLink since 8.0 and an explicit reference shadows it. Verified the packed `.snupkg` still
+  carries the source-document mapping and the nuspec its `<repository>` metadata. Removes a
+  recurring dependabot bump with no behavior change.
 
 ## [1.0.0] - 2026-07-06
 
@@ -579,6 +329,8 @@ single-node deployments.
   tree contained `IMongoDatabase` received the transactional frame. Handlers
   injecting `IMongoCollection<T>` silently ran without a transaction; handlers
   declaring `IClientSessionHandle` directly failed code generation.
+
+## [0.1.0-beta.5] - 2026-06-14
 
 ### Added
 - **CI runs the full compliance test suite on every PR.** The `library` job checks
