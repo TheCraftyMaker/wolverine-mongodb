@@ -9,6 +9,7 @@ The major version tracks Wolverine's major version.
 ## [Unreleased]
 
 ### Fixed
+
 - **Every transaction the library opens now carries the store's `w:majority` (journaled) write
   concern and majority read concern.** MongoDB discards collection- and database-level concerns
   for operations run inside a transaction: the individual writes are never acknowledged on their
@@ -29,8 +30,6 @@ The major version tracks Wolverine's major version.
     `startTransaction` commands through `CommandStartedEvent` monitoring on a deliberately weak
     (`WriteConcern.W1` / `ReadConcern.Local`) client. Asserting collection or database settings
     cannot see this — those are exactly the values the driver throws away inside a transaction.
-
-### Changed
 - **Application writes enlisted in the Wolverine handler transaction now commit at
   `w:majority, j:true` as well.** A transaction has exactly one write concern, so pinning the
   handler/outbox transaction necessarily governs the application's own enlisted writes —
@@ -56,6 +55,42 @@ The major version tracks Wolverine's major version.
   against the current frame output). The two store-side transactions are not generated code and
   are pinned regardless of codegen mode. No stored-data, index, or collection-name change; nothing
   to migrate.
+- **Agent-assignment removal now honours the node id.** `RemoveAssignmentAsync(nodeId, agentUri, …)`
+  deleted the `wolverine_node_assignments` document by agent URI alone, ignoring `nodeId`. That
+  collection holds exactly one document per agent URI and ownership transfers by *overwriting* the
+  document's `nodeId`, so a removal issued by a node that no longer owns the agent destroyed the row
+  belonging to the node that now legitimately owned it. On this provider the missing row is worse
+  than a lost fact: `LoadAllNodesAsync` attributes a URI to exactly one node, so the agent reads as
+  unassigned, the leader can start a second copy elsewhere, and the resulting duplicate is invisible
+  to Wolverine's split-brain detection (which needs the same URI reported by two nodes). The delete
+  now filters on `_id` **and** `nodeId`, matching all five RDBMS providers (Postgres:
+  `delete from … where id = :id and node_id = :node`); a mismatch is a silent no-op, exactly as it
+  is there. This is **defence in depth against a contract violation, not a fix for a reproduced
+  outage**: under WolverineFx 6.21.0 the ordinary ownership-transfer path is protected by ordering
+  (`ReassignAgent` awaits the old owner's `StopAgent` before returning `AssignAgent`), and a stop
+  that arrives late is discarded by the handler pipeline because the request/reply envelope carries
+  a 60-second `DeliverWithin`. What the predicate guards is the shape the parameter exists for:
+  `NodeAgentController.StopAgentAsync` always passes its own `UniqueNodeId` ("remove *my* claim")
+  and issues the removal even when the node was never running the agent. The write side is
+  unchanged — `AddAssignmentAsync`/`AssignAgentsAsync` still upsert by agent URI and overwrite
+  `nodeId`, which is how ownership transfers. No schema, index or API change.
+- **A scheduled message rescheduled mid-poll no longer fires early.** The durability agent's
+  scheduled-message poll captures one `now`, selects the due documents
+  (`Status == Scheduled && ExecutionTime <= now`) in a single round trip, then claims each one with
+  a separate `FindOneAndUpdate` — but that claim was filtered only on
+  `(_id, Status == Scheduled)`. `IScheduledMessages.RescheduleAsync` writes only `ExecutionTime`
+  and deliberately leaves the status alone, so a reschedule committing between the batch select and
+  a given document's claim did not invalidate the claim: the message was flipped to `Incoming` and
+  enqueued for immediate execution while carrying its new, future execution time (nothing
+  downstream of the durable local scheduled queue re-checks it). The operator saw a reschedule that
+  appeared to succeed and a handler that ran anyway — and because the document was then `Incoming`,
+  every later `RescheduleAsync` for it was a silent no-op and it disappeared from
+  `IScheduledMessages.QueryAsync`. The claim filter now also carries `ExecutionTime <= now`, using
+  the same instant the select captured. This only narrows the filter, so it cannot affect
+  exactly-once across competing nodes — the `Status == Scheduled` guard remains the sole arbiter —
+  and a refused claim is simply re-selected on a later tick once the message is due again. Known
+  residual, unchanged and shared by every sibling provider: a reschedule that lands *after* a
+  message has been claimed still does not take effect and is not reported back to the caller.
 
 ## [1.0.1] - 2026-07-28
 

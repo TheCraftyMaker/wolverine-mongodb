@@ -106,8 +106,24 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
             new AgentAssignmentDocument { Id = agentUri.ToString(), NodeId = nodeId, AgentUri = agentUri.ToString() },
             new ReplaceOptions { IsUpsert = true }, cancellationToken);
 
+    // Node-scoped by design, unlike the two writes above. The collection holds exactly one document
+    // per agent URI (_id = the URI), so ownership transfers by overwriting that document's nodeId —
+    // which is why AssignAgentsAsync/AddAssignmentAsync upsert unscoped, matching Postgres's
+    // "on conflict (id) do update set node_id". A delete keyed on the URI alone would therefore let a
+    // node that no longer owns an agent wipe the row that now belongs to a *different* node.
+    // Wolverine's only caller, NodeAgentController.StopAgentAsync, always passes its own
+    // UniqueNodeId ("remove MY claim") and issues the removal even when this node was never running
+    // the agent (it sits outside the Agents.TryGetValue guard), so an unscoped delete is unsound even
+    // though upstream ordering makes it hard to hit in practice. Every RDBMS provider filters on both
+    // columns ("delete from ... where id = :id and node_id = :node"); a mismatch is a silent no-op
+    // there and here. Do NOT node-scope the writes above — their unscoped upsert IS how ownership
+    // transfers, and the NodePersistenceCompliance assignment facts depend on it.
     public Task RemoveAssignmentAsync(Guid nodeId, Uri agentUri, CancellationToken cancellationToken)
-        => AssignmentDocs.DeleteOneAsync(Builders<AgentAssignmentDocument>.Filter.Eq(x => x.Id, agentUri.ToString()), cancellationToken);
+        => AssignmentDocs.DeleteOneAsync(
+            Builders<AgentAssignmentDocument>.Filter.And(
+                Builders<AgentAssignmentDocument>.Filter.Eq(x => x.Id, agentUri.ToString()),
+                Builders<AgentAssignmentDocument>.Filter.Eq(x => x.NodeId, nodeId)),
+            cancellationToken);
 
     public async Task<NodeAgentState> LoadNodeAgentStateAsync(CancellationToken cancellationToken)
     {
