@@ -3,6 +3,9 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
+    <!-- When bumping these to 6.36.0 or later, delete Directory.Build.rsp: the NU1902
+         workaround it carries exists only because Wolverine <= V6.35.0 pins the flagged
+         Microsoft.SourceLink.GitHub 8.0.0. Keep the external/wolverine submodule pin in sync. -->
     <PackageVersion Include="WolverineFx" Version="6.21.0" />
     <PackageVersion Include="WolverineFx.ComplianceTests" Version="6.21.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.10.0" />
