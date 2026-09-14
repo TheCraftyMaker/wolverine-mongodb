@@ -124,11 +124,49 @@ includes `IMongoDatabase`, `IMongoClient`, `IMongoCollection<T>`,
 ### Write durability
 
 The message store internally pins **`w:majority` (journaled) write concern** and
-**majority read concern** on all envelope collections. This is independent of
-how the consumer's `MongoClient` is configured: a `w:1` client does not weaken
-the durability of the inbox/outbox writes. The app-facing `IMongoDatabase`
-registered by `UseMongoDbPersistence` is **not** modified; domain write concerns
-remain the application's choice.
+**majority read concern** on all envelope collections, independent of how the
+consumer's `MongoClient` is configured.
+
+That handle-level pin covers the *sessionless* writes only. MongoDB **discards**
+collection- and database-level concerns for anything run inside a transaction:
+the individual writes are never acknowledged on their own, only
+`commitTransaction` is, and that command's concern comes from the transaction
+options — falling back to the consumer's `MongoClient` settings when none are
+supplied. So every transaction this library opens **restates** the pin
+(`MongoTransactionOptions.Durable`): the code-generated handler/outbox
+transaction, the batch inbox store, and the dead-letter move. A `w:1` client
+therefore weakens neither the sessionless inbox/outbox writes nor the
+transactional ones.
+
+One consequence is deliberate and worth knowing: the handler transaction is
+shared with the application's own enlisted writes — `MongoDbUnitOfWork`, a raw
+`IClientSessionHandle`, saga and entity documents — and a transaction has
+exactly one write concern, so those commit at `w:majority, j:true` too. A
+handler that enlists in the outbox transaction opts into its commit semantics.
+Writes the application makes **outside** that transaction, through the
+app-facing `IMongoDatabase` (which is still **not** modified), remain entirely
+the application's choice.
+
+Two read paths are honestly *not* covered: a read-only `[Entity]` load that
+resolves no session falls back to a session-less read on the unpinned app-facing
+handle, and `MongoDbSagaStoreDiagnostics` acquires its own unpinned handle. Both
+are reads, and neither is part of the durability guarantee.
+
+The transaction concern is a single non-configurable constant today — there is
+no per-host override (see `FOLLOWUPS.md`). It imposes no new availability floor:
+a replica set that cannot satisfy `w:majority` already cannot serve this store,
+because every non-transactional inbox/outbox/recovery write goes through the
+pinned handle.
+
+> **Upgrading:** the frame's generated code changed. Any consumer with
+> pre-generated handler code compiled into the application assembly must
+> **regenerate** before the handler transaction picks this up — that means
+> `TypeLoadMode.Static` *and* `TypeLoadMode.Auto`, which also attaches a
+> pre-generated handler type by name when it finds one and never compares it
+> against the current frame output. Until then the stale handler keeps the
+> option-less `StartTransaction()` and commits at the client default. The two
+> store-side transactions (inbox batch, dead-letter move) are not generated
+> code and are pinned regardless of codegen mode.
 
 ### Dead-letter retention
 
@@ -143,6 +181,36 @@ opts.Durability.DeadLetterQueueExpiration = TimeSpan.FromDays(10); // default
 When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op: documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
+
+### Dead letters and `MessageIdentity`
+
+With Wolverine's default `opts.Durability.MessageIdentity = MessageIdentity.IdOnly`
+nothing here needs your attention: one envelope id means one dead letter, and the
+document's `_id` is the envelope's own `Guid`.
+
+If your app opts into `MessageIdentity.IdAndDestination` — the modular-monolith
+case, where the same message id arrives on several listening endpoints and each
+delivery is processed separately — then each failed delivery gets **its own**
+dead-letter document, distinguished by `receivedAt`, the same way the inbox
+already keeps one document per destination. Because the `IDeadLetters` API
+addresses dead letters only by `Guid`:
+
+- `QueryAsync` and `SummarizeAllAsync` show every delivery, one entry per
+  destination.
+- `DeadLetterEnvelopeByIdAsync(id)` can only return one; it returns the first
+  ordered by `receivedAt`.
+- Discard, replay and `EditAndReplayAsync` by message id affect **every**
+  delivery of that id. This matches the RDBMS providers.
+
+Upgrading is transparent: dead letters written by earlier versions stay
+queryable, discardable, replayable and editable, and the next startup that runs
+storage migration backfills them with the new `envelopeId` field. The backfill is
+non-destructive — it only copies `_id` into `envelopeId` on documents that lack
+it — and it needs MongoDB 4.2 or later. To run it on demand, call
+`IMessageStoreAdmin.MigrateAsync()`. Do **not** reach for `RebuildAsync()`: that
+is a full reset, not a migration — it deletes every dead letter and every pending
+inbox/outbox envelope before recreating the indexes, so there is nothing left to
+backfill.
 
 ### The registered `IMongoDatabase`
 
@@ -259,6 +327,24 @@ wolverine_saga_<lowercased-type-name>
 For example, `OrderFulfillmentSaga` → `wolverine_saga_orderfulfillmentsaga`. Collections
 are created automatically on startup.
 
+The name comes from the **simple** type name, so it carries no namespace, no generic
+arguments and no case. Two saga types called `OrderSaga` in different namespaces, two
+differing only in case, or two closed constructions of one open generic
+(`Box<int>` and `Box<string>` are both `` box`1 ``) would therefore resolve to the same
+collection and silently mix their documents. Wolverine.MongoDB detects that while it
+compiles the handler graph and **refuses to start the host**, naming both types, the shared
+collection and the mapping call to add. Resolve it with an explicit mapping:
+
+```csharp
+opts.UseMongoDbPersistence("appdb", o =>
+    o.MapSagaCollection<Returns.OrderSaga>("wolverine_saga_returns_ordersaga"));
+```
+
+A saga mapping must keep the `wolverine_saga_` prefix — `IMessageStoreAdmin.ClearAllAsync`
+and `RebuildAsync` sweep saga collections by that prefix, so a saga stored outside it would
+silently stop being cleared. Mapping a type does not move documents that were already
+written elsewhere.
+
 ### Atomicity with the outbox
 
 The saga state write and any outbox entries produced in the handler commit inside the same
@@ -305,6 +391,27 @@ public static Update<OrderNote> Handle(EditOrderNoteCommand cmd, [Entity("NoteId
   `wolverine_saga_` sagas, because entity collections are application-owned data, not a
   Wolverine system collection. `IMessageStoreAdmin.ClearAllAsync`/`RebuildAsync` never
   touch them.
+
+  As for sagas, the name comes from the **simple** type name — no namespace, no generic
+  arguments, no case — so `Ordering.Note` and `Billing.Note`, `Metric` and `METRIC`, and
+  `Box<int>` and `Box<string>` all resolve to one collection. There is no type
+  discriminator and entity writes upsert without a version guard, so such types would
+  silently overwrite each other. Wolverine.MongoDB detects this while it compiles the
+  handler graph and **refuses to start the host**. Resolve it with an explicit mapping:
+
+  ```csharp
+  opts.UseMongoDbPersistence("appdb", o =>
+      o.MapEntityCollection<Billing.Note>("billing_note"));
+  ```
+
+  Because entity collections are deliberately un-prefixed, they also share the
+  application's own collection namespace. If your repositories already own the lowercased
+  type name — or already hold the same aggregate under a differently-cased or pluralised
+  name, e.g. `GetCollection<Order>("orders")` next to an `[Entity] Order` that resolves to
+  `order` — map the entity explicitly. **The startup check cannot see this case:** an
+  application's own `GetCollection<T>("...")` literal is not in the handler graph. Entity
+  mappings may not sit inside the `wolverine_saga_` prefix (an administrative rebuild would
+  drop that data) or take one of Wolverine's system collection names.
 - **Write semantics: upsert, no optimistic concurrency.** `Insert`/`Update`/`Store` all
   compile to the same upserting write (`ReplaceOneAsync` with `IsUpsert = true`); `Delete`
   removes by the entity's id. Plain entities do not carry a `Saga.Version`-style guard, so

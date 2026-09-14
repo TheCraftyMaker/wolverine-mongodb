@@ -51,10 +51,17 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.MessageType)),
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.ExceptionType)),
             new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.Replayable)),
+            // The Guid-facing dead-letter operations (DeadLetterEnvelopeByIdAsync, MessageIds
+            // queries, EditAndReplayAsync) key on envelopeId rather than _id, which follows the
+            // message-identity unit. Mirrors the incoming envelopeId index above; without it every
+            // dead-letter id lookup collection-scans.
+            new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.EnvelopeId)),
             new CreateIndexModel<DeadLetterMessage>(
                 Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.ExpirationTime),
                 new CreateIndexOptions { ExpireAfter = TimeSpan.Zero })
         });
+
+        await BackfillDeadLetterEnvelopeIdsAsync();
 
         // Node-event records: retain two weeks, then let TTL discard them.
         await RecordDocs.Indexes.CreateManyAsync(new[]
@@ -63,6 +70,36 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
                 Builders<NodeRecordDocument>.IndexKeys.Ascending(x => x.Timestamp),
                 new CreateIndexOptions { ExpireAfter = TimeSpan.FromDays(14) })
         });
+    }
+
+    /// <summary>
+    /// Copies <c>_id</c> into <c>envelopeId</c> for dead-letter documents written before the
+    /// identity split, whose <c>_id</c> WAS the envelope Guid.
+    /// <para>
+    /// Correctness does not depend on this — <c>ForEnvelopeIds</c> keeps un-backfilled documents
+    /// addressable — but it moves them onto the <c>envelopeId</c> index and drains the legacy
+    /// shape so the compatibility branch can eventually be dropped. Idempotent: once a document
+    /// carries a real <c>envelopeId</c> the filter no longer matches it. The aggregation-pipeline
+    /// update needs MongoDB 4.2 or later.
+    /// </para>
+    /// <para>
+    /// <see cref="MigrateAsync"/> — the startup storage migration, and the operator-facing entry
+    /// point — is the only path that actually migrates anything. <see cref="RebuildAsync"/> reaches
+    /// this method too, but only after <c>ClearAllAsync</c> has deleted every dead letter,
+    /// so it is a destructive full reset rather than a migration and there is nothing left to
+    /// backfill. Never recommend it as an upgrade step.
+    /// </para>
+    /// </summary>
+    private Task BackfillDeadLetterEnvelopeIdsAsync()
+    {
+        var b = Builders<DeadLetterMessage>.Filter;
+        var preSplit = b.Or(b.Exists(x => x.EnvelopeId, false), b.Eq(x => x.EnvelopeId, Guid.Empty));
+
+        var copyIdAcross = new PipelineUpdateDefinition<DeadLetterMessage>(
+            PipelineDefinition<DeadLetterMessage, DeadLetterMessage>.Create(
+                new BsonDocument("$set", new BsonDocument("envelopeId", "$_id"))));
+
+        return DeadLetterDocs.UpdateManyAsync(preSplit, copyIdAcross);
     }
 
     public async Task ClearAllAsync()
@@ -81,8 +118,14 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
         // above are fixed, but saga collections are created on demand per saga type, so they must
         // be enumerated. Dropping (rather than DeleteMany) also clears their indexes. Without this,
         // saga documents leak between compliance facts on the shared fixture database.
+        //
+        // The sweep stays PREFIX-coupled rather than resolver-coupled, and MongoCollectionNaming keeps
+        // that correct from the other end: MapSagaCollection requires a saga name to stay inside the
+        // prefix (so an explicitly mapped saga is still swept) and MapEntityCollection forbids an entity
+        // name inside it (so application data is never dropped here). Both sides use the one predicate
+        // below, so the two cannot drift apart.
         var sagaCollections = await (await _database.ListCollectionNamesAsync()).ToListAsync();
-        foreach (var name in sagaCollections.Where(n => n.StartsWith(MongoConstants.SagaCollectionPrefix)))
+        foreach (var name in sagaCollections.Where(MongoCollectionNaming.IsSagaCollectionName))
         {
             await _database.DropCollectionAsync(name);
         }

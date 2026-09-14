@@ -3,7 +3,85 @@
 Known limitations and deferred work, captured so nothing is silently dropped.
 Promote to GitHub issues before the first public release.
 
+## Deferred from the collection-naming collision guard
+
+- **Alias-style disambiguation for generic and nested types — deferred, opt-in at best.**
+  Wolverine's own RDBMS saga storage sanitizes both axes
+  (`external/wolverine/src/Persistence/Wolverine.RDBMS/Sagas/SagaTableDefinition.cs:33-49`, "stolen
+  from Marten"): a closed generic gets its arguments folded into the alias, and a nested type is
+  prefixed with its declaring type. Adopting that as the Wolverine.MongoDB default would give
+  `Box<int>` and `Box<string>` distinct collections with no explicit mapping — but it would also
+  **rename** the collection of every closed-generic and nested persisted type that works fine
+  today (a lone `[Entity] Box<int>` currently writes to `` box`1 ``). That is exactly the silent
+  migration the collision guard was designed to avoid, so it was rejected as the default. If it is
+  ever wanted it must ship as an explicit opt-in (`UseTypeAliasCollectionNames()`) or in a major
+  version with a migration note. Until then the startup guard plus `MapEntityCollection` /
+  `MapSagaCollection` is the remedy.
+
+- **App-owned collection overlap is out of the guard's reach.** `MongoDbCollectionNamePolicy` walks
+  the handler graph, so it sees only the types Wolverine persists. An application repository's own
+  `IMongoDatabase.GetCollection<T>("orders")` literal is not in the graph, and neither is the
+  likelier variant — an app that already stores `Order` in `"orders"` or `"Order"` and then adds an
+  `[Entity] Order` that resolves to the *separate* collection `order`, producing a split-brain copy
+  rather than an overwrite. Documented in README (the entity "Collection naming" bullet);
+  `MapEntityCollection` is the remedy. Revisit only if a startup "these Wolverine collections
+  already exist and were not created by us" probe is ever wanted — note it would have to be
+  advisory, since a legitimate redeploy also finds existing collections.
+
+- **Two clusters, one database name, one process.** `MongoCollectionNaming` keys its mapping and
+  claim registries by database *name*, not by cluster. Two `IMongoClient`s pointed at different
+  servers that happen to share a database name are therefore treated as one naming namespace in a
+  single process. Accepted: the alternative (keying on the cluster's server description) is
+  unstable across reconnects and replica-set topology changes, and the failure mode is a
+  false-positive throw with an actionable message, not corruption.
+
+- **Diagnostics short-name index is first-writer-wins.** `MongoDbSagaStoreDiagnostics` indexes saga
+  types by both `FullName` and short `Name` with `TryAdd`, so with two same-short-named sagas —
+  which the mapping API now makes legitimately possible — short-name `ReadSagaAsync` /
+  `ListSagaInstancesAsync` lookups answer for whichever type the handler graph enumerated first.
+  `FullName` lookups stay correct. Deliberately left alone: the lines are byte-identical to
+  `RavenDbSagaStoreDiagnostics`, i.e. upstream-parity behaviour on a read-only tooling surface.
+  Revisit if saga-explorer tooling reports it.
+
+- **`MongoDbPersistenceFrameProvider.IsCatchAll` is left at the interface default (`false`) even
+  though `CanPersist` returns unconditional `true`.** Noticed while wiring the policy's provider
+  filter, which mirrors core's own `TryFindPersistenceFrameProvider` /
+  `GetPersistenceProviders` selection exactly, so it introduces nothing new. Pre-existing and out
+  of scope for the collision guard, but worth a look: `IsCatchAll` exists so catch-all document
+  stores are consulted *after* selective ones (EF Core) in mixed-persistence apps, and this
+  provider is a catch-all.
+
 ## Deferred from the post-review hardening pass
+
+- **Per-host configurability of the transaction write concern — document/defer.** Every
+  transaction the library opens carries the single constant `MongoTransactionOptions.Durable`
+  (majority + journaled writes, majority reads); there is no per-host override. **Why deferred:**
+  `MongoDbPersistenceOptions` cannot reach the code-generated frame — upstream
+  `GenerationRulesExtensions.InsertFirstPersistenceStrategy<T>()` is `new()`-constrained and
+  `MongoDbPersistenceFrameProvider` declares no constructor, and the options instance created in
+  `UseMongoDbPersistence` is captured only in the `IMessageStore` factory closure, never
+  registered in DI. A frame-level override would inject a new dependency into *every* generated
+  handler class — the same high-blast-radius codegen change that produced the T4.3
+  "document, don't switch to keyed registration" decision. **Why it is safe to defer:** the pin
+  imposes no new availability floor. The store's database handle is already pinned, so every
+  non-transactional inbox/outbox/recovery write already requires majority; a cluster that cannot
+  satisfy it already cannot serve this store. **Extension point if revisited:** register
+  `MongoDbPersistenceOptions` as a singleton in `UseMongoDbPersistence` and resolve it in
+  `TransactionalFrame.FindVariables`, or set `ClientSessionOptions.DefaultTransactionOptions` at
+  `StartSessionAsync` (which would also cover any transaction an application starts on the same
+  session — deliberately not a guarantee this library makes silently today).
+
+- **Commit-result ambiguity on the code-generated transaction — deferred hardening.**
+  `CommitMongoTransactionFrame` (`TransactionalFrame.cs`) emits a bare `CommitTransactionAsync`
+  with no `UnknownTransactionCommitResult` retry and no `maxCommitTime`, unlike the two
+  store-side sites which get the driver's transparent retry through `WithTransactionAsync`. A
+  commit that succeeded server-side but errored client-side is caught by the frame's try/catch,
+  rolled back (a no-op once the driver has marked it committed) and rethrown, so Wolverine
+  retries or dead-letters a message whose saga/entity write and inbox `Handled` marker already
+  committed. Raising the transaction's write concern to `w:majority, j:true` makes that window
+  *more frequent*; it does not create it (it exists at `w:1` too). **Fix shape if taken:** retry
+  the commit on the `UnknownTransactionCommitResult` error label, or set an explicit
+  `maxCommitTime` with a documented policy. Needs its own test.
 
 - **`INodeAgentPersistence.ClearAllAsync` scope — resolved (T4.4, 2026-07-05: documented as
   intentionally narrow).** It clears only the node and assignment collections
@@ -136,7 +214,9 @@ Promote to GitHub issues before the first public release.
   automatically, and `EnsureIndexesAsync` only creates, never drops. **Decision: harmless,
   deferred.** The old indexes remain valid (just suboptimal for the new query patterns) and impose
   no correctness issue; a `RebuildAsync` (which recreates all indexes from scratch) is an
-  acceptable manual remedy if desired. This was originally framed as a "before 1.0" checkpoint —
+  acceptable manual remedy if desired — but note it is destructive: it calls `ClearAllAsync` first,
+  deleting every inbox, outbox, dead-letter and node document and dropping every saga collection.
+  This was originally framed as a "before 1.0" checkpoint —
   the package shipped [1.0.0] on 2026-07-06 with no migration step added, so this is now a
   standing post-1.0 decision, not a lapsed pre-1.0 TODO. **If revisited:** add an explicit
   `Admin.MigrateAsync()` step that drops the specific superseded index names before
@@ -157,6 +237,19 @@ Promote to GitHub issues before the first public release.
   bounded nuspec while leaving the version file on single plain versions), not in the shared
   `Directory.Packages.props`.
 
+- **Legacy dead-letter compatibility branch — remove in a future major (2026-09-08).**
+  `ForEnvelopeIds` (`MongoDbMessageStore.DeadLetters.cs`) carries an `$or` branch matching
+  documents written before the dead-letter identity split: `_id` in the requested ids **and**
+  `envelopeId` missing or `Guid.Empty`. `DeadLetterMessage.ResolvedEnvelopeId` has the matching
+  fallback. `EnsureIndexesAsync`'s backfill drains the legacy shape, but it only runs from
+  `MigrateAsync` (`RebuildAsync` also reaches `EnsureIndexesAsync`, but only after `ClearAllAsync`
+  has deleted every dead letter, so it migrates nothing), and the branch must stay while
+  `AutoCreate.None` deployments can still hold un-migrated documents. **If revisited:** drop the
+  branch, the `ResolvedEnvelopeId` fallback and the backfill together at the next major, along with
+  the regression test
+  `legacy_document_without_envelope_id_stays_addressable_by_guid`
+  (`src/Wolverine.MongoDB.Tests/dead_letter_identity.cs`), which is the fact that goes red if the
+  branch is removed early.
 - **Set-based scheduled claim — efficiency, deferred.** `PublishDueScheduledMessagesAsync`
   (`MongoDbMessageStore.Durability.cs`) claims one document per `FindOneAndUpdate` inside a
   `foreach`, so a full batch costs `RecoveryBatchSize` sequential round trips while the
@@ -270,6 +363,15 @@ Promote to GitHub issues before the first public release.
   that needs its own red-first test pass, not a drive-by. **If revisited:** replace `AgentUri`
   reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
   (test or app) reads the `agentUri` field directly first.
+
+- **Upstream: RavenDb and Cosmos ignore `nodeId` in `RemoveAssignmentAsync` too.** Both
+  (`Wolverine.RavenDb/Internals/RavenDbMessageStore.NodeAgents.cs`,
+  `Wolverine.CosmosDb/Internals/CosmosDbMessageStore.NodeAgents.cs`) delete the agent-assignment
+  document by agent URI alone, the same unscoped delete this provider fixed under `## [Unreleased]`
+  in `CHANGELOG.md`; all five RDBMS providers filter on `id` **and** `node_id`. Nothing about a
+  document store makes the predicate hard, so this reads as a plain omission rather than a
+  deliberate trade-off. Raise a one-line PR against each when this provider is contributed upstream
+  (same moment as the `ISagaStoreDiagnostics` internals note above).
 
 ## Untested-but-inspected paths (add deterministic coverage later)
 
