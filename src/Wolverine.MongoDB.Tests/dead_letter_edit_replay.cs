@@ -27,12 +27,12 @@ public class dead_letter_edit_replay
             MessageType = "poison",
             Replayable = false,
             Body = []
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         var newBody = "hello"u8.ToArray();
         await store.DeadLetters.EditAndReplayAsync(id, newBody, CancellationToken.None);
 
-        var doc = await dlqCollection.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, id)).SingleAsync();
+        var doc = await dlqCollection.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, id)).SingleAsync(TestContext.Current.CancellationToken);
         doc.Replayable.ShouldBeTrue();
 
         var envelope = await store.DeadLetters.DeadLetterEnvelopeByIdAsync(id);
@@ -56,7 +56,7 @@ public class dead_letter_edit_replay
 
         var dlqCollection = _fixture.Client.GetDatabase(AppFixture.DatabaseName)
             .GetCollection<DeadLetterMessage>(MongoConstants.DeadLetterCollection);
-        var doc = await dlqCollection.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelope.Id)).SingleAsync();
+        var doc = await dlqCollection.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         doc.Replayable.ShouldBeTrue();
 
         var replayed = await store.DeadLetters.DeadLetterEnvelopeByIdAsync(envelope.Id);

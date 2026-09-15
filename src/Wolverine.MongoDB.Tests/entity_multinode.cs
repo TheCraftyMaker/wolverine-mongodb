@@ -112,7 +112,7 @@ public class entity_multinode
         await _fixture.ClearAll();
         // Entity collections are application-owned, not Wolverine system collections, so ClearAll()
         // does not touch them — drop ours explicitly.
-        await Database.DropCollectionAsync(MongoConstants.EntityCollectionName(typeof(MultinodeNote)));
+        await Database.DropCollectionAsync(MongoConstants.EntityCollectionName(typeof(MultinodeNote)), TestContext.Current.CancellationToken);
         NoteIndexedHandler.Indexed.Clear();
 
         using var nodeA = await StartNode(1);
@@ -139,7 +139,7 @@ public class entity_multinode
         var allPresent = await PollAsync(
             async () => await CountNotesAsync() >= CreateCount, TimeSpan.FromSeconds(90));
         allPresent.ShouldBeTrue("every CreateNote must persist its entity (no drop) across both nodes");
-        await Task.Delay(2000);
+        await Task.Delay(2000, TestContext.Current.CancellationToken);
 
         // No drop + correct content + deterministic node attribution: each entity exists exactly once,
         // records its step, and carries the label of the node it was deterministically routed to.

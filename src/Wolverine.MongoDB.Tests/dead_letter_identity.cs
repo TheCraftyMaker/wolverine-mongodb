@@ -169,7 +169,7 @@ public class dead_letter_identity
 
         // The default mode's _id must stay byte-identical to every previous release: the raw
         // BSON Binary subtype-4 Guid, addressable without any translation.
-        var raw = await RawDeadLetters.Find(ById(envelope.Id)).SingleAsync();
+        var raw = await RawDeadLetters.Find(ById(envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         raw["envelopeId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard).ShouldBe(envelope.Id);
     }
 
@@ -183,7 +183,7 @@ public class dead_letter_identity
 
         await store.Admin.MigrateAsync();
 
-        var raw = await RawDeadLetters.Find(ById(legacyId)).SingleAsync();
+        var raw = await RawDeadLetters.Find(ById(legacyId)).SingleAsync(TestContext.Current.CancellationToken);
         raw["envelopeId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard).ShouldBe(legacyId);
     }
 
@@ -211,12 +211,12 @@ public class dead_letter_identity
             .TotalCount.ShouldBe(1);
 
         await store.DeadLetters.EditAndReplayAsync(legacyId, "updated"u8.ToArray(), CancellationToken.None);
-        var edited = await RawDeadLetters.Find(ById(legacyId)).SingleAsync();
+        var edited = await RawDeadLetters.Find(ById(legacyId)).SingleAsync(TestContext.Current.CancellationToken);
         edited["replayable"].AsBoolean.ShouldBeTrue();
 
         await store.DeadLetters.DiscardAsync(
             new DeadLetterEnvelopeQuery { MessageIds = [legacyId] }, CancellationToken.None);
-        (await RawDeadLetters.CountDocumentsAsync(new BsonDocument())).ShouldBe(0);
+        (await RawDeadLetters.CountDocumentsAsync(new BsonDocument(), cancellationToken: TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
     private IMongoCollection<BsonDocument> RawDeadLetters

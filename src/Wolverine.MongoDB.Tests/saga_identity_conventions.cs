@@ -108,7 +108,7 @@ public class saga_identity_conventions
 
         // Completion: proves the generated delete frame found the same document.
         await host.InvokeMessageAndWaitAsync(new ClosePermit(permitNumber));
-        (await RawDocuments(typeof(PermitSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty))
+        (await RawDocuments(typeof(PermitSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: TestContext.Current.CancellationToken))
             .ShouldBe(0);
     }
 
@@ -135,7 +135,7 @@ public class saga_identity_conventions
         updated["Version"].AsInt32.ShouldBe(2);
 
         await host.InvokeMessageAndWaitAsync(new DeliverParcel(id));
-        (await RawDocuments(typeof(ParcelSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty))
+        (await RawDocuments(typeof(ParcelSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: TestContext.Current.CancellationToken))
             .ShouldBe(0);
     }
 
@@ -162,7 +162,7 @@ public class saga_identity_conventions
         updated["Version"].AsInt32.ShouldBe(2);
 
         await host.InvokeMessageAndWaitAsync(new FinishShipment(id));
-        (await RawDocuments(typeof(ShipmentSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty))
+        (await RawDocuments(typeof(ShipmentSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: TestContext.Current.CancellationToken))
             .ShouldBe(0);
     }
 
@@ -189,7 +189,7 @@ public class saga_identity_conventions
         updated["Version"].AsInt32.ShouldBe(2);
 
         await host.InvokeMessageAndWaitAsync(new RetireMeter(id));
-        (await RawDocuments(typeof(MeterSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty))
+        (await RawDocuments(typeof(MeterSaga)).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: TestContext.Current.CancellationToken))
             .ShouldBe(0);
     }
 
@@ -223,7 +223,7 @@ public class saga_identity_conventions
                 opts.Discovery.DisableConventionalDiscovery().IncludeType(typeof(TollboothSaga));
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
 
         var graph = host.Services.GetRequiredService<HandlerGraph>();
         var ex = Should.Throw<Exception>(() => graph.HandlerFor(typeof(BeginToll)));
@@ -237,7 +237,7 @@ public class saga_identity_conventions
 
         // No document was written — the saga collection was never created.
         (await RawDocuments(typeof(TollboothSaga))
-            .CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty)).ShouldBe(0);
+            .CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
     // ── row 17: the runtime leg (TypeLoadMode.Static safety net) ──────────────────────
@@ -257,13 +257,13 @@ public class saga_identity_conventions
         var database = _fixture.Client.GetDatabase(AppFixture.DatabaseName);
         var id = Guid.NewGuid();
 
-        using var session = await _fixture.Client.StartSessionAsync();
+        using var session = await _fixture.Client.StartSessionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         await MongoSagaOperations.InsertSagaAsync(
             database, session, new TurbineSaga { TurbineId = id, Stage = "spinning" }, CancellationToken.None);
 
         var document = await RawDocuments(typeof(TurbineSaga))
-            .Find(Builders<BsonDocument>.Filter.Eq("_id", id)).SingleAsync();
+            .Find(Builders<BsonDocument>.Filter.Eq("_id", id)).SingleAsync(TestContext.Current.CancellationToken);
         document["_id"].AsGuid.ShouldBe(id);
         document.Contains("TurbineId").ShouldBeFalse();
 
@@ -275,7 +275,7 @@ public class saga_identity_conventions
         await MongoSagaOperations.DeleteSagaAsync<TurbineSaga, Guid>(
             database, session, id, CancellationToken.None);
         (await RawDocuments(typeof(TurbineSaga))
-            .CountDocumentsAsync(Builders<BsonDocument>.Filter.Eq("_id", id))).ShouldBe(0);
+            .CountDocumentsAsync(Builders<BsonDocument>.Filter.Eq("_id", id), cancellationToken: TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 }
 

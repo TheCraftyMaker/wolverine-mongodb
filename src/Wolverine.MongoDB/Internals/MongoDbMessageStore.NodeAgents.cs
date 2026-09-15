@@ -62,23 +62,41 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
         return w;
     }
 
-    // Mirror the canonical Postgres implementation: update the heartbeat in place, and if no
-    // node document matched, re-register the node via PersistAsync. This avoids resurrecting a
-    // phantom node from a blind SetOnInsert (which would have written a half-populated document
-    // with a stale/zero node number); re-registration always assigns a proper node number and a
-    // complete record. The Wolverine NodePersistenceCompliance suite enforces this upsert-style
-    // contract (a heartbeat for an unregistered node must create it).
-    public async Task MarkHealthCheckAsync(WolverineNode node, CancellationToken cancellationToken)
+    /// <summary>
+    /// Refreshes this node's heartbeat and reports whether its document was there to refresh.
+    /// <para>
+    /// A miss means a peer deleted this still-live node's document (stale-node ejection under churn,
+    /// GH-3604). The store must NOT insert anything here: <c>NodeAgentController</c> passes only a
+    /// skeleton node to the heartbeat and, on <c>false</c>, re-registers the node's REAL identity via
+    /// <see cref="ReregisterNodeAsync"/> and restores its agent assignments itself. Before WolverineFx
+    /// 6.38 this method re-inserted a skeleton with a fresh node number and no capabilities, which
+    /// dropped the live node out of capability-matched distribution.
+    /// </para>
+    /// </summary>
+    public async Task<bool> MarkHealthCheckAsync(WolverineNode node, CancellationToken cancellationToken)
     {
         var result = await NodeDocs.UpdateOneAsync(
             Builders<NodeDocument>.Filter.Eq(x => x.Id, node.NodeId),
             Builders<NodeDocument>.Update.Set(x => x.LastHealthCheck, DateTime.UtcNow),
             cancellationToken: cancellationToken);
 
-        if (result.MatchedCount == 0)
-        {
-            await PersistAsync(node, cancellationToken);
-        }
+        return result.MatchedCount > 0;
+    }
+
+    /// <summary>
+    /// Re-persists a node document that was deleted out from under a still-live node. Unlike
+    /// <see cref="PersistAsync"/> this never touches the node-number counter: the document is written
+    /// with the node's existing <see cref="WolverineNode.AssignedNodeNumber"/>, <see cref="WolverineNode.Capabilities"/>
+    /// and <see cref="WolverineNode.Version"/>, so the resurrected row matches the identity the process
+    /// is still using in memory (envelope ownership, capability-matched agent distribution). Upsert on
+    /// the node id; the caller restores agent assignments separately.
+    /// </summary>
+    public Task ReregisterNodeAsync(WolverineNode node, CancellationToken cancellationToken)
+    {
+        var doc = NodeDocument.FromWolverineNode(node);
+        doc.LastHealthCheck = DateTime.UtcNow;
+        return NodeDocs.ReplaceOneAsync(Builders<NodeDocument>.Filter.Eq(x => x.Id, node.NodeId), doc,
+            new ReplaceOptions { IsUpsert = true }, cancellationToken);
     }
 
     public Task OverwriteHealthCheckTimeAsync(Guid nodeId, DateTimeOffset lastHeartbeatTime)
@@ -105,6 +123,34 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
             Builders<AgentAssignmentDocument>.Filter.Eq(x => x.Id, agentUri.ToString()),
             new AgentAssignmentDocument { Id = agentUri.ToString(), NodeId = nodeId, AgentUri = agentUri.ToString() },
             new ReplaceOptions { IsUpsert = true }, cancellationToken);
+
+    /// <summary>
+    /// Claims <paramref name="agentUri"/> for <paramref name="nodeId"/> only if no node owns it yet
+    /// (GH-4407). Unlike <see cref="AddAssignmentAsync"/> this never takes over a document a peer wrote:
+    /// the insert relies on the <c>_id</c> (= agent URI) uniqueness, and on a duplicate key the existing
+    /// document decides — <c>true</c> when it already names this node, <c>false</c> when another node owns
+    /// it. A single insert plus one read; the insert is the atomic step.
+    /// </summary>
+    public async Task<bool> TryClaimAssignmentAsync(Guid nodeId, Uri agentUri, CancellationToken cancellationToken)
+    {
+        var id = agentUri.ToString();
+        try
+        {
+            await AssignmentDocs.InsertOneAsync(
+                new AgentAssignmentDocument { Id = id, NodeId = nodeId, AgentUri = id },
+                cancellationToken: cancellationToken);
+            return true;
+        }
+        catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            return await AssignmentDocs
+                .Find(Builders<AgentAssignmentDocument>.Filter.And(
+                    Builders<AgentAssignmentDocument>.Filter.Eq(x => x.Id, id),
+                    Builders<AgentAssignmentDocument>.Filter.Eq(x => x.NodeId, nodeId)))
+                .Limit(1)
+                .AnyAsync(cancellationToken);
+        }
+    }
 
     // Node-scoped by design, unlike the two writes above. The collection holds exactly one document
     // per agent URI (_id = the URI), so ownership transfers by overwriting that document's nodeId —

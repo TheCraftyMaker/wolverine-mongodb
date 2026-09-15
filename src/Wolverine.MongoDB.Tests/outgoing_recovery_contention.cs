@@ -27,7 +27,7 @@ public class outgoing_recovery_contention
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
                 opts.PublishAllMessages().ToLocalQueue("contended-out").UseDurableInbox();
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
 
         var runtime = host.GetRuntime();
         var store = _fixture.BuildMessageStore();
@@ -52,16 +52,16 @@ public class outgoing_recovery_contention
             .GetCollection<OutgoingMessage>(MongoConstants.OutgoingCollection);
         await outgoing.UpdateOneAsync(
             Builders<OutgoingMessage>.Filter.Eq(x => x.Id, stolen.Id),
-            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, competitorNode));
+            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, competitorNode), cancellationToken: TestContext.Current.CancellationToken);
 
         await store.RecoverOrphanedOutgoingAsync(runtime, CancellationToken.None);
 
         // The competitor's envelope must remain untouched; ours must be claimed.
-        var stolenDoc = await outgoing.Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Id, stolen.Id)).SingleAsync();
+        var stolenDoc = await outgoing.Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Id, stolen.Id)).SingleAsync(TestContext.Current.CancellationToken);
         stolenDoc.OwnerId.ShouldBe(competitorNode,
             "an envelope owned by a live competitor must never be re-claimed");
 
-        var mineDoc = await outgoing.Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Id, mine.Id)).SingleAsync();
+        var mineDoc = await outgoing.Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Id, mine.Id)).SingleAsync(TestContext.Current.CancellationToken);
         mineDoc.OwnerId.ShouldBe(runtime.DurabilitySettings.AssignedNodeNumber);
     }
 }

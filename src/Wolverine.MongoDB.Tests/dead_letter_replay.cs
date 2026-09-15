@@ -145,13 +145,13 @@ public class dead_letter_replay
             MessageType = "poison",
             Replayable = true,
             Body = []
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         await store.ReplayDeadLettersAsync(CancellationToken.None);
 
         // The body-less letter cannot be replayed: it stays in the DLQ but is unflagged
         // so the loop does not retry it on every tick.
-        var doc = await dlqCollection.Find(FilterDefinition<DeadLetterMessage>.Empty).SingleAsync();
+        var doc = await dlqCollection.Find(FilterDefinition<DeadLetterMessage>.Empty).SingleAsync(TestContext.Current.CancellationToken);
         doc.Replayable.ShouldBeFalse();
     }
 }

@@ -3,18 +3,19 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <!-- When bumping these to 6.36.0 or later, delete Directory.Build.rsp: the NU1902
-         workaround it carries exists only because Wolverine <= V6.35.0 pins the flagged
-         Microsoft.SourceLink.GitHub 8.0.0. Keep the external/wolverine submodule pin in sync. -->
-    <PackageVersion Include="WolverineFx" Version="6.21.0" />
-    <PackageVersion Include="WolverineFx.ComplianceTests" Version="6.21.0" />
+    <!-- Keep the external/wolverine submodule pin (tag V<version>) in sync with these two. -->
+    <PackageVersion Include="WolverineFx" Version="6.38.0" />
+    <PackageVersion Include="WolverineFx.ComplianceTests" Version="6.38.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.11.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
     <PackageVersion Include="Testcontainers.MongoDb" Version="4.15.0" />
-    <PackageVersion Include="xunit" Version="2.9.3" />
-    <PackageVersion Include="xunit.assemblyfixture" Version="2.2.0" />
+    <!-- xUnit v3: WolverineFx.ComplianceTests is built on xunit.v3.extensibility.core 3.2.2, so the
+         test project must be an xunit.v3 test host (OutputType Exe). Pinned to the same 3.2.2. -->
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
-    <PackageVersion Include="GitHubActionsTestLogger" Version="3.0.5" />
+    <!-- 2.4.1 is the VSTest-only logger; 3.x targets Microsoft.Testing.Platform 2.0, which conflicts with
+         the MTP 1.9.1 that xunit.v3 3.2.2 carries (CS1705). Same pin as upstream Wolverine. -->
+    <PackageVersion Include="GitHubActionsTestLogger" Version="2.4.1" />
   </ItemGroup>
 </Project>

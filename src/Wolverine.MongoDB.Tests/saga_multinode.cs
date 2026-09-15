@@ -150,7 +150,7 @@ public class saga_multinode
         var advanced = await PollSagaAsync(id,
             s => s is not null && s.AppliedSteps.Count >= AdvanceCount, TimeSpan.FromSeconds(90));
         advanced.ShouldNotBeNull();
-        await Task.Delay(2000);
+        await Task.Delay(2000, TestContext.Current.CancellationToken);
 
         var saga = await LoadSagaAsync(id);
         saga.ShouldNotBeNull();

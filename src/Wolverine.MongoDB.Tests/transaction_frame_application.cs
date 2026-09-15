@@ -60,11 +60,11 @@ public class transaction_frame_application
         var bus = host.Services.GetRequiredService<IMessageBus>();
         var id = Guid.NewGuid();
 
-        await bus.InvokeAsync(new CollectionOnlyCommand(id));
+        await bus.InvokeAsync(new CollectionOnlyCommand(id), TestContext.Current.CancellationToken);
 
         var collection = _fixture.Client.GetDatabase(AppFixture.DatabaseName)
             .GetCollection<FrameTestDoc>("frame_test_docs");
-        var doc = await collection.Find(x => x.Id == id.ToString()).FirstOrDefaultAsync();
+        var doc = await collection.Find(x => x.Id == id.ToString()).FirstOrDefaultAsync(TestContext.Current.CancellationToken);
         doc.ShouldNotBeNull();
     }
 
@@ -73,6 +73,6 @@ public class transaction_frame_application
     {
         using var host = await BuildHost();
         var bus = host.Services.GetRequiredService<IMessageBus>();
-        await bus.InvokeAsync(new SessionOnlyCommand(Guid.NewGuid()));
+        await bus.InvokeAsync(new SessionOnlyCommand(Guid.NewGuid()), TestContext.Current.CancellationToken);
     }
 }

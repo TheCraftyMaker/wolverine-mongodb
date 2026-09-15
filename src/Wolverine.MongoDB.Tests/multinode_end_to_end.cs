@@ -77,9 +77,9 @@ public class multinode_end_to_end
         var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
         while (DateTimeOffset.UtcNow < deadline && MultinodeCounterHandler.Handled.Count == 0)
         {
-            await Task.Delay(250);
+            await Task.Delay(250, TestContext.Current.CancellationToken);
         }
-        await Task.Delay(2000); // window for an (incorrect) duplicate execution to appear
+        await Task.Delay(2000, TestContext.Current.CancellationToken); // window for an (incorrect) duplicate execution to appear
 
         MultinodeCounterHandler.Handled.Count(x => x == id).ShouldBe(1,
             "the Scheduled->Incoming CAS claim must make cross-node execution exactly-once");
@@ -105,7 +105,7 @@ public class multinode_end_to_end
         {
             var all = await store.Admin.AllIncomingAsync();
             if (all.Single(x => x.Id == stranded.Id).OwnerId != 999) break;
-            await Task.Delay(250);
+            await Task.Delay(250, TestContext.Current.CancellationToken);
         }
 
         (await store.Admin.AllIncomingAsync()).Single(x => x.Id == stranded.Id)

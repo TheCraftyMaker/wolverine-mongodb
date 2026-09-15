@@ -23,7 +23,7 @@ public class end_to_end
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
                 opts.LocalQueue("things").UseDurableInbox();
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
 
         // Explicit timeout: the default TrackActivity window is short, and when both TFMs run
         // concurrently (two MongoDB containers contending) the durable-inbox round-trip can exceed it.

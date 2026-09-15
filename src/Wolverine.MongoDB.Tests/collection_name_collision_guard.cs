@@ -128,10 +128,10 @@ namespace Wolverine.MongoDB.Tests
         public async Task a_non_conflicting_entity_still_uses_its_default_collection_name()
         {
             const string database = "collision_guard_defaults";
-            await _fixture.Client.DropDatabaseAsync(database);
+            await _fixture.Client.DropDatabaseAsync(database, TestContext.Current.CancellationToken);
 
             using var host = BuildHost(database, configure: null, typeof(CollisionDefaults.PlacardHandler));
-            await host.StartAsync();
+            await host.StartAsync(TestContext.Current.CancellationToken);
 
             var id = "PLACARD-" + Guid.NewGuid().ToString("N");
             await host.InvokeMessageAndWaitAsync(new CollisionDefaults.RecordPlacard(id, "yellow"));
@@ -139,13 +139,13 @@ namespace Wolverine.MongoDB.Tests
             MongoConstants.EntityCollectionName(typeof(CollisionDefaults.Placard)).ShouldBe("placard");
 
             var documents = await RawDocuments(database, "placard")
-                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync();
+                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(TestContext.Current.CancellationToken);
 
             documents.Count.ShouldBe(1);
             documents[0]["_id"].AsString.ShouldBe(id);
             documents[0]["Colour"].AsString.ShouldBe("yellow");
 
-            await host.StopAsync();
+            await host.StopAsync(TestContext.Current.CancellationToken);
         }
 
         // ── the escape hatch: an explicit mapping ─────────────────────────────────────
@@ -162,14 +162,14 @@ namespace Wolverine.MongoDB.Tests
         {
             const string database = "collision_guard_entity_mapping";
             const string mapped = "mapped_beta_waybill";
-            await _fixture.Client.DropDatabaseAsync(database);
+            await _fixture.Client.DropDatabaseAsync(database, TestContext.Current.CancellationToken);
 
             using var host = BuildHost(database,
                 o => o.MapEntityCollection<MappedBeta.Waybill>(mapped),
                 typeof(MappedAlpha.AlphaWaybillHandler),
                 typeof(MappedBeta.BetaWaybillHandler));
 
-            await host.StartAsync();
+            await host.StartAsync(TestContext.Current.CancellationToken);
 
             var alphaId = "WB-A-" + Guid.NewGuid().ToString("N");
             var betaId = "WB-B-" + Guid.NewGuid().ToString("N");
@@ -180,20 +180,20 @@ namespace Wolverine.MongoDB.Tests
             MongoConstants.EntityCollectionName(typeof(MappedAlpha.Waybill)).ShouldBe("waybill");
 
             var alphaDocuments = await RawDocuments(database, "waybill")
-                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync();
+                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(TestContext.Current.CancellationToken);
             alphaDocuments.Count.ShouldBe(1);
             alphaDocuments[0]["_id"].AsString.ShouldBe(alphaId);
             alphaDocuments[0]["Origin"].AsString.ShouldBe("Antwerp");
             alphaDocuments[0].Contains("Weight").ShouldBeFalse();
 
             var betaDocuments = await RawDocuments(database, mapped)
-                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync();
+                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(TestContext.Current.CancellationToken);
             betaDocuments.Count.ShouldBe(1);
             betaDocuments[0]["_id"].AsString.ShouldBe(betaId);
             betaDocuments[0]["Weight"].ToDecimal().ShouldBe(12.5m);
             betaDocuments[0].Contains("Origin").ShouldBeFalse();
 
-            await host.StopAsync();
+            await host.StopAsync(TestContext.Current.CancellationToken);
         }
 
         /// <summary>
@@ -208,14 +208,14 @@ namespace Wolverine.MongoDB.Tests
         {
             const string database = "collision_guard_saga_mapping";
             const string mapped = MongoConstants.SagaCollectionPrefix + "mapped_beta_consignment";
-            await _fixture.Client.DropDatabaseAsync(database);
+            await _fixture.Client.DropDatabaseAsync(database, TestContext.Current.CancellationToken);
 
             using var host = BuildHost(database,
                 o => o.MapSagaCollection<MappedBeta.Consignment>(mapped),
                 typeof(MappedAlpha.Consignment),
                 typeof(MappedBeta.Consignment));
 
-            await host.StartAsync();
+            await host.StartAsync(TestContext.Current.CancellationToken);
 
             var alphaId = "CN-A-" + Guid.NewGuid().ToString("N");
             var betaId = "CN-B-" + Guid.NewGuid().ToString("N");
@@ -227,13 +227,13 @@ namespace Wolverine.MongoDB.Tests
                 .ShouldBe("wolverine_saga_consignment");
 
             var alphaDocuments = await RawDocuments(database, "wolverine_saga_consignment")
-                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync();
+                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(TestContext.Current.CancellationToken);
             alphaDocuments.Count.ShouldBe(1);
             alphaDocuments[0]["_id"].AsString.ShouldBe(alphaId);
             alphaDocuments[0]["Status"].AsString.ShouldBe("alpha");
 
             var betaDocuments = await RawDocuments(database, mapped)
-                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync();
+                .Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(TestContext.Current.CancellationToken);
             betaDocuments.Count.ShouldBe(1);
             betaDocuments[0]["_id"].AsString.ShouldBe(betaId);
             betaDocuments[0]["Notes"].AsString.ShouldBe("beta");
@@ -249,13 +249,13 @@ namespace Wolverine.MongoDB.Tests
             state.State.GetProperty("Notes").GetString().ShouldBe("beta");
             state.State.GetProperty("Id").GetString().ShouldBe(betaId);
 
-            await host.StopAsync();
+            await host.StopAsync(TestContext.Current.CancellationToken);
 
             // Admin's prefix sweep must still reach the mapped collection.
             await new MongoDbMessageStore(_fixture.Client, database, new WolverineOptions()).Admin.RebuildAsync();
 
-            var remaining = await (await _fixture.Client.GetDatabase(database).ListCollectionNamesAsync())
-                .ToListAsync();
+            var remaining = await (await _fixture.Client.GetDatabase(database).ListCollectionNamesAsync(cancellationToken: TestContext.Current.CancellationToken))
+                .ToListAsync(TestContext.Current.CancellationToken);
             remaining.ShouldNotContain(mapped);
             remaining.ShouldNotContain("wolverine_saga_consignment");
         }

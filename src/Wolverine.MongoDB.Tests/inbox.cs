@@ -120,7 +120,7 @@ public class inbox
 
         var doc = await store.Incoming
             .Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, original.Id))
-            .SingleAsync();
+            .SingleAsync(TestContext.Current.CancellationToken);
 
         doc.Status.ShouldBe(EnvelopeStatus.Handled);
         doc.KeepUntil.ShouldNotBeNull(

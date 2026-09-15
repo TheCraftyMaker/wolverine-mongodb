@@ -27,7 +27,7 @@ public class dead_letter_expiration
         await store.Inbox.StoreIncomingAsync(envelope);
         await store.Inbox.MoveToDeadLetterStorageAsync(envelope, new InvalidOperationException("boom"));
 
-        var doc = await Dlq.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelope.Id)).SingleAsync();
+        var doc = await Dlq.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         doc.ExpirationTime.ShouldBeNull(
             "with expiration disabled (Wolverine's default) the TTL index must never remove a dead letter");
     }
@@ -47,7 +47,7 @@ public class dead_letter_expiration
         await store.Inbox.StoreIncomingAsync(envelope);
         await store.Inbox.MoveToDeadLetterStorageAsync(envelope, new InvalidOperationException("boom"));
 
-        var doc = await Dlq.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelope.Id)).SingleAsync();
+        var doc = await Dlq.Find(Builders<DeadLetterMessage>.Filter.Eq(x => x.Id, envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         doc.ExpirationTime.ShouldNotBeNull();
         doc.ExpirationTime!.Value.ShouldBeGreaterThan(DateTimeOffset.UtcNow.AddDays(2));
     }

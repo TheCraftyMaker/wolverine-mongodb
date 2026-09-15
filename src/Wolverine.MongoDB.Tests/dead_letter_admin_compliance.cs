@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using MongoDB.Driver;
 using Wolverine.ComplianceTests;
 using Wolverine.Transports.Tcp;
-using Xunit.Abstractions;
 
 namespace Wolverine.MongoDB.Tests;
 

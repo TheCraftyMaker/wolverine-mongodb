@@ -318,13 +318,13 @@ public class entity_identity_conventions
     public async Task operations_align_identity_without_any_frame_ever_being_constructed()
     {
         var id = Guid.NewGuid();
-        using var session = await _fixture.Client.StartSessionAsync();
+        using var session = await _fixture.Client.StartSessionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         await MongoEntityOperations.UpsertAsync(
             Database, session, new Pallet { PalletId = id, Contents = "bricks" }, CancellationToken.None);
 
         var document = await RawDocuments(typeof(Pallet))
-            .Find(Builders<BsonDocument>.Filter.Eq("_id", id)).SingleAsync();
+            .Find(Builders<BsonDocument>.Filter.Eq("_id", id)).SingleAsync(TestContext.Current.CancellationToken);
         document["_id"].AsGuid.ShouldBe(id);
         document.Contains("PalletId").ShouldBeFalse();
 
@@ -335,7 +335,7 @@ public class entity_identity_conventions
 
         await MongoEntityOperations.DeleteAsync(Database, session, loaded, CancellationToken.None);
         (await RawDocuments(typeof(Pallet))
-            .CountDocumentsAsync(Builders<BsonDocument>.Filter.Eq("_id", id))).ShouldBe(0);
+            .CountDocumentsAsync(Builders<BsonDocument>.Filter.Eq("_id", id), cancellationToken: TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 }
 

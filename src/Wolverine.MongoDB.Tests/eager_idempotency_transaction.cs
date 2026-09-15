@@ -39,7 +39,7 @@ public class eager_idempotency_transaction
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
                 opts.LocalQueue("things").UseDurableInbox();
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
 
         var runtime = host.Services.GetRequiredService<IWolverineRuntime>();
         runtime.Storage.ShouldBeOfType<MongoDbMessageStore>();
@@ -64,7 +64,7 @@ public class eager_idempotency_transaction
         };
 
         var client = _fixture.Client;
-        using var session = await client.StartSessionAsync();
+        using var session = await client.StartSessionAsync(cancellationToken: TestContext.Current.CancellationToken);
         session.StartTransaction();
 
         var tx = new MongoDbEnvelopeTransaction(session, context);
@@ -81,7 +81,7 @@ public class eager_idempotency_transaction
         // If the duplicate aborted the transaction, this throws an aborted-transaction MongoCommandException.
         await tx.PersistOutgoingAsync(outgoing);
 
-        await session.CommitTransactionAsync();
+        await session.CommitTransactionAsync(TestContext.Current.CancellationToken);
 
         // Verify the outgoing write actually committed.
         var outgoingCollection = client
@@ -89,7 +89,7 @@ public class eager_idempotency_transaction
             .GetCollection<OutgoingMessage>(MongoConstants.OutgoingCollection);
         var stored = await outgoingCollection
             .Find(Builders<OutgoingMessage>.Filter.Eq(x => x.Id, outgoing.Id))
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
         stored.ShouldNotBeNull();
 
         // Regression guard: the handled marker persisted by the eager idempotency check
@@ -99,7 +99,7 @@ public class eager_idempotency_transaction
             .GetCollection<IncomingMessage>(MongoConstants.IncomingCollection);
         var marker = await incomingCollection
             .Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, incoming.Id))
-            .SingleAsync();
+            .SingleAsync(TestContext.Current.CancellationToken);
         marker.KeepUntil.ShouldNotBeNull();
     }
 }

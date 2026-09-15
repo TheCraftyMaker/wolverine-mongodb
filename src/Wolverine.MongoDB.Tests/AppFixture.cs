@@ -32,13 +32,13 @@ public class AppFixture : IAsyncLifetime
         }
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await EnsureContainerStarted();
         Client = new MongoClient(_connectionString);
     }
 
-    public Task DisposeAsync() => Task.CompletedTask; // container shared; process exit cleans up
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask; // container shared; process exit cleans up
 
     public string ConnectionString => _connectionString;
 
