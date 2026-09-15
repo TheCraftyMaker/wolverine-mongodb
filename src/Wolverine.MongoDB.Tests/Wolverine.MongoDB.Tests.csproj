@@ -23,9 +23,12 @@
        so the PackageReference path works for a checkout without the submodule. -->
   <ItemGroup Condition="'$(UseWolverineSource)' == 'true'">
     <ProjectReference Include="$(WolverineSourcePath)\src\Testing\Wolverine.ComplianceTests\Wolverine.ComplianceTests.csproj" />
+    <!-- Wolverine.Http: the AfterCommit HTTP-endpoint coverage runs the MongoDB transaction frame inside an HttpChain. -->
+    <ProjectReference Include="$(WolverineSourcePath)\src\Http\Wolverine.Http\Wolverine.Http.csproj" />
   </ItemGroup>
   <ItemGroup Condition="'$(UseWolverineSource)' != 'true'">
     <PackageReference Include="WolverineFx.ComplianceTests" />
+    <PackageReference Include="WolverineFx.Http" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
