@@ -12,6 +12,15 @@ namespace Wolverine.MongoDB.Internals;
 
 public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
 {
+    // CanPersist below claims every entity type, which makes this a catch-all document store in
+    // Wolverine's sense (Marten, RavenDb, Cosmos, Polecat all return true here). Core sorts catch-alls
+    // AFTER selective providers such as EF Core (GenerationRulesExtensions.OrderedPersistenceProviders,
+    // a stable OrderBy on this flag) so that in a mixed-persistence app an entity mapped by a selective
+    // provider resolves to it regardless of which integration happened to register last. Every
+    // integration registers with InsertFirstPersistenceStrategy, so without this flag whichever
+    // UseXxx call came last sat at index 0 and won every entity — the GH-3443 failure mode.
+    public bool IsCatchAll => true;
+
     public void ApplyTransactionSupport(IChain chain, IServiceContainer container)
     {
         if (!chain.Middleware.OfType<TransactionalFrame>().Any())
