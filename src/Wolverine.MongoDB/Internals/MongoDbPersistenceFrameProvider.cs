@@ -201,6 +201,39 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
         return call;
     }
 
+    // Whole-collection reads for [All] / [FirstOrDefault] / [Queryable] (WolverineFx 6.38). Each type
+    // has its own collection here (unlike Cosmos's single shared container, which is why Cosmos only
+    // supports [Queryable]), so every one of the three is a plain read of that collection. The frames
+    // resolve the outbox session non-forcingly, exactly like LoadEntityFrame: transaction-consistent
+    // when the handler is transactional, session-less otherwise. A Saga subclass reads its
+    // wolverine_saga_* collection; reads carry no version guard, so that is safe.
+    public bool TryBuildAllFrame(Type entityType, IServiceContainer container,
+        [NotNullWhen(true)] out Frame? frame, [NotNullWhen(true)] out Variable? result)
+    {
+        var all = new MongoAllFrame(entityType);
+        frame = all;
+        result = all.Result;
+        return true;
+    }
+
+    public bool TryBuildFirstOrDefaultFrame(Type entityType, IServiceContainer container,
+        [NotNullWhen(true)] out Frame? frame, [NotNullWhen(true)] out Variable? result)
+    {
+        var first = new MongoFirstOrDefaultFrame(entityType);
+        frame = first;
+        result = first.Result;
+        return true;
+    }
+
+    public bool TryBuildQueryableFrame(Type elementType, IServiceContainer container,
+        [NotNullWhen(true)] out Frame? frame, [NotNullWhen(true)] out Variable? result)
+    {
+        var queryable = new MongoQueryableFrame(elementType);
+        frame = queryable;
+        result = queryable.Result;
+        return true;
+    }
+
     public Frame[] DetermineFrameToNullOutMaybeSoftDeleted(Variable entity)
     {
         return [];
