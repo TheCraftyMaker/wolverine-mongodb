@@ -8,6 +8,8 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-16
+
 ### Changed
 - **Upgraded `WolverineFx` from 6.21.0 to 6.38.0** (latest stable; `external/wolverine` submodule at
   `V6.38.0`, commit `3d0e0433`). The only compile-breaking upstream change was
@@ -558,7 +560,8 @@ Post-review hardening pass (adversarial review of the 0.1.0 implementation):
   `WolverineFx.ComplianceTests` is published to NuGet.
 - Replica set is required; standalone MongoDB is not supported.
 
-[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.7...v1.0.0
 [0.1.0-beta.7]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.6...v0.1.0-beta.7
