@@ -104,7 +104,8 @@ internal static class MongoCollectionNaming
         MongoConstants.AgentRestrictionCollection,
         MongoConstants.CounterCollection,
         MongoConstants.LockCollection,
-        MongoConstants.DeduplicationCollection
+        MongoConstants.DeduplicationCollection,
+        MongoConstants.RecurringMessagesCollection
     };
 
     /// <summary>
