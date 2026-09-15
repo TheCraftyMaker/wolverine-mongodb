@@ -695,10 +695,13 @@ required beyond Docker Desktop.
   WolverineFx 6.38 (post-commit frames are plain method calls). Publish through
   `IMessageBus` from the hook instead; the message rides the end-of-pipeline flush,
   not the committed transaction's outbox.
-- **One upstream compliance fact cannot pass here:**
+- **One upstream compliance fact is replaced, not inherited:**
   `RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules`
-  casts the store to Weasel's `IDatabase` to enumerate tables. Its behaviour is covered by
-  `recurring_messages.the_opt_in_is_schema_neutral`.
+  casts the store to Weasel's `IDatabase` to enumerate tables. The test class hosts the suite by
+  composition (a private `Bridge` subclass plus owned forwarding facts, the pattern RavenDb's
+  `RavenDbFaultPublishingTests` uses upstream) and owns a same-named fact asserting the same
+  contract against MongoDB collections; a guard fact fails if upstream adds a fact that is not
+  forwarded. No other non-RDBMS provider implements recurring messages, so upstream has no hook yet.
 - **High-throughput contention.** The `findAndModify` lock approach serializes
   access per document; under very high concurrency this can bottleneck. Tune
   write concern and indexes accordingly.

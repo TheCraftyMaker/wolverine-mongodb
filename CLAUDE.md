@@ -44,7 +44,7 @@ src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine sourc
   leadership_election_compliance.cs ← Upstream LeadershipElectionCompliance ([Category=multinode], un-gated)
   exclusive_listener_recovery_compliance.cs ← Upstream ExclusiveListenerRecoveryCompliance (GH-3590)
   core_type_name_collision_compliance.cs ← Upstream CoreTypeNameCollisionCompliance (GH-3907)
-  recurring_message_compliance.cs   ← Upstream RecurringMessageCompliance (one Weasel-bound fact cannot pass, see FOLLOWUPS)
+  recurring_message_compliance.cs   ← Upstream RecurringMessageCompliance (hosted via a RavenDb-style Bridge; the one Weasel-bound fact is replaced, see FOLLOWUPS)
   node_reregistration.cs            ← 6.38 INodeAgentPersistence contract: heartbeat miss, reregister, atomic claim
   retry_retention.cs                ← Rescheduled retries drop keepUntil and restore the payload
   persistence_provider_precedence.cs← IsCatchAll: selective providers win in mixed persistence, both orders

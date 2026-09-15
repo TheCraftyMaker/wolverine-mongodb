@@ -276,9 +276,14 @@ Promote to GitHub issues before the first public release.
   "claim on my session" seam; then delete the reflection.
 - **`RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules` cannot
   pass for a non-Weasel store** (casts to `Weasel.Core.Migrations.IDatabase`,
-  `RecurringMessageCompliance.cs:528`). Covered locally by `recurring_messages.the_opt_in_is_schema_neutral`;
-  the inherited fact stays red until upstream makes the object enumeration a `protected virtual`
-  hook. Reported, not skipped.
+  `RecurringMessageCompliance.cs:528`; upstream only the four RDBMS providers inherit the suite).
+  `recurring_message_compliance` hosts the suite by composition — a private `Bridge` subclass and
+  one owned forwarding fact per upstream fact, the pattern `RavenDbFaultPublishingTests` uses for
+  `DurableFaultPublishingCompliance` — and owns a same-named MongoDB-native fact asserting the same
+  contract against collections; `every_upstream_fact_is_owned_here` fails if upstream adds a fact
+  that is not forwarded. **Upstream ask:** make the schema-object enumeration a `protected virtual`
+  hook; then inherit the suite directly again and delete the bridge. Store-level counterpart:
+  `recurring_messages.the_opt_in_is_schema_neutral`.
 - **A value returned from an `AfterCommit` method is not a cascading message** (post-commit frames
   are plain `MethodCall`s; `HandlerChain` cascades only handler return values) although
   `WolverineAfterCommitAttribute`'s doc comment implies otherwise. Documented in README; worth an
