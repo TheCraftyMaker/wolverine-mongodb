@@ -82,6 +82,18 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     public IMessageOutbox Outbox => this;
     public INodeAgentPersistence Nodes => this;
     public IListenerStore Listeners { get; protected set; } = NullListenerStore.Instance;
+    private IDeduplicationStore? _deduplication;
+
+    /// <summary>
+    /// Logical message deduplication (GH-4180). Opt-in: with
+    /// <c>DurabilitySettings.EnableMessageDeduplication</c> off this is <see cref="NullDeduplicationStore.Instance"/>
+    /// and no collection or index is provisioned, so an upgrade is a no-op for hosts that have not asked
+    /// for the feature. See <see cref="MongoDbDeduplicationStore"/> for the claim semantics.
+    /// </summary>
+    public IDeduplicationStore Deduplication => _deduplication ??= _options.Durability.EnableMessageDeduplication
+        ? new MongoDbDeduplicationStore(_database)
+        : NullDeduplicationStore.Instance;
+
     public IMessageStoreAdmin Admin => this;
     public IDeadLetters DeadLetters => this;
     public IScheduledMessages ScheduledMessages => this;
