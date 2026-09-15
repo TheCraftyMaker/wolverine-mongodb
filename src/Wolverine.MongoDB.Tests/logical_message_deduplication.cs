@@ -9,6 +9,7 @@ using MongoDB.Bson;
 using MongoDB.Driver;
 using Shouldly;
 using Wolverine.Attributes;
+using Wolverine.ComplianceTests;
 using Wolverine.ErrorHandling;
 using Wolverine.MongoDB.Internals;
 using Wolverine.Persistence;
@@ -299,6 +300,28 @@ public class logical_message_deduplication
         var nonTransactional = generatedSourceFor(host, typeof(FailingDeduplicatedMessage));
         nonTransactional.ShouldNotContain("RollbackAsync(");
         nonTransactional.ShouldContain(".ReleaseAsync(");
+    }
+
+    [Fact]
+    public async Task the_deduplication_id_round_trips_through_the_inbox_and_the_outbox()
+    {
+        // The store persists the envelope through EnvelopeSerializer, which serializes DeduplicationId
+        // since 6.3x (GH-3793: dropping it on the durable outbox round-trip broke SQS FIFO). Pinned here
+        // because the shared compliance suite never sets the property.
+        await _fixture.ClearAll();
+        var store = _fixture.BuildMessageStore();
+
+        var incoming = ObjectMother.Envelope();
+        incoming.Destination = new Uri("local://dedup-roundtrip");
+        incoming.DeduplicationId = "order-42|2026-09-15";
+        await store.Inbox.StoreIncomingAsync(incoming);
+        (await store.Admin.AllIncomingAsync()).Single().DeduplicationId.ShouldBe("order-42|2026-09-15");
+
+        var outgoing = ObjectMother.Envelope();
+        outgoing.Destination = new Uri("local://dedup-roundtrip-out");
+        outgoing.DeduplicationId = "order-42|2026-09-15|out";
+        await store.Outbox.StoreOutgoingAsync(outgoing, MongoConstants.AnyNode);
+        (await store.Outbox.LoadOutgoingAsync(outgoing.Destination)).Single().DeduplicationId.ShouldBe("order-42|2026-09-15|out");
     }
 
     [Fact]
