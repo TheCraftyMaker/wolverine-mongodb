@@ -43,14 +43,6 @@ Promote to GitHub issues before the first public release.
   `RavenDbSagaStoreDiagnostics`, i.e. upstream-parity behaviour on a read-only tooling surface.
   Revisit if saga-explorer tooling reports it.
 
-- **`MongoDbPersistenceFrameProvider.IsCatchAll` is left at the interface default (`false`) even
-  though `CanPersist` returns unconditional `true`.** Noticed while wiring the policy's provider
-  filter, which mirrors core's own `TryFindPersistenceFrameProvider` /
-  `GetPersistenceProviders` selection exactly, so it introduces nothing new. Pre-existing and out
-  of scope for the collision guard, but worth a look: `IsCatchAll` exists so catch-all document
-  stores are consulted *after* selective ones (EF Core) in mixed-persistence apps, and this
-  provider is a catch-all.
-
 ## Deferred from the post-review hardening pass
 
 - **Per-host configurability of the transaction write concern — document/defer.** Every
@@ -272,40 +264,41 @@ Promote to GitHub issues before the first public release.
   (`Status = Scheduled`, `OwnerId = AnyNode`) rather than drop it, which is a second write path
   with its own failure modes and tests. The residual is shared by every sibling provider.
 
-## Remove at the Wolverine upgrade
+## Deferred from the WolverineFx 6.38 upgrade (2026-09-15)
 
-- **`Directory.Build.rsp` NU1902 workaround — delete when the submodule pin reaches V6.36.0
-  (added 2026-09-14).** The repo-root response file passes `-p:WarningsNotAsErrors=NU1902` and
-  `-restoreProperty:WarningsNotAsErrors=NU1902` (both needed — `-p` alone does not reach the
-  implicit restore that `dotnet build`/`dotnet test` run as a separate MSBuild submission) so that
-  CVE-2026-62900 / GHSA-23fw-v26w-5fgq no longer fails every restore. **This is a stopgap, agreed
-  as such:** the Wolverine upgrade that actually removes the flagged package is planned separately.
-  - **Cause.** `external/wolverine` (pinned V6.21.0) sets `TreatWarningsAsErrors=true` and pins
-    `Microsoft.SourceLink.GitHub 8.0.0` → `Microsoft.Build.Tasks.Git 8.0.0`, which has **no patched
-    release on its line** (advisory reports `first_patched_version: none` for 8.0.0; only 10.0.111+
-    / 10.0.303+ are clear).
-  - **Why it cannot be fixed from this repo.** The version lives in the submodule's own
-    `Directory.Packages.props`. A `NuGetAuditSuppress` item or `NoWarn` in this repo's
-    `Directory.Build.props` never reaches those projects (the submodule's own
-    `Directory.Build.props` stops MSBuild's upward traversal), and `AdditionalProperties` on the
-    `ProjectReference` into the submodule is not honoured by the restore graph walk — both were
-    tried and measured. A global property is the only lever that crosses the boundary.
-  - **The package is redundant anyway.** The .NET 8+ SDK bundles SourceLink
-    (`Microsoft.NET.Sdk.SourceLink.props` imports `Microsoft.Build.Tasks.Git` from inside the SDK,
-    with no PackageReference) — which is why this repo's own projects audit clean while setting
-    `PublishRepositoryUrl`/`EmbedUntrackedSources` without referencing SourceLink.
-  - **Action at the upgrade.** Upstream bumped to `Microsoft.SourceLink.GitHub 10.0.401`; bisected,
-    V6.35.0 and earlier still carry 8.0.0, **V6.36.0** and later carry the fix. When the submodule
-    pin and `WolverineFx`/`WolverineFx.ComplianceTests` move to ≥ 6.36.0, delete
-    `Directory.Build.rsp`, the note in `CLAUDE.md`, the reminder comment in
-    `Directory.Packages.props`, and this entry — then confirm a clean restore with no NU1902.
-  - **Risk accepted meanwhile.** A genuinely vulnerable *moderate* package anywhere in the graph
-    would warn rather than fail. NU1901/NU1903/NU1904 and the Trivy scan in `security.yml` are
-    unaffected. Exposure from the flagged package itself is nil: `developmentDependency`, no `lib/`
-    assets, `PrivateAssets="All"`, never shipped.
-  - **Related:** `WolverineFx.ComplianceTests` is now published on NuGet (6.24.1+, latest 6.37.0),
-    so the upgrade can also retire the submodule entirely — see the `UseWolverineSource` TODO in
-    `Directory.Build.props`.
+- **Logical deduplication has no upstream hook to claim inside the handler transaction.** Core
+  weaves `ClaimDeduplicationIdFrame` in at `Middleware[0]` before the persistence provider opens a
+  session, `IMessageDeduplicator` never sees one, and the release frame is omitted for transactional
+  chains on the assumption the claim is transactional (it is not, on any shipped provider).
+  Wolverine.MongoDB compensates with a rollback release in `TransactionalFrame`, reading the
+  `internal` claim frame's id variable reflectively (`DeduplicationClaim.FindIn`, loud failure on a
+  shape change). **Upstream ask:** a public hook on the claim frame, or a provider-side
+  "claim on my session" seam; then delete the reflection.
+- **`RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules` cannot
+  pass for a non-Weasel store** (casts to `Weasel.Core.Migrations.IDatabase`,
+  `RecurringMessageCompliance.cs:528`; upstream only the four RDBMS providers inherit the suite).
+  `recurring_message_compliance` hosts the suite by composition — a private `Bridge` subclass and
+  one owned forwarding fact per upstream fact, the pattern `RavenDbFaultPublishingTests` uses for
+  `DurableFaultPublishingCompliance` — and owns a same-named MongoDB-native fact asserting the same
+  contract against collections; `every_upstream_fact_is_owned_here` fails if upstream adds a fact
+  that is not forwarded. **Upstream ask:** make the schema-object enumeration a `protected virtual`
+  hook; then inherit the suite directly again and delete the bridge. Store-level counterpart:
+  `recurring_messages.the_opt_in_is_schema_neutral`.
+- **A value returned from an `AfterCommit` method is not a cascading message** (post-commit frames
+  are plain `MethodCall`s; `HandlerChain` cascades only handler return values) although
+  `WolverineAfterCommitAttribute`'s doc comment implies otherwise. Documented in README; worth an
+  upstream doc fix or feature.
+- **`ClearAllWolverineStorageCompliance` is not adopted:** it requires a database-backed queue
+  transport, which MongoDB does not have.
+- **Node-record TTL index is fixed at 14 days** while the agent now prunes on
+  `NodeEventRecordExpirationTime` (default 5 days). Aligning the index would need a `collMod`
+  migration on existing deployments; the TTL is a backstop only, so it was left alone.
+- **`WolverineFx.ComplianceTests` is on NuGet (6.38.0):** the submodule could be retired in favour
+  of the package reference (`UseWolverineSource=false` path already works). Kept for now because
+  the project-reference build is what CI runs and gives one consistent `Wolverine.dll`.
+- **Upstream inconsistency observed:** the RDBMS dead-letter admin ANDs `MessageIds` with the other
+  filters, RavenDb/Cosmos (and this provider) give `MessageIds` precedence as the query's doc comment
+  says. Not changed here.
 
 ## Deferred from saga persistence (S6–S14)
 
