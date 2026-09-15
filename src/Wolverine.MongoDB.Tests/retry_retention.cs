@@ -49,7 +49,7 @@ public class retry_retention
         await store.Inbox.StoreIncomingAsync(envelope);
         await store.Inbox.MarkIncomingEnvelopeAsHandledAsync(envelope);
 
-        var handled = await rawIncoming().Find(byEnvelopeId(envelope.Id)).SingleAsync();
+        var handled = await rawIncoming().Find(byEnvelopeId(envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         handled.Contains("keepUntil").ShouldBeTrue("precondition: the handled marker carries keepUntil");
 
         var scheduledTime = DateTimeOffset.UtcNow.AddMinutes(5);
@@ -57,7 +57,7 @@ public class retry_retention
         envelope.Attempts = 2;
         await store.Inbox.RescheduleExistingEnvelopeForRetryAsync(envelope);
 
-        var doc = await rawIncoming().Find(byEnvelopeId(envelope.Id)).SingleAsync();
+        var doc = await rawIncoming().Find(byEnvelopeId(envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         doc.Contains("keepUntil").ShouldBeFalse(
             "a Scheduled retry must not carry keepUntil, or the TTL index deletes it before it runs");
         doc["status"].AsString.ShouldBe(nameof(EnvelopeStatus.Scheduled));
@@ -89,7 +89,7 @@ public class retry_retention
         await store.Inbox.StoreIncomingAsync(marker);
 
         var stored = await store.Incoming
-            .Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, original.Id)).SingleAsync();
+            .Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, original.Id)).SingleAsync(TestContext.Current.CancellationToken);
         stored.Body.ShouldBeEmpty("precondition: the eager marker is body-less");
         stored.KeepUntil.ShouldNotBeNull();
 
@@ -99,7 +99,7 @@ public class retry_retention
         original.Attempts = 1;
         await store.Inbox.RescheduleExistingEnvelopeForRetryAsync(original);
 
-        var docs = await rawIncoming().Find(byEnvelopeId(original.Id)).ToListAsync();
+        var docs = await rawIncoming().Find(byEnvelopeId(original.Id)).ToListAsync(TestContext.Current.CancellationToken);
         docs.Count.ShouldBe(1, "the marker is reused, not duplicated");
         docs[0].Contains("keepUntil").ShouldBeFalse();
         docs[0]["body"].AsByteArray.Length.ShouldBeGreaterThan(0, "the retry must carry the message payload");
@@ -156,7 +156,7 @@ public class retry_retention
         envelope.ScheduledTime = DateTimeOffset.UtcNow.AddMinutes(3);
         await store.Inbox.ScheduleExecutionAsync(envelope);
 
-        var doc = await rawIncoming().Find(byEnvelopeId(envelope.Id)).SingleAsync();
+        var doc = await rawIncoming().Find(byEnvelopeId(envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         doc.Contains("keepUntil").ShouldBeFalse();
         doc["status"].AsString.ShouldBe(nameof(EnvelopeStatus.Scheduled));
         doc["ownerId"].AsInt32.ShouldBe(MongoConstants.AnyNode);
@@ -170,12 +170,12 @@ public class retry_retention
 
         var envelope = incomingEnvelope("local://retry-retention/identity");
         await store.Inbox.StoreIncomingAsync(envelope);
-        var before = (await store.Incoming.Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, envelope.Id)).SingleAsync()).Id;
+        var before = (await store.Incoming.Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, envelope.Id)).SingleAsync(TestContext.Current.CancellationToken)).Id;
 
         envelope.ScheduledTime = DateTimeOffset.UtcNow.AddMinutes(1);
         await store.Inbox.RescheduleExistingEnvelopeForRetryAsync(envelope);
 
-        var after = await store.Incoming.Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, envelope.Id)).SingleAsync();
+        var after = await store.Incoming.Find(Builders<IncomingMessage>.Filter.Eq(x => x.EnvelopeId, envelope.Id)).SingleAsync(TestContext.Current.CancellationToken);
         after.Id.ShouldBe(before, "the document _id is the inbox identity and must not change");
         after.EnvelopeId.ShouldBe(envelope.Id);
         after.ReceivedAt.ShouldBe(envelope.Destination!.ToString());

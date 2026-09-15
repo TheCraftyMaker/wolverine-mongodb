@@ -145,13 +145,13 @@ public class persistence_provider_precedence
         var mongoId = Guid.NewGuid().ToString();
         await _fixture.Client.GetDatabase(AppFixture.DatabaseName)
             .GetCollection<MongoEntity>(MongoConstants.EntityCollectionName(typeof(MongoEntity)))
-            .InsertOneAsync(new MongoEntity { Id = mongoId, Name = "from-mongo" });
+            .InsertOneAsync(new MongoEntity { Id = mongoId, Name = "from-mongo" }, cancellationToken: TestContext.Current.CancellationToken);
 
         var selectiveId = Guid.NewGuid().ToString();
         var bus = host.Services.GetRequiredService<IMessageBus>();
 
-        await bus.InvokeAsync(new LoadSelective(selectiveId));
-        await bus.InvokeAsync(new LoadMongo(mongoId));
+        await bus.InvokeAsync(new LoadSelective(selectiveId), TestContext.Current.CancellationToken);
+        await bus.InvokeAsync(new LoadMongo(mongoId), TestContext.Current.CancellationToken);
 
         // The selective provider's own load frame must have supplied the entity. When MongoDB wins the
         // selection instead, its [Entity] load reads the (empty) `selectiveentity` collection and the
@@ -168,12 +168,12 @@ public class persistence_provider_precedence
         using var host = await buildMixedHostAsync(mongoFirst);
 
         var sagaId = Guid.NewGuid();
-        await host.Services.GetRequiredService<IMessageBus>().InvokeAsync(new StartPrecedence(sagaId));
+        await host.Services.GetRequiredService<IMessageBus>().InvokeAsync(new StartPrecedence(sagaId), TestContext.Current.CancellationToken);
 
         var saga = await _fixture.Client.GetDatabase(AppFixture.DatabaseName)
             .GetCollection<PrecedenceSaga>(MongoConstants.SagaCollectionName(typeof(PrecedenceSaga)))
             .Find(x => x.Id == sagaId)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
 
         saga.ShouldNotBeNull();
         saga.Started.ShouldBeTrue();
