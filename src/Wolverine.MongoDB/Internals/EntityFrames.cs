@@ -5,6 +5,7 @@ using JasperFx.Core.Reflection;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using Wolverine.Persistence;
+using Wolverine.Persistence.Sagas;
 
 namespace Wolverine.MongoDB.Internals;
 
@@ -147,6 +148,66 @@ public static class MongoEntityOperations
                 => UpsertAsync(database, session, action.Entity, cancellationToken),
             _ => Task.CompletedTask, // Nothing
         };
+    }
+
+    /// <summary>
+    /// The collection a whole-collection read (<c>[All]</c>, <c>[FirstOrDefault]</c>, <c>[Queryable]</c>)
+    /// runs against. Plain entities go through <see cref="entityCollection{T}"/>; a <see cref="Saga"/>
+    /// subclass lives in its <c>wolverine_saga_*</c> collection, so reading it as an entity would scan an
+    /// un-prefixed collection that is never written. Reads carry no version guard, so pointing them at
+    /// the saga collection is safe — it is the write paths that reject sagas (LD4).
+    /// </summary>
+    private static IMongoCollection<T> readCollection<T>(IMongoDatabase database) where T : class
+    {
+        if (!typeof(T).CanBeCastTo<Saga>())
+        {
+            return entityCollection<T>(database);
+        }
+
+        MongoIdentityMapping.EnsureIdMember(typeof(T));
+        return database.GetCollection<T>(MongoCollectionNaming.ClaimSaga(database, typeof(T)));
+    }
+
+    /// <summary>
+    /// <c>[All]</c>: every document of the type. Runs on <paramref name="session"/> when the handler has
+    /// an open outbox transaction (so it sees that transaction's own writes), session-less otherwise.
+    /// Never null — an empty collection yields an empty list.
+    /// </summary>
+    public static async Task<IReadOnlyList<T>> LoadAllAsync<T>(
+        IMongoDatabase database, IClientSessionHandle? session, CancellationToken cancellationToken)
+        where T : class
+    {
+        var collection = readCollection<T>(database);
+        var find = session is null
+            ? collection.Find(Builders<T>.Filter.Empty)
+            : collection.Find(session, Builders<T>.Filter.Empty);
+        return await find.ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>[FirstOrDefault]</c>: the first document of the type in natural order, or <c>null</c>. Same
+    /// session rule as <see cref="LoadAllAsync{T}"/>.
+    /// </summary>
+    public static Task<T?> FirstOrDefaultAsync<T>(
+        IMongoDatabase database, IClientSessionHandle? session, CancellationToken cancellationToken)
+        where T : class
+    {
+        var collection = readCollection<T>(database);
+        var find = session is null
+            ? collection.Find(Builders<T>.Filter.Empty)
+            : collection.Find(session, Builders<T>.Filter.Empty);
+        return find.Limit(1).FirstOrDefaultAsync(cancellationToken)!;
+    }
+
+    /// <summary>
+    /// <c>[Queryable]</c>: the driver's LINQ provider over the type's collection, transaction-consistent
+    /// when a session is open. This is the raw, unfiltered escape hatch core documents as "sharp".
+    /// </summary>
+    public static IQueryable<T> Queryable<T>(IMongoDatabase database, IClientSessionHandle? session)
+        where T : class
+    {
+        var collection = readCollection<T>(database);
+        return session is null ? collection.AsQueryable() : collection.AsQueryable(session);
     }
 
     /// <summary>
