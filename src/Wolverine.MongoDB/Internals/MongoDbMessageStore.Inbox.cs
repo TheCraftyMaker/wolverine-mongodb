@@ -1,5 +1,6 @@
 using MongoDB.Driver;
 using Wolverine.Persistence.Durability;
+using Wolverine.Runtime.Serialization;
 
 namespace Wolverine.MongoDB.Internals;
 
@@ -178,13 +179,47 @@ public partial class MongoDbMessageStore : IMessageInbox
     /// to <see cref="EnvelopeStatus.Scheduled"/>, released to <see cref="MongoConstants.AnyNode"/>,
     /// with the envelope's current execution time and attempt count. One definition so the two call
     /// sites can't drift.
+    /// <para>
+    /// The document being moved may be a <em>handled</em> one: <c>MarkIncomingEnvelopeAsHandledAsync</c>
+    /// stamps <c>keepUntil</c> and the eager idempotency check stores a body-less handled marker
+    /// (<see cref="Envelope.ForPersistedHandled"/>) before the handler even runs. Two things must
+    /// therefore happen on the way back to Scheduled, or the retry is lost:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><c>keepUntil</c> is <b>unset</b>. The TTL index on that element
+    /// (<c>MongoDbMessageStore.Admin.cs</c>) is not status-gated the way the RDBMS expiry sweep is
+    /// (<c>where status = 'Handled' and keep_until &lt;= now</c>): a Scheduled document that still
+    /// carries the handled marker's <c>keepUntil</c> is deleted by the TTL monitor before it is due.
+    /// The TTL index ignores documents without the field, so unsetting it — not nulling it — is the
+    /// proof of ineligibility.</description></item>
+    /// <item><description>The payload is <b>restored</b> from the live envelope when it has one:
+    /// <c>body</c>, <c>messageType</c> and <c>receivedAt</c> are rewritten so a body-less marker becomes
+    /// a runnable retry instead of an envelope with empty <c>Data</c>. An envelope without a payload
+    /// leaves the stored body alone.</description></item>
+    /// </list>
+    /// The filter is the inbox identity (<c>_id</c>) and <c>envelopeId</c> is never touched, so the
+    /// document keeps its identity; ownership is released to <see cref="MongoConstants.AnyNode"/> so
+    /// the scheduled poller on any node can claim it.
     /// </summary>
     private static UpdateDefinition<IncomingMessage> SchedulingUpdate(Envelope envelope)
-        => Builders<IncomingMessage>.Update
+    {
+        var update = Builders<IncomingMessage>.Update
             .Set(x => x.ExecutionTime, envelope.ScheduledTime?.ToUniversalTime())
             .Set(x => x.Status, EnvelopeStatus.Scheduled)
             .Set(x => x.Attempts, envelope.Attempts)
-            .Set(x => x.OwnerId, MongoConstants.AnyNode);
+            .Set(x => x.OwnerId, MongoConstants.AnyNode)
+            .Unset(x => x.KeepUntil);
+
+        if (envelope.Data is { Length: > 0 })
+        {
+            update = update
+                .Set(x => x.Body, EnvelopeSerializer.Serialize(envelope))
+                .Set(x => x.MessageType, envelope.MessageType!)
+                .Set(x => x.ReceivedAt, envelope.Destination?.ToString());
+        }
+
+        return update;
+    }
 
     public Task ScheduleExecutionAsync(Envelope envelope)
     {
