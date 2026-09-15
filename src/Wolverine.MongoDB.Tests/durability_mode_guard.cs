@@ -24,7 +24,7 @@ public class durability_mode_guard
                 opts.UseTcpForControlEndpoint();
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
         host.ShouldNotBeNull();
     }
 
@@ -38,7 +38,7 @@ public class durability_mode_guard
                 opts.Durability.Mode = DurabilityMode.Solo;
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
         host.ShouldNotBeNull();
     }
 }

@@ -142,7 +142,7 @@ public class entity_atomicity
 
         // Give any (incorrectly) relayed cascade a chance to be processed, so a genuine atomicity
         // violation surfaces instead of being masked by timing.
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         // The entity document was never inserted.
         (await LoadNoteAsync(id)).ShouldBeNull();
@@ -177,8 +177,8 @@ public class entity_atomicity
 
         // Snapshot a losing writer at version 1 BEFORE the touch advances the saga (deterministic OCC
         // proof, exactly as saga_atomicity does — no async-receiver race).
-        using var session = await _fixture.Client.StartSessionAsync();
-        var loser = await MongoSagaOperations.LoadSagaAsync<CoexistenceSaga, Guid>(Database, session, sagaId, default);
+        using var session = await _fixture.Client.StartSessionAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var loser = await MongoSagaOperations.LoadSagaAsync<CoexistenceSaga, Guid>(Database, session, sagaId, TestContext.Current.CancellationToken);
         loser.ShouldNotBeNull();
         loser.Version.ShouldBe(1);
 
@@ -237,7 +237,7 @@ public class entity_atomicity
             .ReplaceOneAsync(
                 Builders<NoteEntity>.Filter.Eq("_id", existingId),
                 new NoteEntity { Id = existingId, Text = "exists" },
-                new ReplaceOptions { IsUpsert = true });
+                new ReplaceOptions { IsUpsert = true }, cancellationToken: TestContext.Current.CancellationToken);
 
         await host.InvokeMessageAndWaitAsync(new TouchNote(existingId));
         RequiredEntityHandler.Executed.TryGetValue(existingId, out var count).ShouldBeTrue();

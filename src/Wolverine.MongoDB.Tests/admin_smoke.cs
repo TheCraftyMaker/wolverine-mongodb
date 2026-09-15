@@ -29,7 +29,7 @@ public class admin_smoke
         var store = _fixture.BuildMessageStore();
         await store.Admin.RebuildAsync();
 
-        var incomingIndexes = await (await store.Incoming.Indexes.ListAsync()).ToListAsync();
+        var incomingIndexes = await (await store.Incoming.Indexes.ListAsync(TestContext.Current.CancellationToken)).ToListAsync(TestContext.Current.CancellationToken);
         var names = incomingIndexes.Select(i => i["name"].AsString).ToList();
 
         // Print actual names so any naming mismatch is immediately visible in CI output.

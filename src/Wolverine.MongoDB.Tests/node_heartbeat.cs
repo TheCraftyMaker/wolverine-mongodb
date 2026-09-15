@@ -37,7 +37,7 @@ public class node_heartbeat
     public node_heartbeat(AppFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task heartbeat_for_unknown_node_reregisters_with_a_real_node_number()
+    public async Task heartbeat_for_unknown_node_reports_absence_and_creates_nothing()
     {
         var store = _fixture.BuildMessageStore();
         await store.Admin.RebuildAsync();
@@ -50,15 +50,13 @@ public class node_heartbeat
             Description = "newcomer"
         };
 
-        // Per the Wolverine contract (mirrored from Postgres), a heartbeat for an unregistered
-        // node re-registers it via PersistAsync rather than leaving a half-populated phantom.
-        await store.Nodes.MarkHealthCheckAsync(unknown, CancellationToken.None);
+        // WolverineFx 6.38 contract: a heartbeat for a node without a document reports the miss and
+        // MUST NOT insert one. NodeAgentController re-registers the node's real identity itself
+        // (ReregisterNodeAsync) so no skeleton with a fresh number and empty capabilities is written.
+        (await store.Nodes.MarkHealthCheckAsync(unknown, CancellationToken.None)).ShouldBeFalse();
 
-        var reloaded = await store.Nodes.LoadNodeAsync(unknown.NodeId, CancellationToken.None);
-        reloaded.ShouldNotBeNull();
-        reloaded.Description.ShouldBe("newcomer");
-        // PersistAsync assigns a real node number (>= 1); no stale/zero phantom slot.
-        reloaded.AssignedNodeNumber.ShouldBeGreaterThan(0);
+        (await store.Nodes.LoadNodeAsync(unknown.NodeId, CancellationToken.None)).ShouldBeNull();
+        (await store.Nodes.LoadAllNodesAsync(CancellationToken.None)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -77,8 +75,8 @@ public class node_heartbeat
 
         await store.Nodes.PersistAsync(node, CancellationToken.None);
 
-        // Should not throw and should leave exactly the one registered node.
-        await store.Nodes.MarkHealthCheckAsync(node, CancellationToken.None);
+        // Reports the hit and leaves exactly the one registered node.
+        (await store.Nodes.MarkHealthCheckAsync(node, CancellationToken.None)).ShouldBeTrue();
 
         var reloaded = await store.Nodes.LoadNodeAsync(node.NodeId, CancellationToken.None);
         reloaded.ShouldNotBeNull();
