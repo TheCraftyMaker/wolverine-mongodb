@@ -1,3 +1,4 @@
+using MongoDB.Bson;
 using MongoDB.Driver;
 using Wolverine.Persistence.Durability;
 using Wolverine.Runtime;
@@ -275,7 +276,7 @@ public partial class MongoDbMessageStore
     /// while it is still claiming, its work is released after two ticks — the same semantic the RDBMS
     /// single-statement release has; closing it requires an ownership fencing token.
     /// </summary>
-    internal async Task ReleaseDeadNodeOwnershipAsync(CancellationToken token)
+    internal async Task<int> ReleaseDeadNodeOwnershipAsync(CancellationToken token)
     {
         // OWNED FIRST, LIVE SECOND. This order is load-bearing (see fact 3 above): it makes the
         // liveness check strictly later than the evidence of ownership, so a node that is merely
@@ -307,18 +308,62 @@ public partial class MongoDbMessageStore
 
         if (confirmed.Count == 0)
         {
-            return;
+            return 0;
         }
 
-        await Incoming.UpdateManyAsync(
-            Builders<IncomingMessage>.Filter.In(x => x.OwnerId, confirmed),
-            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode),
-            cancellationToken: token);
+        var released = await releaseOwnedByAsync(MongoConstants.IncomingCollection, confirmed, token);
+        released += await releaseOwnedByAsync(MongoConstants.OutgoingCollection, confirmed, token);
+        return released;
+    }
 
-        await Outgoing.UpdateManyAsync(
-            Builders<OutgoingMessage>.Filter.In(x => x.OwnerId, confirmed),
-            Builders<OutgoingMessage>.Update.Set(x => x.OwnerId, MongoConstants.AnyNode),
-            cancellationToken: token);
+    /// <summary>
+    /// Releases (sets <c>ownerId</c> to <see cref="MongoConstants.AnyNode"/>) the documents owned by the
+    /// confirmed-dead node numbers, in bounded batches (GH-3971 parity): at most
+    /// <see cref="DurabilitySettings.OrphanedMessageReleaseBatchSize"/> documents per write and at most
+    /// <see cref="DurabilitySettings.OrphanedMessageReleaseMaxBatchesPerCycle"/> writes per sweep, so a
+    /// node that died holding a large backlog cannot turn one sweep into an unbounded update. Whatever a
+    /// sweep leaves behind stays owned by the (still confirmed-dead) number and is released by the next
+    /// sweep — the two-tick soundness argument above is unaffected, because nothing here changes which
+    /// numbers count as dead. A non-positive batch size falls back to one unbounded update, as the RDBMS
+    /// providers without a bounded statement do. Returns how many documents this sweep released.
+    /// </summary>
+    private async Task<int> releaseOwnedByAsync(string collectionName, IReadOnlyCollection<int> deadOwners,
+        CancellationToken token)
+    {
+        var collection = _database.GetCollection<BsonDocument>(collectionName);
+        var ownedByDead = Builders<BsonDocument>.Filter.In("ownerId", deadOwners);
+        var release = Builders<BsonDocument>.Update.Set("ownerId", MongoConstants.AnyNode);
+        var batchSize = _options.Durability.OrphanedMessageReleaseBatchSize;
+
+        if (batchSize <= 0)
+        {
+            var all = await collection.UpdateManyAsync(ownedByDead, release, cancellationToken: token);
+            return (int)all.ModifiedCount;
+        }
+
+        var total = 0;
+        for (var batch = 0; batch < Math.Max(1, _options.Durability.OrphanedMessageReleaseMaxBatchesPerCycle); batch++)
+        {
+            if (token.IsCancellationRequested) break;
+
+            var ids = await collection.Find(ownedByDead)
+                .Project(Builders<BsonDocument>.Projection.Include("_id"))
+                .Limit(batchSize)
+                .ToListAsync(token);
+            if (ids.Count == 0) break;
+
+            var result = await collection.UpdateManyAsync(
+                Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.In("_id", ids.Select(x => x["_id"])),
+                    ownedByDead),
+                release, cancellationToken: token);
+            total += (int)result.ModifiedCount;
+
+            // A short batch means everything currently orphaned in this collection has been released.
+            if (ids.Count < batchSize) break;
+        }
+
+        return total;
     }
 
     /// <summary>
