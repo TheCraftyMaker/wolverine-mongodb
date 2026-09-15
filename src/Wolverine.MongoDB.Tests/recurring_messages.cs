@@ -13,7 +13,7 @@ namespace Wolverine.MongoDB.Tests;
 /// <summary>
 /// MongoDB-specific facts for <see cref="MongoDbRecurringMessageStore"/>, beside the inherited upstream
 /// suite: the opt-in is schema neutral at the store level (no host; the host-level counterpart is the
-/// hidden compliance fact in <c>recurring_message_compliance</c>),
+/// replaced compliance fact in <c>recurring_message_compliance</c>),
 /// the store is Main-only, a publish never un-pauses, pause/resume/trigger work from a SECOND store
 /// instance (a different node than the scheduler), pause eagerly cancels exactly the tracked Scheduled
 /// inbox documents, and the paused-trigger refusal is atomic.
