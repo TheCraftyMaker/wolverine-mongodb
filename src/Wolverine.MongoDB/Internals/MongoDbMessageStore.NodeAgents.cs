@@ -220,6 +220,29 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
         return docs.Select(d => d.ToRecord()).ToList();
     }
 
+    /// <summary>
+    /// One node-record housekeeping pass, honouring the same two settings the RDBMS
+    /// <c>DurabilityAgent.PruneNodeRecords</c> honours (GH-3701): first the age bound
+    /// (<see cref="DurabilitySettings.NodeEventRecordExpirationTime"/>, records older than that are
+    /// deleted), then the row cap (<see cref="DurabilitySettings.NodeRecordRetention"/>, kept only when
+    /// positive — an age bound alone puts no ceiling on a chatty cluster's record volume). Returns how many
+    /// records the age bound removed. The pre-existing 14-day TTL index on <c>timestamp</c> stays as a
+    /// server-side backstop; this pass is what applies the configured values.
+    /// </summary>
+    internal async Task<long> PruneNodeRecordsAsync(DurabilitySettings settings, CancellationToken token)
+    {
+        var cutoff = DateTimeOffset.UtcNow.Subtract(settings.NodeEventRecordExpirationTime);
+        var expired = await RecordDocs.DeleteManyAsync(
+            Builders<NodeRecordDocument>.Filter.Lt(x => x.Timestamp, cutoff), token);
+
+        if (settings.NodeRecordRetention > 0)
+        {
+            await DeleteOldNodeRecordsAsync(settings.NodeRecordRetention);
+        }
+
+        return expired.DeletedCount;
+    }
+
     public async Task DeleteOldNodeRecordsAsync(int retainCount)
     {
         if (retainCount <= 0) return;
