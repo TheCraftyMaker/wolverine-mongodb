@@ -18,6 +18,7 @@ public class MongoDbDurabilityAgent : IAgent
     private Task? _recoveryTask;
     private Task? _scheduledJob;
     private Task? _nodeRecordPruning;
+    private Task? _orphanSweep;
 
     private readonly CancellationTokenSource _cancellation = new();
     private readonly CancellationTokenSource _combined;
@@ -55,10 +56,6 @@ public class MongoDbDurabilityAgent : IAgent
             {
                 try
                 {
-                    if (_settings.Mode != DurabilityMode.Solo)
-                    {
-                        await _parent.ReleaseDeadNodeOwnershipAsync(_combined.Token);
-                    }
                     await _parent.RecoverOrphanedIncomingAsync(_runtime, _combined.Token);
                     await _parent.RecoverOrphanedOutgoingAsync(_runtime, _combined.Token);
                     await _parent.ReplayDeadLettersAsync(_combined.Token);
@@ -93,6 +90,7 @@ public class MongoDbDurabilityAgent : IAgent
         }, _combined.Token);
 
         startNodeRecordPruning();
+        startOrphanSweep(recoveryStart);
     }
 
     /// <summary>
@@ -130,6 +128,44 @@ public class MongoDbDurabilityAgent : IAgent
                 {
                     // Housekeeping must never take the agent down.
                     _logger.LogError(e, "Node-record pruning pass failed");
+                }
+
+                await timer.WaitForNextTickAsync(_combined.Token);
+            }
+        }, _combined.Token);
+    }
+
+    /// <summary>
+    /// Whether this agent runs the dead-node ownership sweep. Solo mode has no peers to orphan anything,
+    /// so the timer is never created — same rule as the RDBMS agent (GH-3971).
+    /// </summary>
+    internal bool RunsOrphanSweep => _settings.Mode != DurabilityMode.Solo;
+
+    /// <summary>
+    /// GH-3971 parity: the dead-node ownership sweep used to ride the recovery loop, which tied its cadence
+    /// to <see cref="DurabilitySettings.ScheduledJobPollingTime"/> — slowing scheduled-message polling also
+    /// delayed orphan release — and let one sweep issue an unbounded update. It now runs on its own timer
+    /// at <see cref="DurabilitySettings.OrphanedMessageSweepPollingTime"/>, releasing in bounded batches.
+    /// The two-tick confirmation is unchanged: "tick" now means one sweep.
+    /// </summary>
+    private void startOrphanSweep(TimeSpan firstDelay)
+    {
+        if (!RunsOrphanSweep) return;
+
+        _orphanSweep = Task.Run(async () =>
+        {
+            await Task.Delay(firstDelay, _combined.Token);
+            using var timer = new PeriodicTimer(_settings.OrphanedMessageSweepPollingTime);
+
+            while (!_combined.IsCancellationRequested)
+            {
+                try
+                {
+                    await _parent.ReleaseDeadNodeOwnershipAsync(_combined.Token);
+                }
+                catch (Exception e) when (!_combined.IsCancellationRequested)
+                {
+                    _logger.LogError(e, "Orphaned-message sweep failed");
                 }
 
                 await timer.WaitForNextTickAsync(_combined.Token);
@@ -198,7 +234,7 @@ public class MongoDbDurabilityAgent : IAgent
         {
             await _cancellation.CancelAsync();
 
-            var loops = new[] { _recoveryTask, _scheduledJob, _nodeRecordPruning }.Where(t => t is not null).Select(t => t!).ToArray();
+            var loops = new[] { _recoveryTask, _scheduledJob, _nodeRecordPruning, _orphanSweep }.Where(t => t is not null).Select(t => t!).ToArray();
             if (loops.Length > 0)
             {
                 try
