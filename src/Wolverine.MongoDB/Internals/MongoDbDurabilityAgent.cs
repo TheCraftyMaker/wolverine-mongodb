@@ -2,6 +2,7 @@ using JasperFx;
 using JasperFx.Core;
 using Microsoft.Extensions.Logging;
 using Wolverine.Persistence;
+using Wolverine.Persistence.Durability;
 using Wolverine.Runtime;
 using Wolverine.Runtime.Agents;
 
@@ -16,6 +17,7 @@ public class MongoDbDurabilityAgent : IAgent
 
     private Task? _recoveryTask;
     private Task? _scheduledJob;
+    private Task? _nodeRecordPruning;
 
     private readonly CancellationTokenSource _cancellation = new();
     private readonly CancellationTokenSource _combined;
@@ -89,6 +91,50 @@ public class MongoDbDurabilityAgent : IAgent
                 await timer.WaitForNextTickAsync(_combined.Token);
             }
         }, _combined.Token);
+
+        startNodeRecordPruning();
+    }
+
+    /// <summary>
+    /// Whether this agent prunes node records: node records exist on the Main store only (GH-3701), and
+    /// a non-positive <see cref="DurabilitySettings.NodeRecordPruningPeriod"/> switches the loop off.
+    /// </summary>
+    internal bool PrunesNodeRecords
+        => _parent.Role == MessageStoreRole.Main && _settings.NodeRecordPruningPeriod > TimeSpan.Zero;
+
+    /// <summary>
+    /// First pruning pass: held back from startup, but never past the configured period itself — a host
+    /// that asks for a short period is asking to see pruning promptly. Same rule as the RDBMS agent.
+    /// </summary>
+    internal static TimeSpan PruningStartDelay(DurabilitySettings settings)
+        => settings.NodeRecordPruningPeriod < TimeSpan.FromMinutes(1)
+            ? settings.NodeRecordPruningPeriod
+            : TimeSpan.FromMinutes(1);
+
+    private void startNodeRecordPruning()
+    {
+        if (!PrunesNodeRecords) return;
+
+        _nodeRecordPruning = Task.Run(async () =>
+        {
+            await Task.Delay(PruningStartDelay(_settings), _combined.Token);
+            using var timer = new PeriodicTimer(_settings.NodeRecordPruningPeriod);
+
+            while (!_combined.IsCancellationRequested)
+            {
+                try
+                {
+                    await _parent.PruneNodeRecordsAsync(_settings, _combined.Token);
+                }
+                catch (Exception e) when (!_combined.IsCancellationRequested)
+                {
+                    // Housekeeping must never take the agent down.
+                    _logger.LogError(e, "Node-record pruning pass failed");
+                }
+
+                await timer.WaitForNextTickAsync(_combined.Token);
+            }
+        }, _combined.Token);
     }
 
     private async Task runScheduledJobs()
@@ -152,7 +198,7 @@ public class MongoDbDurabilityAgent : IAgent
         {
             await _cancellation.CancelAsync();
 
-            var loops = new[] { _recoveryTask, _scheduledJob }.Where(t => t is not null).Select(t => t!).ToArray();
+            var loops = new[] { _recoveryTask, _scheduledJob, _nodeRecordPruning }.Where(t => t is not null).Select(t => t!).ToArray();
             if (loops.Length > 0)
             {
                 try
