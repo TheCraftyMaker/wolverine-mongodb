@@ -53,11 +53,11 @@ public class saga_optimistic_concurrency
 
         var client = host.Services.GetRequiredService<IMongoClient>();
         var database = client.GetDatabase(AppFixture.DatabaseName);
-        using var session = await client.StartSessionAsync();
+        using var session = await client.StartSessionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // Two stores load the same saga at the same (initial) version — the classic OCC race.
-        var winner = await MongoSagaOperations.LoadSagaAsync<GuidBasicWorkflow, Guid>(database, session, id, default);
-        var loser = await MongoSagaOperations.LoadSagaAsync<GuidBasicWorkflow, Guid>(database, session, id, default);
+        var winner = await MongoSagaOperations.LoadSagaAsync<GuidBasicWorkflow, Guid>(database, session, id, TestContext.Current.CancellationToken);
+        var loser = await MongoSagaOperations.LoadSagaAsync<GuidBasicWorkflow, Guid>(database, session, id, TestContext.Current.CancellationToken);
         winner.ShouldNotBeNull();
         loser.ShouldNotBeNull();
         winner.Version.ShouldBe(1);
@@ -65,14 +65,14 @@ public class saga_optimistic_concurrency
 
         // The winner updates first: succeeds, version 1 -> 2.
         winner.Name = "winner";
-        await MongoSagaOperations.UpdateSagaAsync<GuidBasicWorkflow, Guid>(database, session, winner, id, default);
+        await MongoSagaOperations.UpdateSagaAsync<GuidBasicWorkflow, Guid>(database, session, winner, id, TestContext.Current.CancellationToken);
         winner.Version.ShouldBe(2);
 
         // The loser is still at the stale version 1, so its guarded update matches no document and
         // surfaces the optimistic-concurrency violation rather than overwriting the winner.
         loser.Name = "loser";
         await Should.ThrowAsync<SagaConcurrencyException>(async () =>
-            await MongoSagaOperations.UpdateSagaAsync<GuidBasicWorkflow, Guid>(database, session, loser, id, default));
+            await MongoSagaOperations.UpdateSagaAsync<GuidBasicWorkflow, Guid>(database, session, loser, id, TestContext.Current.CancellationToken));
 
         // No clobber: the persisted document reflects the winner's write, at version 2.
         var persisted = await sagaHost.LoadState<GuidBasicWorkflow>(id);

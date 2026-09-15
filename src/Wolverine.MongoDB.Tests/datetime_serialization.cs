@@ -31,7 +31,7 @@ public class datetime_serialization
 
         var doc = await RawIncoming
             .Find(Builders<BsonDocument>.Filter.Empty)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
 
         doc.ShouldNotBeNull();
         doc.Contains("keepUntil").ShouldBeTrue();
@@ -91,14 +91,14 @@ public class datetime_serialization
         // Stored executionTime must be a BSON Date that compares correctly against UtcNow.
         var raw = await RawIncoming
             .Find(Builders<BsonDocument>.Filter.Empty)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
         raw.ShouldNotBeNull();
         raw["executionTime"].BsonType.ShouldBe(BsonType.DateTime);
 
         // A $lte UtcNow scan must match the past-scheduled message.
         // DateTime maps natively to BSON Date; no global serializer required for raw filters.
         var dueFilter = Builders<BsonDocument>.Filter.Lte("executionTime", DateTime.UtcNow);
-        var dueCount = await RawIncoming.CountDocumentsAsync(dueFilter);
+        var dueCount = await RawIncoming.CountDocumentsAsync(dueFilter, cancellationToken: TestContext.Current.CancellationToken);
         dueCount.ShouldBe(1);
     }
 }

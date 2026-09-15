@@ -62,9 +62,9 @@ public class unit_of_work
         var bus = host.Services.GetRequiredService<IMessageBus>();
         var id = Guid.NewGuid();
 
-        await bus.InvokeAsync(new UowWriteCommand(id, "hello"));
+        await bus.InvokeAsync(new UowWriteCommand(id, "hello"), TestContext.Current.CancellationToken);
 
-        (await Docs.Find(x => x.Id == id.ToString()).FirstOrDefaultAsync()).ShouldNotBeNull();
+        (await Docs.Find(x => x.Id == id.ToString()).FirstOrDefaultAsync(TestContext.Current.CancellationToken)).ShouldNotBeNull();
     }
 
     [Fact]
@@ -79,6 +79,6 @@ public class unit_of_work
 
         // The write went through the session-bound collection, so the abort
         // must have rolled it back.
-        (await Docs.Find(x => x.Id == id.ToString()).FirstOrDefaultAsync()).ShouldBeNull();
+        (await Docs.Find(x => x.Id == id.ToString()).FirstOrDefaultAsync(TestContext.Current.CancellationToken)).ShouldBeNull();
     }
 }

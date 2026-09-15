@@ -29,7 +29,7 @@ public class outbox_recovery
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
                 opts.PublishAllMessages().ToLocalQueue("durable-out").UseDurableInbox();
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
 
         var runtime = host.GetRuntime();
         var store = _fixture.BuildMessageStore();
@@ -72,7 +72,7 @@ public class outbox_recovery
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
                 opts.PublishAllMessages().ToLocalQueue("durable-out").UseDurableInbox();
-            }).StartAsync();
+            }).StartAsync(TestContext.Current.CancellationToken);
 
         var runtime = host.GetRuntime();
         var store = _fixture.BuildMessageStore();

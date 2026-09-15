@@ -128,7 +128,7 @@ public class saga_atomicity
 
         // Give any (incorrectly) relayed cascade a chance to be processed, so a genuine atomicity
         // violation surfaces instead of being masked by timing.
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         // The saga document was never inserted.
         (await LoadSagaAsync(id)).ShouldBeNull();
@@ -172,10 +172,10 @@ public class saga_atomicity
         await host.InvokeMessageAndWaitAsync(new BeginWork(id)); // version 1, Applied 0
 
         var database = _fixture.Client.GetDatabase(AppFixture.DatabaseName);
-        using var session = await _fixture.Client.StartSessionAsync();
+        using var session = await _fixture.Client.StartSessionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // A second writer snapshots the saga at the (soon-to-be-stale) version 1.
-        var loser = await MongoSagaOperations.LoadSagaAsync<S11AtomicitySaga, Guid>(database, session, id, default);
+        var loser = await MongoSagaOperations.LoadSagaAsync<S11AtomicitySaga, Guid>(database, session, id, TestContext.Current.CancellationToken);
         loser.ShouldNotBeNull();
         loser.Version.ShouldBe(1);
 

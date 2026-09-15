@@ -27,7 +27,7 @@ public class leader_lease
         (await nodeB.TryAttainLeadershipLockAsync(CancellationToken.None)).ShouldBeFalse(
             "the lease is live, a second node must not steal it");
 
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
 
         (await nodeB.TryAttainLeadershipLockAsync(CancellationToken.None)).ShouldBeTrue(
             "an expired lease must be claimable by another node");
@@ -46,7 +46,7 @@ public class leader_lease
 
         // At 75% of a 2s lease (1.5s), the cached claim must already be reported
         // as lost so the node stops acting as leader before takeover is possible.
-        await Task.Delay(TimeSpan.FromMilliseconds(1700));
+        await Task.Delay(TimeSpan.FromMilliseconds(1700), TestContext.Current.CancellationToken);
         node.HasLeadershipLock().ShouldBeFalse();
     }
 }
