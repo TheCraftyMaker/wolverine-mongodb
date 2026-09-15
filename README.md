@@ -24,7 +24,8 @@ MongoDB-backed applications reliable, durable message delivery without EF Core.
   are not available on standalone MongoDB. Atlas and any production deployment
   already satisfy this; for local development use a Docker Compose replica set.
   Standalone MongoDB is explicitly unsupported.
-- **WolverineFx 6.x**: see `Directory.Packages.props` for the exact pinned version.
+- **WolverineFx 6.38.0 or later** (the exact pin is in `Directory.Packages.props`; the
+  `external/wolverine` submodule tracks the same release).
 - **.NET 9 or .NET 10.**
 - **MongoDB.Driver** 3.x.
 
@@ -431,6 +432,69 @@ public static Update<OrderNote> Handle(EditOrderNoteCommand cmd, [Entity("NoteId
 See the demo's [`OrderNoteHandler`](demo/src/OrderDemo.Application/Notes/OrderNoteHandler.cs)
 for a complete `Insert`/`Update`/`Delete` example wired to HTTP endpoints.
 
+### Whole-collection reads: `[All]`, `[FirstOrDefault]`, `[Queryable]`
+
+WolverineFx 6.38 added three read-only parameter attributes; all three are supported because
+every type has its own collection here.
+
+```csharp
+public static ColorsCounted Handle(CountColors cmd, [All] IReadOnlyList<Color> colors)
+    => new(colors.Count);
+
+// Null when nothing is stored — there is deliberately no Required/404 branch on this one.
+public static AlertDefaultsRead Handle(ReadAlertDefaults cmd, [FirstOrDefault] AlertDefaults? defaults)
+    => new(defaults?.Threshold ?? -1);
+
+// The escape hatch: the driver's own LINQ provider over the collection. Not portable.
+public static async Task<PopularColorsFound> Handle(FindPopularColors cmd,
+    [Queryable] IQueryable<Color> colors, CancellationToken ct)
+    => new((await colors.Where(x => x.Hits >= cmd.Minimum).Select(x => x.Name).ToListAsync(ct)).ToArray());
+```
+
+- When the handler is transactional (it writes through a storage action, takes
+  `MongoDbUnitOfWork`, …) the read runs on the outbox session and sees that transaction's own
+  writes; a read-only handler reads session-less and no transaction is forced open.
+- Reads honour an explicit `MapEntityCollection` mapping, and a `Saga` type is read from its
+  `wolverine_saga_*` collection.
+
+### Mixed persistence
+
+The provider is a **catch-all** (`IsCatchAll`): it claims every entity type. Wolverine consults
+selective providers such as EF Core (which only claim the types mapped in a registered
+`DbContext`) *before* catch-alls, regardless of registration order, so in an application that
+also registers EF Core the EF-mapped entities keep resolving to EF Core and everything else to
+MongoDB.
+
+## Logical message deduplication
+
+Opt in with `opts.Durability.EnableMessageDeduplication = true` and mark handlers
+`[Deduplicated]` (or use `opts.MessageDeduplication` / `[DeduplicationIdentity]` to derive the
+id). Claims live in `wolverine_deduplication`, keyed by the deduplication id, so the collection's
+own `_id` uniqueness is the atomic claim: twenty nodes racing for one id produce exactly one
+winner. The stored expiry (`Durability.DeduplicationWindow`) is honoured to the instant — a claim
+whose window has passed is taken over — and a TTL index reaps stale claims. With the flag off the
+store is `NullDeduplicationStore` and nothing is provisioned.
+
+**Transactional handlers.** Wolverine weaves the claim in *before* the persistence provider opens
+a session and gives providers no way to claim inside the handler transaction; on the RDBMS
+providers a rolled-back transactional handler therefore leaves its claim behind and the retry is
+refused as a duplicate. Here the claim is sessionless and the MongoDB transaction frame **releases
+it when the transaction rolls back**, so the retry runs. A duplicate-key error on the claim can
+never abort a handler transaction because the claim is not part of one.
+
+## Durable recurring messages
+
+Registering a schedule (`opts.Schedules.ScheduleRecurring<T>("0 * * * *")`) turns on
+`IRecurringMessageStore` tracking in `wolverine_recurring_messages` (one document per schedule,
+Main store only). The recurring agent records the pre-scheduled occurrence's envelope ids and
+deduplication id, re-publishes a cancelled occurrence under the same deduplication id, and a
+restarted or failed-over host adopts its predecessor's pending occurrence instead of publishing a
+second one. `IRecurringScheduleControl.PauseAsync` marks the document **and deletes the tracked
+scheduled envelopes in the same transaction**, so pausing from any node stops the next occurrence
+immediately; resume never back-fills; a manual trigger is refused while paused. Exactly-once
+beyond that (same occurrence → same deduplication id → one handling) rests on the deduplication
+store above.
+
 ## Saga store diagnostics
 
 `Wolverine.MongoDB` implements Wolverine's read-only `ISagaStoreDiagnostics` surface (the
@@ -489,16 +553,23 @@ clocks are required (not a throw; the host starts normally).
   reschedule issued *after* a message has already been claimed does not take effect,
   and `IScheduledMessages.RescheduleAsync` returns no matched count, so the caller is
   not told.
-- **Dead-node recovery:** on each recovery tick, each node releases envelope
-  ownership held by node numbers with no live node document (crashed nodes), then
-  recovers those orphaned envelopes. Envelopes owned by live nodes are never touched.
+- **Dead-node recovery:** a dedicated sweep (every
+  `Durability.OrphanedMessageSweepPollingTime`, Balanced mode only) releases envelope
+  ownership held by node numbers with no live node document (crashed nodes) — a number must
+  be observed dead on two consecutive sweeps, and the release is bounded to
+  `OrphanedMessageReleaseBatchSize` documents per write and
+  `OrphanedMessageReleaseMaxBatchesPerCycle` writes per sweep, the remainder following on the
+  next sweep. The recovery loop then recovers the orphaned envelopes. Envelopes owned by live
+  nodes are never touched.
 - **CAS-guarded outgoing recovery:** when recovering orphaned outgoing envelopes,
   only envelopes still globally-owned (`OwnerId == 0`) are claimed, and the claim
   uses a filter guard so a competing node that claimed an envelope between load and
   write retains it, so there are no double-sends.
-- **Node records:** the leader trims old node-event records via
-  `DeleteOldNodeRecordsAsync`; the TTL index on `wolverine_node_records` provides
-  a 14-day backstop.
+- **Node records:** the Main store's durability agent prunes node-event records on
+  `Durability.NodeRecordPruningPeriod` (first pass after at most one minute): records older
+  than `NodeEventRecordExpirationTime` are deleted and the rest trimmed to
+  `NodeRecordRetention` when that is positive. The TTL index on `wolverine_node_records`
+  keeps its 14-day backstop.
 
 ### Tuning failover speed
 
@@ -561,7 +632,8 @@ the multinode runbook.
 The provider stores envelopes in dedicated collections
 (`wolverine_incoming_envelopes`, `wolverine_outgoing_envelopes`,
 `wolverine_dead_letters`) plus node-coordination collections
-(`wolverine_nodes`, `wolverine_node_assignments`). Single-document atomic
+(`wolverine_nodes`, `wolverine_node_assignments`) and, when opted in,
+`wolverine_deduplication` and `wolverine_recurring_messages`. Single-document atomic
 operations (`findAndModify`) handle ownership claims and idempotency rather than
 relying on multi-document transactions for the hot path, the approach proven in
 the MassTransit MongoDB outbox.
@@ -570,13 +642,16 @@ Collections and indexes are created automatically when Wolverine starts.
 
 ## Building and testing
 
-The compliance test suite currently requires the Wolverine source, because
-`WolverineFx.ComplianceTests` is not yet published to NuGet. It is vendored as a
-git submodule at `external/wolverine`, pinned to the matching `WolverineFx`
-version: clone with `git clone --recursive` (or run `git submodule update
---init`). Both the library and the test project project-reference it so there is
-a single consistent `Wolverine.dll`. The path is overridable via the
-`WOLVERINE_SOURCE` environment variable or `-p:WolverineSourcePath=...`.
+The compliance test suite comes from the Wolverine source, vendored as a git
+submodule at `external/wolverine` and pinned to the same release as the
+`WolverineFx` package (`V6.38.0`): clone with `git clone --recursive` (or run
+`git submodule update --init`). Both the library and the test project
+project-reference it so there is a single consistent `Wolverine.dll`; the path is
+overridable via the `WOLVERINE_SOURCE` environment variable or
+`-p:WolverineSourcePath=...`. `WolverineFx.ComplianceTests` is also published on
+NuGet, so a checkout without the submodule builds against the package. The test
+project is an xUnit v3 test host (the compliance suites are built on
+`xunit.v3.extensibility.core`); the demo stays on xUnit 2.
 
 CI initialises the submodule, runs the compliance suite in two separate steps
 (single-node and multinode categories), then packs the library; the demo job
@@ -616,6 +691,14 @@ required beyond Docker Desktop.
   that registers its own unkeyed `IMongoDatabase` conflicts with it. See
   [The registered `IMongoDatabase`](#the-registered-imongodatabase) for the
   workarounds.
+- **A value returned from an `AfterCommit` method is not a cascading message** in
+  WolverineFx 6.38 (post-commit frames are plain method calls). Publish through
+  `IMessageBus` from the hook instead; the message rides the end-of-pipeline flush,
+  not the committed transaction's outbox.
+- **One upstream compliance fact cannot pass here:**
+  `RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules`
+  casts the store to Weasel's `IDatabase` to enumerate tables. Its behaviour is covered by
+  `recurring_messages.the_opt_in_is_schema_neutral`.
 - **High-throughput contention.** The `findAndModify` lock approach serializes
   access per document; under very high concurrency this can bottleneck. Tune
   write concern and indexes accordingly.

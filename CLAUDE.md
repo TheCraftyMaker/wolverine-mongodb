@@ -6,7 +6,7 @@ Native MongoDB persistence provider for Wolverine's transactional inbox/outbox. 
 
 **Package:** `Wolverine.MongoDB` (NuGet; see `Directory.Build.props` for the current version — `1.0.0` as of the [1.0.0] CHANGELOG entry)  
 **Targets:** .NET 9, .NET 10  
-**Dependencies:** `WolverineFx 6.x`, `MongoDB.Driver 3.x`  
+**Dependencies:** `WolverineFx 6.38.0` (submodule `external/wolverine` at `V6.38.0`), `MongoDB.Driver 3.x`  
 **Constraint:** MongoDB must run as a replica set (transactions require it).
 
 ---
@@ -25,6 +25,9 @@ src/Wolverine.MongoDB/              ← Library (NuGet package)
     MongoCollectionNaming.cs        ← Collection-name resolver: mappings + collision claims
     MongoDbCollectionNamePolicy.cs  ← IHandlerPolicy that claims a collection per persisted type
     MongoTransactionOptions.cs      ← The TransactionOptions every library-opened transaction carries
+    EntityQueryFrames.cs            ← [All]/[FirstOrDefault]/[Queryable] read frames (non-forcing session)
+    MongoDbDeduplicationStore.cs    ← IDeduplicationStore over wolverine_deduplication (opt-in)
+    MongoDbRecurringMessageStore.cs ← IRecurringMessageStore over wolverine_recurring_messages (opt-in, Main only)
 src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine source clone)
   MongoDbSagaHost.cs                ← ISagaHost implementation for compliance suites
   string_saga_storage_compliance.cs ← StringIdentifiedSagaComplianceSpecs<MongoDbSagaHost>
@@ -39,6 +42,19 @@ src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine sourc
   collection_naming.cs              ← Unit facts: default-name pins, collision axes, mapping API (no Docker)
   collection_name_collision_guard.cs← Host facts: collision refused at StartAsync; mapping honoured end to end
   leadership_election_compliance.cs ← Upstream LeadershipElectionCompliance ([Category=multinode], un-gated)
+  exclusive_listener_recovery_compliance.cs ← Upstream ExclusiveListenerRecoveryCompliance (GH-3590)
+  core_type_name_collision_compliance.cs ← Upstream CoreTypeNameCollisionCompliance (GH-3907)
+  recurring_message_compliance.cs   ← Upstream RecurringMessageCompliance (one Weasel-bound fact cannot pass, see FOLLOWUPS)
+  node_reregistration.cs            ← 6.38 INodeAgentPersistence contract: heartbeat miss, reregister, atomic claim
+  retry_retention.cs                ← Rescheduled retries drop keepUntil and restore the payload
+  persistence_provider_precedence.cs← IsCatchAll: selective providers win in mixed persistence, both orders
+  dead_letter_replayable_filter.cs  ← Tri-state Replayable filter on query/discard/replay
+  outbox_batching.cs                ← WasPersistedInOutbox + the batch StoreOutgoingAsync (one bulk update, all-or-nothing)
+  entity_query_attributes.cs        ← [All]/[FirstOrDefault]/[Queryable] incl. session use proven on generated source
+  after_commit_integration.cs / after_commit_http.cs ← AfterCommit ordering after commit + flush
+  logical_message_deduplication.cs  ← Framework-level dedup facts incl. rollback release
+  recurring_messages.cs             ← MongoDB-specific recurring-store facts (cross-node pause, trigger refusal)
+  node_record_pruning.cs / orphan_sweep_settings.cs ← Durability maintenance settings honoured by the agent
 demo/                               ← Separate solution, references package from CI nupkg
   src/OrderDemo.Application/Sagas/
     OrderFulfillmentSaga.cs         ← Demo saga: Guid id, start/continue/complete lifecycle
@@ -139,6 +155,8 @@ coercion, unlike Cosmos/RavenDb).
 | `wolverine_dead_letters` | Failed messages + exception info. `_id` follows `Durability.MessageIdentity` (the envelope Guid in `IdOnly`, an identity-derived Guid in `IdAndDestination`); the framework-facing envelope Guid is the separate `envelopeId` element |
 | `wolverine_nodes` | Node registry (heartbeat, capabilities) |
 | `wolverine_node_assignments` | Agent-to-node mapping |
+| `wolverine_deduplication` | Logical-deduplication claims (`_id` = deduplication id, `expires` TTL); only when `EnableMessageDeduplication` |
+| `wolverine_recurring_messages` | Recurring-schedule tracking (`_id` = schedule name); only when `EnableRecurringMessages` on the Main store |
 | `wolverine_saga_<lowercased-type>` | One collection per saga type (e.g. `wolverine_saga_orderfulfillmentsaga`) |
 | `<lowercased-entity-type>` | One un-prefixed collection per app entity type persisted via `[Entity]`/`Insert`/`Update`/`Store`/`Delete<T>` (e.g. `OrderNote` → `ordernote`) — application-owned, not swept by `ClearAllAsync`/`RebuildAsync` |
 
@@ -152,7 +170,7 @@ coercion, unlike Cosmos/RavenDb).
 - **Agent-assignment removal is node-scoped; assignment *writes* are not:** `wolverine_node_assignments` holds exactly one document per agent URI (`_id` = the URI, `nodeId` = the owner), so ownership transfers by overwriting `nodeId` — `AddAssignmentAsync`/`AssignAgentsAsync` upsert unscoped on purpose, matching Postgres's `on conflict (id) do update set node_id`. `RemoveAssignmentAsync` therefore filters on `_id` **and** `nodeId` (`MongoDbMessageStore.NodeAgents.cs`): Wolverine's only caller, `NodeAgentController.StopAgentAsync`, always passes its own `UniqueNodeId` (“remove *my* claim”) and issues the removal even when this node was never running the agent, so an unscoped delete would let a node that no longer owns an agent wipe the row that now belongs to another node — and because `LoadAllNodesAsync` attributes a URI to exactly one node, the resulting duplicate start would be invisible to Wolverine's split-brain detection. This is contract parity / defence in depth, not a fix for an observed failure: under WolverineFx 6.21.0 `ReassignAgent` awaits the old owner's `StopAgent` before issuing `AssignAgent`, and a late stop is discarded by the handler pipeline via the request/reply envelope's 60s `DeliverWithin`. All five RDBMS providers scope the delete; RavenDb and Cosmos do not (an upstream omission, not a document-store trade-off — see `FOLLOWUPS.md`). Do not “fix” the writes into node-scoped operations: that breaks ownership transfer and the `NodePersistenceCompliance` assignment facts.
 - **`LoadOutgoingAsync` is owner-scoped and batch-limited:** only envelopes with `OwnerId == 0` (globally-owned / unclaimed) are returned, capped at `Durability.RecoveryBatchSize`. Envelopes owned by a live node are in-flight and must never be handed to recovery.
 - **CAS-guarded outgoing recovery:** `RecoverOrphanedOutgoingAsync` uses a filter guard (`OwnerId == AnyNode`) on the claim `UpdateMany` and re-reads which ids this node actually won before enqueuing — prevents double-sends when two nodes race for the same orphaned envelopes.
-- **Dead-node ownership release is two-tick-confirmed (Balanced mode only):** each recovery tick calls `ReleaseDeadNodeOwnershipAsync`, which computes the node numbers that are *owned* in `wolverine_incoming_envelopes`/`wolverine_outgoing_envelopes` but have no live `wolverine_nodes` document, and releases only the numbers that were **also** dead on the previous tick (`Filter.In(confirmed)`, never `Filter.Nin(liveSnapshot)`). Reading the owned set *before* the live set, plus monotonic never-reused node numbers (see the node-number-reuse decision below), means a number confirmed dead was dead for the whole interval — a node that registers and claims between the read and the write can never be released. Cost: a crashed node's envelopes are rescued one recovery interval later. Still runs before orphan recovery so released envelopes are re-claimable in the same tick. **A future change to reuse freed node numbers would invalidate this argument** — see the soundness comment on the method.
+- **Dead-node ownership release is two-tick-confirmed (Balanced mode only):** the orphan sweep — its own loop at `OrphanedMessageSweepPollingTime`, never created in Solo mode — calls `ReleaseDeadNodeOwnershipAsync`, which releases in bounded batches (`OrphanedMessageReleaseBatchSize` × `OrphanedMessageReleaseMaxBatchesPerCycle`, remainder on the next sweep; a tick is one sweep). It which computes the node numbers that are *owned* in `wolverine_incoming_envelopes`/`wolverine_outgoing_envelopes` but have no live `wolverine_nodes` document, and releases only the numbers that were **also** dead on the previous tick (`Filter.In(confirmed)`, never `Filter.Nin(liveSnapshot)`). Reading the owned set *before* the live set, plus monotonic never-reused node numbers (see the node-number-reuse decision below), means a number confirmed dead was dead for the whole interval — a node that registers and claims between the read and the write can never be released. Cost: a crashed node's envelopes are rescued one recovery interval later. Still runs before orphan recovery so released envelopes are re-claimable in the same tick. **A future change to reuse freed node numbers would invalidate this argument** — see the soundness comment on the method.
 - **Handled markers expire via `KeepUntil` TTL:** `IncomingMessage` maps `envelope.KeepUntil` into the document. The TTL index on `keepUntil` automatically removes handled markers. Previously, `KeepUntil` was dropped, causing unbounded inbox growth.
 - **Dead-letter TTL is opt-in:** `ExpirationTime` is only written when `Durability.DeadLetterQueueExpirationEnabled == true`. With the default `false`, dead letters are retained forever (matching RDBMS providers). The TTL index ignores documents without the `expirationTime` field.
 - **Dead-letter identity follows `Durability.MessageIdentity` (2026-09-08):** the `_id` is `envelope.Id` in the default `IdOnly` mode and a deterministic SHA-256-derived Guid of `InboxIdentity(envelope)` in `IdAndDestination` (`DeadLetterIdentity.Derive`, selected by `MongoDbMessageStore.DeadLetterKey`); the framework-facing Guid lives in `envelopeId`, exactly as `IncomingMessage` splits the two. Before this, `MoveToDeadLetterStorageAsync` upserted on the bare envelope Guid, so in `IdAndDestination` a second failed delivery of the same Guid to a different destination silently replaced the first — while the incoming delete two lines below already used the identity-aware key. The RDBMS providers add `received_at` to the dead-letter primary key in exactly that mode (`Wolverine.Postgresql/Schema/DeadLettersTable.cs:19-26`); Cosmos/RavenDb carry the same defect this fixes. **`_id` stays a BSON Binary Guid deliberately** — re-typing it to a string would throw `Cannot deserialize a 'String' from BsonType 'Binary'` on every pre-existing document *inside cursor deserialization*, i.e. failing whole result sets, which would take out `QueryAsync` and every `ReplayDeadLettersAsync` tick. Guid-facing operations go through `ForEnvelopeIds`, which `$or`s in a pre-split branch (`_id` in ids **and** `envelopeId` missing or empty) so un-backfilled documents stay addressable; `EnsureIndexesAsync` adds an `envelopeId` index and backfills `envelopeId` from `_id` (aggregation-pipeline update, MongoDB 4.2+); the operator-facing, **non-destructive** entry point for that backfill is `MigrateAsync()` (also run at startup by the storage migration) — **not** `RebuildAsync()`, which is `ClearAllAsync()` + `EnsureIndexesAsync()` and therefore wipes the dead-letter, inbox, outbox and node collections before the backfill can see anything. Discard/replay/edit apply to **all** documents for the Guid and `DeadLetterEnvelopeByIdAsync` returns the first ordered by `receivedAt`, matching `MessageDatabase.DeadLetterAdminService.cs:176-221`; edit re-serializes per document so each keeps its own `Destination` (a shared blob would collapse both replays onto one inbox key). `ReplayDeadLettersAsync`'s three id filters are **deliberately unchanged** — they round-trip the `_id` of documents they just read, and repointing them at `envelopeId` would over-delete sibling destinations.
@@ -187,6 +205,14 @@ coercion, unlike Cosmos/RavenDb).
   - **Lease fencing token (epoch):** the lock document (`MongoDbMessageStore.Locking.cs`) has no fencing token; not needed for store-only leader work since the 75%-lease margin already mitigates the internal stale-leadership window. Track as a future hardening item only if leader-scoped **external** side effects (writes outside this store needing stale-epoch rejection) become common.
   - **Saga-specific indexes:** saga collections (`wolverine_saga_*`) have only the implicit `_id` index; the current access pattern (load/insert/update/delete by `_id`) doesn't need more. `EnsureIndexesAsync`/`RebuildAsync` (`MongoDbMessageStore.Admin.cs`) is the extension point when a concrete query pattern (e.g. filtering by status) demands secondary indexes.
 
+- **Retry rescheduling clears `keepUntil` and restores the payload (2026-09-15):** `SchedulingUpdate` `$unset`s `keepUntil` because the TTL index on it is not status-gated (unlike the RDBMS `where status='Handled'` sweep), and rewrites `body`/`messageType`/`receivedAt` from the live envelope when it has a payload so a body-less eager handled marker (`Envelope.ForPersistedHandled`) becomes a runnable retry. Identity (`_id`, `envelopeId`) and the release to `AnyNode` are unchanged.
+- **`IsCatchAll => true`:** `CanPersist` claims every type, so the provider must sort after selective providers (EF Core) in `OrderedPersistenceProviders`; without the flag whichever `UseXxx` ran last (all register via `InsertFirstPersistenceStrategy`) won every entity.
+- **Outbox batch overload is all-or-nothing:** one unordered `BulkWrite` of `ReplaceOne{IsUpsert}` models inside `InTransactionAsync`; `WasPersistedInOutbox` is set only after the commit (both overloads set it only after success). Matches the RDBMS explicit-transaction + rollback and Cosmos `TransactionalBatch` expectations.
+- **`[All]`/`[FirstOrDefault]`/`[Queryable]` are plain reads of the type's collection** (`EntityQueryFrames.cs`), resolving the session non-forcingly like `LoadEntityFrame`; a `Saga` type reads `wolverine_saga_*` (reads carry no version guard, so this is safe where LD4 rejects saga *writes*).
+- **Logical deduplication: sessionless claim + rollback release.** Core inserts `ClaimDeduplicationIdFrame` at `Middleware[0]` (before the session exists), never hands a provider a session for the claim, and omits its release frame for transactional chains. The claim is therefore an `_id`-unique insert on its own (so a duplicate key never aborts a handler transaction), and `TransactionalFrame` emits `IMessageDeduplicator.ReleaseAsync` in its rollback catch, guarded by the claim outcome. The claim frame is `internal` upstream; `DeduplicationClaim.FindIn` reads its id/marker reflectively and fails the host build loudly if the shape changes (`TODO(upstream)`).
+- **Recurring messages mirror `RdbmsRecurringMessageStore` member for member;** the paused-trigger refusal is the update predicate itself (an upsert whose `paused == false` filter misses turns into a duplicate-key insert). Main store only.
+- **Node-record pruning and the orphan sweep are provider-implemented:** upstream applies `NodeRecordRetention`/`NodeRecordPruningPeriod`/`NodeEventRecordExpirationTime` and the `OrphanedMessage*` settings only in the RDBMS `DurabilityAgent`; `MongoDbDurabilityAgent` runs its own loops for them (pruning for the Main store, first pass after `min(period, 1 min)`; the sweep in Balanced mode only). The 14-day node-record TTL index stays as a backstop.
+
 ### Parity Capabilities — Non-Goals
 
 Four RDBMS/Marten-only Wolverine capabilities are deliberately **not implemented**, matching the two closest document-store analogues, Cosmos and RavenDb, which also defer all four. Each is already at its correctly-deferred default; no code exists to remove. See `docs/superpowers/plans/2026-06-21-parity-non-goals.md` for the full contract-by-contract writeup.
@@ -216,23 +242,15 @@ dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"
 dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false
 ```
 
-Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required.
-
-**`Directory.Build.rsp` — temporary NU1902 workaround, delete at the Wolverine upgrade.** The
-repo-root response file downgrades NU1902 (moderate NuGet audit finding) from error to warning for
-every MSBuild-driven `dotnet` command. It exists only because the pinned Wolverine submodule
-(V6.21.0) sets `TreatWarningsAsErrors=true` and pins `Microsoft.SourceLink.GitHub 8.0.0`, which
-resolves `Microsoft.Build.Tasks.Git 8.0.0` — CVE-2026-62900, with **no patched release on the 8.0.x
-line**. The reference is redundant on SDK 8+ (the SDK bundles SourceLink, which is why this repo's
-own projects audit clean), but the version lives in the submodule's own `Directory.Packages.props`
-and nothing here can reach it. Upstream fixed it in **V6.36.0** (bumped to 10.0.401; V6.35.0 and
-earlier still carry 8.0.0). **Removal trigger: when the submodule pin and `WolverineFx` move to
-≥ 6.36.0, delete `Directory.Build.rsp`, this note, and the `FOLLOWUPS.md` entry.** Until then
-NU1901/NU1903/NU1904 still break the build and findings are still printed; the flagged package is a
-`developmentDependency` with no `lib/` assets and never ships.
+Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required. The test project is an
+xUnit **v3** host (`xunit.v3`, `OutputType=Exe`, `ValueTask` `IAsyncLifetime`, every CT-accepting call passes
+`TestContext.Current.CancellationToken` — the xUnit1051 analyzer is an error under `TreatWarningsAsErrors`).
+`GitHubActionsTestLogger` stays on 2.4.1: 3.x targets Microsoft.Testing.Platform 2.0 and does not compile
+next to the MTP 1.9.1 that xunit.v3 3.2.2 carries. A nested worktree under the main checkout still picks up a
+parent `Directory.Build.rsp` if one exists; verify audit-clean restores with `-noAutoResponse`.
 
 **CI:** the `library` job checks out with `submodules: recursive` (the Wolverine source is the
-`external/wolverine` submodule, pinned to the `V6.21.0` commit — keep the pin in sync with
+`external/wolverine` submodule, pinned to the `V6.38.0` commit — keep the pin in sync with
 `WolverineFx` in `Directory.Packages.props`), runs the compliance suite in two steps
 (`Category!=multinode` then `Category=multinode`), then packs the library at version `0.0.0-ci`.
 The `demo` job downloads that nupkg and runs the end-to-end integration tests against it, so

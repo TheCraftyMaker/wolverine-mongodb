@@ -8,7 +8,52 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Changed
+- **Upgraded `WolverineFx` from 6.21.0 to 6.38.0** (latest stable; `external/wolverine` submodule at
+  `V6.38.0`, commit `3d0e0433`). The only compile-breaking upstream change was
+  `INodeAgentPersistence`: `MarkHealthCheckAsync` now reports whether the node document existed and
+  **never inserts on a miss** (a peer ejected the still-live node; Wolverine re-registers the real
+  identity itself), `ReregisterNodeAsync` upserts the node with its existing number, capabilities and
+  version without touching the counter, and `TryClaimAssignmentAsync` claims an agent only when no
+  node owns it. `Directory.Build.rsp` (the NU1902 stopgap) is gone: ≥ V6.36.0 no longer pins the
+  flagged `Microsoft.SourceLink.GitHub 8.0.0`, and restores audit clean. The test harness moved to
+  **xUnit v3** (`xunit.v3` 3.2.2, the version `WolverineFx.ComplianceTests` is built on); the demo
+  stays on xUnit 2. Newly adopted upstream suites: `ExclusiveListenerRecoveryCompliance`,
+  `CoreTypeNameCollisionCompliance`, `RecurringMessageCompliance`.
+- **Dead-node ownership release runs on its own timer, in bounded batches.** It used to ride the
+  recovery loop (cadence tied to `ScheduledJobPollingTime`, one unbounded update per tick). It now
+  honours `OrphanedMessageSweepPollingTime` (Balanced mode only — Solo has no peers to orphan
+  anything), `OrphanedMessageReleaseBatchSize` and `OrphanedMessageReleaseMaxBatchesPerCycle`; what
+  a sweep leaves behind is released by the next one. The two-tick confirmation is unchanged.
+
 ### Added
+- **Logical message deduplication** (`IDeduplicationStore`, opt-in via
+  `Durability.EnableMessageDeduplication`): a `wolverine_deduplication` collection keyed by the
+  deduplication id, so the collection's `_id` uniqueness is the atomic claim; a stored expiry
+  honoured to the instant (an expired claim is taken over atomically), a TTL index as the reaper,
+  and `NullDeduplicationStore` plus no provisioning when the flag is off. Because Wolverine weaves
+  the claim in before any session exists and offers no hook to claim inside the handler
+  transaction, the claim is sessionless and **`TransactionalFrame` releases it when the handler's
+  transaction rolls back**, so a retry is not refused as a duplicate of its own failed attempt.
+- **Durable recurring messages** (`IRecurringMessageStore`, opt-in by registering a schedule through
+  `opts.Schedules`; Main store only): one `wolverine_recurring_messages` document per schedule with
+  the pending occurrence's envelope ids, deduplication id, pause state and trigger slot. Pause
+  eagerly cancels the tracked scheduled envelopes in one transaction so pause/resume work from any
+  node; a trigger request is refused while paused, atomically.
+- **`[All]`, `[FirstOrDefault]` and `[Queryable]` entity reads.** One collection per type makes all
+  three plain reads of that collection. They run on the outbox session when the handler is
+  transactional (so they see the transaction's own writes) and session-less otherwise, honour
+  `MapEntityCollection` mappings, and read a `Saga` type's `wolverine_saga_*` collection.
+- **`IMessageOutbox.StoreOutgoingAsync(IReadOnlyList<Envelope>, int)`**: one unordered bulk write of
+  per-envelope upserts inside one transaction — N envelopes cost one `update` command, a failing
+  envelope aborts the whole batch and flags nothing (the RDBMS/Cosmos all-or-nothing contract).
+- **Node-record pruning** honours `NodeRecordPruningPeriod`, `NodeEventRecordExpirationTime` and
+  `NodeRecordRetention` on the Main store (first pass after `min(period, 1 minute)`); the 14-day TTL
+  index stays as a backstop. Both this and the sweep above were previously applied only by
+  Wolverine's RDBMS durability agent.
+- `AfterCommit` (GH-3975) coverage for handlers, sagas and Wolverine.Http endpoints against the
+  MongoDB transaction frame — the hook lands after the commit and the outbox flush; no code change
+  was needed.
 - **Explicit per-type collection mapping.** `MongoDbPersistenceOptions` gains
   `MapSagaCollection<TSaga>(name)` and `MapEntityCollection<TEntity>(name)` (plus `Type`
   overloads) to override which collection a saga or entity is stored in. A mapping is honoured
@@ -22,6 +67,21 @@ The major version tracks Wolverine's major version.
   ```
 
 ### Fixed
+- **A rescheduled retry no longer inherits the handled marker's `keepUntil` or an empty body.**
+  `RescheduleExistingEnvelopeForRetryAsync` / `ScheduleExecutionAsync` moved a handled document
+  back to `Scheduled` without clearing `keepUntil`; the TTL index on that element is not
+  status-gated the way the RDBMS expiry sweep is, so the retry was deleted before it was due. The
+  element is now unset and, for the body-less eager handled marker, the payload is restored from the
+  live envelope.
+- **The persistence provider advertises `IsCatchAll`.** `CanPersist` claims every type, so in a
+  mixed-persistence application the provider stole entities mapped by a selective provider (EF
+  Core) whenever it happened to register last. Selective providers now win their types regardless
+  of registration order.
+- **`DeadLetterEnvelopeQuery.Replayable` is honoured** by `QueryAsync` (page and `TotalCount`),
+  `DiscardAsync` and `ReplayAsync`; `MessageIds` keeps precedence over every other option.
+- **`Envelope.WasPersistedInOutbox` is set after a successful outbox write** in both
+  `StoreOutgoingAsync` overloads, and never for a failed one.
+
 - **Collection-name collisions are refused at startup instead of silently sharing a
   collection.** Names come from `Type.Name.ToLowerInvariant()`, so two types with the same
   simple name — different namespaces, differing only in case, or two closed constructions of
