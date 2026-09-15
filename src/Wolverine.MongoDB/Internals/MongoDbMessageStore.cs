@@ -94,6 +94,19 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         ? new MongoDbDeduplicationStore(_database)
         : NullDeduplicationStore.Instance;
 
+    private MongoDbRecurringMessageStore? _recurring;
+
+    /// <summary>
+    /// Durable recurring-message tracking (cron schedules registered through <c>opts.Schedules</c>).
+    /// Opt-in: real store only when <c>DurabilitySettings.EnableRecurringMessages</c> is on AND this is
+    /// the <c>Main</c> store (tracking documents live in the main database only, as upstream), otherwise
+    /// <see cref="NullRecurringMessageStore.Instance"/> and nothing is provisioned.
+    /// </summary>
+    public IRecurringMessageStore RecurringMessages
+        => _options.Durability.EnableRecurringMessages && Role == MessageStoreRole.Main
+            ? _recurring ??= new MongoDbRecurringMessageStore(this, _database)
+            : NullRecurringMessageStore.Instance;
+
     public IMessageStoreAdmin Admin => this;
     public IDeadLetters DeadLetters => this;
     public IScheduledMessages ScheduledMessages => this;
@@ -126,7 +139,7 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     /// <c>UnknownTransactionCommitResult</c> and aborts automatically if the body throws.
     /// </para>
     /// </summary>
-    private async Task InTransactionAsync(Func<IClientSessionHandle, CancellationToken, Task> body,
+    internal async Task InTransactionAsync(Func<IClientSessionHandle, CancellationToken, Task> body,
         CancellationToken cancellation = default)
     {
         using var session = await _client.StartSessionAsync(cancellationToken: cancellation);

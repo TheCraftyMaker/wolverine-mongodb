@@ -120,6 +120,7 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
         await _database.GetCollection<BsonDocument>(MongoConstants.CounterCollection).DeleteManyAsync(new BsonDocument());
         await _database.GetCollection<BsonDocument>(MongoConstants.LockCollection).DeleteManyAsync(new BsonDocument());
         await _database.GetCollection<BsonDocument>(MongoConstants.DeduplicationCollection).DeleteManyAsync(new BsonDocument());
+        await _database.GetCollection<BsonDocument>(MongoConstants.RecurringMessagesCollection).DeleteManyAsync(new BsonDocument());
 
         // Drop every per-saga-type collection (wolverine_saga_*). The named system collections
         // above are fixed, but saga collections are created on demand per saga type, so they must

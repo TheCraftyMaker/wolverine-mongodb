@@ -12,6 +12,7 @@ public static class MongoConstants
     public const string CounterCollection = "wolverine_counters";
     public const string LockCollection = "wolverine_locks";
     public const string DeduplicationCollection = "wolverine_deduplication";
+    public const string RecurringMessagesCollection = "wolverine_recurring_messages";
 
     public const string LeaderLockId = "leader";
     public const string ScheduledLockId = "scheduled-jobs";
