@@ -45,6 +45,10 @@ public partial class MongoDbMessageStore : IDeadLetters
             filter &= b.Regex(x => x.ExceptionMessage, new BsonRegularExpression("^" + Regex.Escape(query.ExceptionMessage!)));
         if (query.MessageType.IsNotEmpty()) filter &= b.Eq(x => x.MessageType, query.MessageType);
         if (query.ReceivedAt.IsNotEmpty()) filter &= b.Eq(x => x.ReceivedAt, query.ReceivedAt);
+        // Tri-state (6.22+): null = no predicate, true = only letters already flagged for replay,
+        // false = only stuck ones. Server-side so QueryAsync's TotalCount stays coherent with its page,
+        // and so DiscardAsync/ReplayAsync act on exactly the group the caller named.
+        if (query.Replayable.HasValue) filter &= b.Eq(x => x.Replayable, query.Replayable.Value);
         return filter;
     }
 
