@@ -8,7 +8,7 @@ relational ADO.NET connection and SQL-managed envelope tables. This package
 implements `IMessageStore` directly against the MongoDB .NET driver, giving
 MongoDB-backed applications reliable, durable message delivery without EF Core.
 
-> **Status: `1.0.0`** (released 2026-07-06). The multinode (`DurabilityMode.Balanced`)
+> **Status: `1.0.2`** (released 2026-09-16). The multinode (`DurabilityMode.Balanced`)
 > path is functional and integration-tested; see [Known limitations](#known-limitations).
 
 [![NuGet](https://img.shields.io/nuget/v/Wolverine.MongoDB?label=nuget)](https://www.nuget.org/packages/Wolverine.MongoDB)
