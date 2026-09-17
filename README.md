@@ -506,37 +506,33 @@ string coercion). `ListSagaInstancesAsync` clamps its `count` argument to `[0, 1
 
 ## Multinode support
 
-`DurabilityMode.Balanced` is supported. MongoDB has no native control transport,
-so a TCP control endpoint is required between nodes (mirroring Wolverine's RavenDb
-provider):
+`DurabilityMode.Balanced` is supported out of the box. Nodes coordinate (leader election, agent
+assignment, exclusive listeners) over a control channel that this library provides on the same
+MongoDB database: each node listens on `mongocontrol://<its node id>`, and control messages are
+documents in `wolverine_control_messages`, indexed on `nodeId, posted` with a TTL index on
+`expires`. Nothing to configure:
 
 ```csharp
-using Wolverine.Transports.Tcp;
-
 builder.Host.UseWolverine(opts =>
 {
     opts.Durability.Mode = DurabilityMode.Balanced;
-
-    // Required: MongoDB has no native inter-node control transport.
-    opts.UseTcpForControlEndpoint();
-
     opts.UseMongoDbPersistence("my_database");
 });
 ```
 
-At startup, when `DurabilityMode.Balanced` is detected, the store logs an
-`Information` message confirming the mode and reminding you that synchronized
-clocks are required (not a throw; the host starts normally).
+To use another control channel instead (Wolverine's TCP endpoint, or a broker's control queues
+such as `EnableWolverineControlQueues()` on Azure Service Bus), configure it before
+`UseMongoDbPersistence`: an already configured control endpoint is always kept.
+
+At startup, when `DurabilityMode.Balanced` is detected, the store logs an `Information` message
+naming the control endpoint in use and reminding you that synchronized clocks are required.
 
 ### Multinode requirements
 
-- **`opts.UseTcpForControlEndpoint()`** (or any configured control endpoint):
-  nodes use Wolverine's control channel for leader election and agent balancing.
-  Without it, nodes cannot exchange control messages.
 - **Synchronized node clocks**: the leader lock uses a time-based lease
-  (`LockLeaseDuration`, default 1 minute). Node clocks must be synchronized to
-  well within this duration. Standard NTP keeps typical server clocks within a
-  few milliseconds, which is safe for the default lease.
+  (`LockLeaseDuration`, default 1 minute), and control messages expire thirty seconds after they
+  are posted. Node clocks must be synchronized to well within the lease. Standard NTP keeps
+  typical server clocks within a few milliseconds, which is safe for the defaults.
 
 ### Multinode semantics
 

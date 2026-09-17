@@ -8,6 +8,18 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Added
+- **Native control transport for `DurabilityMode.Balanced`.** A Balanced host that configures no other
+  node control endpoint now gets one over its own MongoDB database: `mongocontrol://<node id>` per node,
+  one document per control message in the new `wolverine_control_messages` collection (indexed on
+  `nodeId, posted`, TTL on `expires`), a one-second poll per node, thirty-second message expiry. Mirrors
+  Wolverine's RavenDb and Cosmos control transports. `opts.UseTcpForControlEndpoint()` is no longer
+  needed; a host that still calls it, or that enables a broker's control queues, keeps that endpoint.
+  Solo hosts are unchanged: no transport, no collection, no indexes.
+
+### Changed
+- The Balanced-mode startup log line names the control endpoint in use instead of asking for one.
+
 ## [1.0.2] - 2026-09-16
 
 ### Changed

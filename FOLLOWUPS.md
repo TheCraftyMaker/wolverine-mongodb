@@ -375,3 +375,11 @@ Promote to GitHub issues before the first public release.
 - The reschedule-after-claim residual (see "Post-claim due-time re-check" above) has
   no test, because it is not fixed. `scheduled_claim_recheck.cs` covers only the
   select→claim window that the `ExecutionTime <= now` conjunct closes.
+
+## Control transport
+
+- **Change-stream listener, deferred.** The `mongocontrol` listener polls `wolverine_control_messages`
+  once a second, like every sibling provider. A change stream on the collection would push control
+  messages with sub-second latency and the library already requires a replica set, but it adds a
+  long-lived cursor per node and resume-token handling. Revisit if a consumer needs faster agent
+  handoff than one second; the durability timers it coordinates run at seconds to minutes today.
