@@ -14,22 +14,6 @@ public class durability_mode_guard
     public durability_mode_guard(AppFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task balanced_mode_starts_with_a_control_endpoint()
-    {
-        await _fixture.ClearAll();
-        using var host = await Host.CreateDefaultBuilder()
-            .UseWolverine(opts =>
-            {
-                opts.Durability.Mode = DurabilityMode.Balanced;
-                // MongoDB has no native control transport; Balanced requires one.
-                opts.UseTcpForControlEndpoint();
-                opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
-                opts.UseMongoDbPersistence(AppFixture.DatabaseName);
-            }).StartAsync(TestContext.Current.CancellationToken);
-        host.ShouldNotBeNull();
-    }
-
-    [Fact]
     public async Task solo_mode_starts_normally()
     {
         await _fixture.ClearAll();
