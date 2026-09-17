@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using MongoDB.Driver;
 using Shouldly;
 using Wolverine.ComplianceTests;
-using Wolverine.Transports.Tcp;
 
 namespace Wolverine.MongoDB.Tests;
 
@@ -35,9 +34,6 @@ public class multinode_end_to_end
     private readonly AppFixture _fixture;
     public multinode_end_to_end(AppFixture fixture) => _fixture = fixture;
 
-    // UseTcpForControlEndpoint() grabs its own OS-assigned free port internally
-    // (PortFinder.GetAvailablePort), so two in-proc Balanced hosts never collide on
-    // the control port and we avoid a manual find-then-bind port race.
     private Task<IHost> StartNode() =>
         Host.CreateDefaultBuilder()
             .UseWolverine(opts =>
@@ -45,9 +41,6 @@ public class multinode_end_to_end
                 opts.Durability.Mode = DurabilityMode.Balanced;
                 opts.Durability.ScheduledJobPollingTime = TimeSpan.FromMilliseconds(500);
                 opts.Durability.ScheduledJobFirstExecution = TimeSpan.Zero;
-
-                // MongoDB has no native control transport; Balanced nodes coordinate over TCP.
-                opts.UseTcpForControlEndpoint();
 
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName,
