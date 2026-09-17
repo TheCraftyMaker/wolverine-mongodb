@@ -506,11 +506,11 @@ string coercion). `ListSagaInstancesAsync` clamps its `count` argument to `[0, 1
 
 ## Multinode support
 
-`DurabilityMode.Balanced` is supported out of the box. Nodes coordinate (leader election, agent
-assignment, exclusive listeners) over a control channel that this library provides on the same
-MongoDB database: each node listens on `mongocontrol://<its node id>`, and control messages are
-documents in `wolverine_control_messages`, indexed on `nodeId, posted` with a TTL index on
-`expires`. Nothing to configure:
+`DurabilityMode.Balanced` is supported with no extra configuration. Nodes coordinate (leader
+election, agent assignment, exclusive listeners) over a control channel that this library
+provides on the same MongoDB database: each node listens on `mongocontrol://<its node id>`, and
+control messages are documents in `wolverine_control_messages`, indexed on `nodeId, posted` with
+a TTL index on `expires`. Nothing to configure:
 
 ```csharp
 builder.Host.UseWolverine(opts =>
@@ -521,8 +521,10 @@ builder.Host.UseWolverine(opts =>
 ```
 
 To use another control channel instead (Wolverine's TCP endpoint, or a broker's control queues
-such as `EnableWolverineControlQueues()` on Azure Service Bus), configure it before
-`UseMongoDbPersistence`: an already configured control endpoint is always kept.
+such as `EnableWolverineControlQueues()` on Azure Service Bus), call it anywhere inside the
+`opts` callback: the store checks for an existing control endpoint when it initializes at host
+startup, after the whole callback has already run, so the call does not need to come before
+`UseMongoDbPersistence`. An already configured control endpoint is always kept.
 
 At startup, when `DurabilityMode.Balanced` is detected, the store logs an `Information` message
 naming the control endpoint in use and reminding you that synchronized clocks are required.
