@@ -69,6 +69,22 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
             await deduplication.EnsureIndexesAsync();
         }
 
+        // The control collection only exists for Balanced hosts: Solo has no peers to coordinate, and
+        // gating here keeps a Solo deployment's collection set unchanged. Sweeping it below is
+        // unconditional so a rebuild always clears everything.
+        if (_options.Durability.Mode == DurabilityMode.Balanced)
+        {
+            var control = _database.GetCollection<ControlMessageDocument>(MongoConstants.ControlMessagesCollection);
+            await control.Indexes.CreateManyAsync(new[]
+            {
+                new CreateIndexModel<ControlMessageDocument>(Builders<ControlMessageDocument>.IndexKeys
+                    .Ascending(x => x.NodeId).Ascending(x => x.Posted)),
+                new CreateIndexModel<ControlMessageDocument>(
+                    Builders<ControlMessageDocument>.IndexKeys.Ascending(x => x.Expires),
+                    new CreateIndexOptions { ExpireAfter = TimeSpan.Zero })
+            });
+        }
+
         // Node-event records: retain two weeks, then let TTL discard them.
         await RecordDocs.Indexes.CreateManyAsync(new[]
         {
@@ -121,6 +137,7 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
         await _database.GetCollection<BsonDocument>(MongoConstants.LockCollection).DeleteManyAsync(new BsonDocument());
         await _database.GetCollection<BsonDocument>(MongoConstants.DeduplicationCollection).DeleteManyAsync(new BsonDocument());
         await _database.GetCollection<BsonDocument>(MongoConstants.RecurringMessagesCollection).DeleteManyAsync(new BsonDocument());
+        await _database.GetCollection<BsonDocument>(MongoConstants.ControlMessagesCollection).DeleteManyAsync(new BsonDocument());
 
         // Drop every per-saga-type collection (wolverine_saga_*). The named system collections
         // above are fixed, but saga collections are created on demand per saga type, so they must
