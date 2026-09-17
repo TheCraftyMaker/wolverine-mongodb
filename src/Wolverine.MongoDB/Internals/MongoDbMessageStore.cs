@@ -159,7 +159,12 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
             && runtime.Options.Transports.NodeControlEndpoint == null
             && runtime.Options.Durability.Mode == DurabilityMode.Balanced)
         {
-            var transport = new Transport.MongoDbControlTransport(_database, runtime.Options);
+            // Reuse a transport a caller already registered rather than constructing a second
+            // one: two instances for the same scheme would each own their own endpoint cache, so
+            // whichever one lost the race to become NodeControlEndpoint would silently orphan its
+            // endpoints.
+            var transport = runtime.Options.Transports.OfType<Transport.MongoDbControlTransport>().FirstOrDefault()
+                            ?? new Transport.MongoDbControlTransport(_database, runtime.Options);
             runtime.Options.Transports.Add(transport);
             runtime.Options.Transports.NodeControlEndpoint = transport.ControlEndpoint;
         }
