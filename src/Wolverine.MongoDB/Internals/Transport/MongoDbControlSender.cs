@@ -56,6 +56,7 @@ internal class MongoDbControlSender : ISender, IAsyncDisposable
         }
         catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategory.DuplicateKey)
         {
+            // The retry block re-posted an envelope whose first insert did land. Nothing to do.
         }
     }
 

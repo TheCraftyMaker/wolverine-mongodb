@@ -28,6 +28,7 @@ internal class MongoDbControlListener : IListener
 
         _receivingLoop = Task.Run(async () =>
         {
+            // Spread the first poll so two nodes started together do not hit the collection in lockstep.
             await Task.Delay(Random.Shared.Next(100, 1000).Milliseconds(), _cancellation.Token);
 
             while (!_cancellation.IsCancellationRequested)
@@ -38,6 +39,7 @@ internal class MongoDbControlListener : IListener
                 }
                 catch (OperationCanceledException)
                 {
+                    // Shutting down.
                 }
                 catch (Exception e)
                 {
@@ -68,6 +70,8 @@ internal class MongoDbControlListener : IListener
 
     private async Task pollAsync()
     {
+        // The expiry predicate closes the window between a message's expiry and the TTL monitor's
+        // next sweep (up to a minute), so a stale agent command is never delivered late.
         var filter = Builders<ControlMessageDocument>.Filter.And(
             Builders<ControlMessageDocument>.Filter.Eq(x => x.NodeId, _transport.Options.UniqueNodeId),
             Builders<ControlMessageDocument>.Filter.Gt(x => x.Expires, DateTime.UtcNow));

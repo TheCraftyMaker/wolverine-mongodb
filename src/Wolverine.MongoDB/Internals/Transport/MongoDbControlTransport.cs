@@ -10,6 +10,12 @@ using Wolverine.Transports;
 
 namespace Wolverine.MongoDB.Internals.Transport;
 
+/// <summary>
+/// Node control channel over the message store's own database: one <c>mongocontrol://&lt;node id&gt;</c>
+/// endpoint per node, one document per control message in <c>wolverine_control_messages</c>.
+/// Registered by <see cref="MongoDbMessageStore.Initialize"/> for Balanced hosts that configured no
+/// other control endpoint.
+/// </summary>
 internal class MongoDbControlTransport : ITransport, IAsyncDisposable
 {
     public const string ProtocolName = "mongocontrol";

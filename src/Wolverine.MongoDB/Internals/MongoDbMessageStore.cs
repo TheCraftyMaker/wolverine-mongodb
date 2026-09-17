@@ -152,6 +152,9 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
 
     public void Initialize(IWolverineRuntime runtime)
     {
+        // Balanced hosts need a control endpoint before WolverineNode.For runs, or it throws
+        // "ControlEndpoint cannot be null for this usage". Register the native one unless the host
+        // already supplied its own (TCP, a broker's control queues): a configured endpoint always wins.
         if (Role == MessageStoreRole.Main
             && runtime.Options.Transports.NodeControlEndpoint == null
             && runtime.Options.Durability.Mode == DurabilityMode.Balanced)
