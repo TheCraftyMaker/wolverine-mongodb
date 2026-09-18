@@ -49,7 +49,7 @@
 **Interfaces:**
 - Produces: `MongoConstants.ControlMessagesCollection = "wolverine_control_messages"`; `public class ControlMessageDocument { Guid Id; Guid NodeId; string MessageType; byte[] Body; DateTime Expires; DateTime Posted; static ControlMessageDocument For(Envelope, Guid nodeId, DateTime expires) }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 // src/Wolverine.MongoDB.Tests/control_collection.cs
@@ -131,7 +131,7 @@ public class control_collection
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run:
 ```powershell
@@ -140,7 +140,7 @@ dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "FullyQualifiedName~
 ```
 Expected: compile error, `MongoConstants.ControlMessagesCollection` does not exist.
 
-- [ ] **Step 3: Add the constant**
+- [x] **Step 3: Add the constant**
 
 In `src/Wolverine.MongoDB/Internals/MongoConstants.cs`, after `RecurringMessagesCollection`:
 
@@ -148,7 +148,7 @@ In `src/Wolverine.MongoDB/Internals/MongoConstants.cs`, after `RecurringMessages
     public const string ControlMessagesCollection = "wolverine_control_messages";
 ```
 
-- [ ] **Step 4: Add the document type**
+- [x] **Step 4: Add the document type**
 
 ```csharp
 // src/Wolverine.MongoDB/Internals/ControlMessageDocument.cs
@@ -184,7 +184,7 @@ public class ControlMessageDocument
 }
 ```
 
-- [ ] **Step 5: Reserve the name**
+- [x] **Step 5: Reserve the name**
 
 In `MongoCollectionNaming._reservedNames`, add after `MongoConstants.RecurringMessagesCollection`:
 
@@ -193,7 +193,7 @@ In `MongoCollectionNaming._reservedNames`, add after `MongoConstants.RecurringMe
         MongoConstants.ControlMessagesCollection
 ```
 
-- [ ] **Step 6: Provision the indexes and extend the sweep**
+- [x] **Step 6: Provision the indexes and extend the sweep**
 
 In `MongoDbMessageStore.Admin.cs`, inside `EnsureIndexesAsync`, after the deduplication block:
 
@@ -221,18 +221,18 @@ In `ClearAllAsync`, after the `RecurringMessagesCollection` line:
         await _database.GetCollection<BsonDocument>(MongoConstants.ControlMessagesCollection).DeleteManyAsync(new BsonDocument());
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run the same command as Step 2. Expected: 3 passed.
 
-- [ ] **Step 8: Run the naming suite, which pins the reserved list**
+- [x] **Step 8: Run the naming suite, which pins the reserved list**
 
 ```powershell
 dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "FullyQualifiedName~collection_naming|FullyQualifiedName~collection_name_collision_guard"
 ```
 Expected: all pass. If a fact enumerates the reserved names explicitly, add `wolverine_control_messages` to it.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```powershell
 git add src/Wolverine.MongoDB/Internals/MongoConstants.cs src/Wolverine.MongoDB/Internals/ControlMessageDocument.cs src/Wolverine.MongoDB/Internals/MongoCollectionNaming.cs src/Wolverine.MongoDB/Internals/MongoDbMessageStore.Admin.cs src/Wolverine.MongoDB.Tests/control_collection.cs
@@ -255,7 +255,7 @@ git commit -m "feat(control): provision the wolverine_control_messages collectio
 - Consumes: `ControlMessageDocument`, `MongoConstants.ControlMessagesCollection` from Task 1.
 - Produces: `internal class MongoDbControlTransport(IMongoDatabase database, WolverineOptions options)` with `const string ProtocolName = "mongocontrol"`, `MongoDbControlEndpoint ControlEndpoint`, `IMongoCollection<ControlMessageDocument> Messages`, `Task DeleteEnvelopesAsync(List<Envelope>)`; `internal class MongoDbControlEndpoint(MongoDbControlTransport parent, Guid nodeId) : Endpoint` with `Guid NodeId`.
 
-- [ ] **Step 1: Write the failing two-node tests**
+- [x] **Step 1: Write the failing two-node tests**
 
 ```csharp
 // src/Wolverine.MongoDB.Tests/control_queue_tests.cs
@@ -371,7 +371,7 @@ public static class ControlQueueMessageHandler
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```powershell
 Remove-Item -Recurse -Force src\Wolverine.MongoDB.Tests\Internal\Generated -ErrorAction SilentlyContinue
@@ -379,7 +379,7 @@ dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "FullyQualifiedName~
 ```
 Expected: `InitializeAsync` fails with `ArgumentOutOfRangeException: ControlEndpoint cannot be null for this usage`.
 
-- [ ] **Step 3: Write the endpoint**
+- [x] **Step 3: Write the endpoint**
 
 ```csharp
 // src/Wolverine.MongoDB/Internals/Transport/MongoDbControlEndpoint.cs
@@ -425,7 +425,7 @@ internal class MongoDbControlEndpoint : Endpoint
 }
 ```
 
-- [ ] **Step 4: Write the transport**
+- [x] **Step 4: Write the transport**
 
 ```csharp
 // src/Wolverine.MongoDB/Internals/Transport/MongoDbControlTransport.cs
@@ -528,7 +528,7 @@ internal class MongoDbControlTransport : ITransport, IAsyncDisposable
 }
 ```
 
-- [ ] **Step 5: Write the sender**
+- [x] **Step 5: Write the sender**
 
 ```csharp
 // src/Wolverine.MongoDB/Internals/Transport/MongoDbControlSender.cs
@@ -602,7 +602,7 @@ internal class MongoDbControlSender : ISender, IAsyncDisposable
 }
 ```
 
-- [ ] **Step 6: Write the listener**
+- [x] **Step 6: Write the listener**
 
 ```csharp
 // src/Wolverine.MongoDB/Internals/Transport/MongoDbControlListener.cs
@@ -702,7 +702,7 @@ internal class MongoDbControlListener : IListener
 }
 ```
 
-- [ ] **Step 7: Register the transport in the store and reword the warning**
+- [x] **Step 7: Register the transport in the store and reword the warning**
 
 In `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs`, replace the one-line `Initialize` and the body of `WarnOnBalancedMode`:
 
@@ -738,11 +738,11 @@ In `src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs`, replace the one-lin
     }
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run the Step 2 command. Expected: 3 passed. If `send_message_from_one_to_another` times out, check that `EnsureIndexesAsync` ran for a Balanced host (Task 1) and that both hosts share `AppFixture.DatabaseName`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```powershell
 git add src/Wolverine.MongoDB/Internals/Transport src/Wolverine.MongoDB/Internals/MongoDbMessageStore.cs src/Wolverine.MongoDB.Tests/control_queue_tests.cs
@@ -760,7 +760,7 @@ git commit -m "feat(control): native mongocontrol transport registered for Balan
 **Interfaces:**
 - Consumes: `MongoDbControlTransport.ProtocolName`, `ControlMessageDocument`, `MongoConstants.ControlMessagesCollection`.
 
-- [ ] **Step 1: Write the failing facts**
+- [x] **Step 1: Write the failing facts**
 
 In `durability_mode_guard.cs`, add `using Wolverine.Runtime;` and these facts (keep the two existing ones):
 
@@ -841,14 +841,14 @@ In `control_collection.cs`, add `using Wolverine.Runtime;` and `using Wolverine.
 
 Add `using JasperFx.Core;` to `control_collection.cs` for `3.Seconds()`. `Envelope(object message)` is Wolverine's public constructor; `MessageType` is settable.
 
-- [ ] **Step 2: Run the facts to verify the new ones fail or pass for the right reason**
+- [x] **Step 2: Run the facts to verify the new ones fail or pass for the right reason**
 
 ```powershell
 dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "FullyQualifiedName~durability_mode_guard|FullyQualifiedName~control_collection"
 ```
 Expected: all pass, because Task 2 already registers the transport. These facts exist to fail later if the registration condition or the expiry filter regresses. If `an_expired_control_message_is_never_delivered` fails with a serialization error, the `Envelope` built in the test lacks a serializer: set `envelope.Data = runtime.Options.DefaultSerializer.Write(envelope)` before `For(...)` and re-run.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add src/Wolverine.MongoDB.Tests/durability_mode_guard.cs src/Wolverine.MongoDB.Tests/control_collection.cs
@@ -865,7 +865,7 @@ git commit -m "test(control): guard the registration condition and the expiry fi
 **Interfaces:**
 - Consumes: `TransportComplianceFixture`, `TransportCompliance<T>` from `Wolverine.ComplianceTests.Compliance`; `AppFixture`.
 
-- [ ] **Step 1: Write the fixture and suite**
+- [x] **Step 1: Write the fixture and suite**
 
 ```csharp
 // src/Wolverine.MongoDB.Tests/control_transport_compliance.cs
@@ -929,14 +929,14 @@ public class MongoDbControlTransportFixture : TransportComplianceFixture, IAsync
 public class control_transport_compliance : TransportCompliance<MongoDbControlTransportFixture>;
 ```
 
-- [ ] **Step 2: Run the suite**
+- [x] **Step 2: Run the suite**
 
 ```powershell
 dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "FullyQualifiedName~control_transport_compliance"
 ```
 Expected: 23 passed. Two facts are worth knowing about if they fail: `schedule_send` needs the tightened `ScheduledJobPollingTime` above; `can_stop_and_restart_listeners` needs `MongoDbControlListener.StopAsync` to cancel the loop (Task 2, Step 6). If a fact fails only because two hosts collide on `AppFixture.DatabaseName` with another running class, re-run with `--filter "FullyQualifiedName~control_transport_compliance"` alone; the suite must be green on its own before Task 8.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add src/Wolverine.MongoDB.Tests/control_transport_compliance.cs
@@ -954,11 +954,11 @@ git commit -m "test(control): run the upstream TransportCompliance suite over mo
 - Modify: `src/Wolverine.MongoDB.Tests/entity_multinode.cs:57-68`
 - Modify: `src/Wolverine.MongoDB.Tests/exclusive_listener_recovery_compliance.cs` (if it calls `UseTcpForControlEndpoint`)
 
-- [ ] **Step 1: Remove the TCP lines and their comments**
+- [x] **Step 1: Remove the TCP lines and their comments**
 
 In each file, delete the `opts.UseTcpForControlEndpoint();` call and the comment block above it that explains the OS-assigned port or says MongoDB has no native control transport. Remove the now-unused `using Wolverine.Transports.Tcp;`. Do not touch `durability_mode_guard.cs`: its `an_explicitly_configured_control_endpoint_is_kept` fact is the one place TCP stays on purpose.
 
-- [ ] **Step 2: Run the multinode category on both TFMs, serially**
+- [x] **Step 2: Run the multinode category on both TFMs, serially**
 
 ```powershell
 Remove-Item -Recurse -Force src\Wolverine.MongoDB.Tests\Internal\Generated -ErrorAction SilentlyContinue
@@ -967,7 +967,7 @@ dotnet test src/Wolverine.MongoDB.Tests -f net9.0 --filter "Category=multinode"
 ```
 Expected: all pass, including the 17 leadership facts, `scheduled_message_executes_exactly_once_across_two_nodes` and the dead-node rescue fact. These now prove leader election and agent handoff over the real control channel.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add src/Wolverine.MongoDB.Tests
@@ -984,7 +984,7 @@ git commit -m "test(multinode): coordinate the two-host suites over the native c
 - Modify: `CLAUDE.md` (repository layout, MongoDB Collections table, the Balanced-mode startup warning bullet, the last constraint line)
 - Modify: `FOLLOWUPS.md`
 
-- [ ] **Step 1: CHANGELOG**
+- [x] **Step 1: CHANGELOG**
 
 Under `## [Unreleased]` add:
 
@@ -1002,7 +1002,7 @@ Under `## [Unreleased]` add:
 - The Balanced-mode startup log line names the control endpoint in use instead of asking for one.
 ```
 
-- [ ] **Step 2: README**
+- [x] **Step 2: README**
 
 Replace the `## Multinode support` intro and the `### Multinode requirements` first bullet with:
 
@@ -1040,7 +1040,7 @@ naming the control endpoint in use and reminding you that synchronized clocks ar
 
 Keep the rest of the section (`### Multinode semantics` onward) as it is.
 
-- [ ] **Step 3: CLAUDE.md**
+- [x] **Step 3: CLAUDE.md**
 
 Four edits:
 1. Repository layout: add `Internals/Transport/` with one line: `mongocontrol transport: endpoint, sender, listener (Balanced-mode node control)`, and `ControlMessageDocument.cs`.
@@ -1048,7 +1048,7 @@ Four edits:
 3. Replace the **Balanced-mode startup warning** bullet with: `**Native control transport (Balanced only):** Initialize registers MongoDbControlTransport when the store is Main, the mode is Balanced and Transports.NodeControlEndpoint is null, and sets it as the node control endpoint, exactly as the RavenDb and Cosmos stores do. A configured endpoint (TCP, broker control queues) always wins. One document per control message in wolverine_control_messages, one-second poll per node, thirty-second expiry, TTL index as the reaper. The startup Information line names the endpoint and reminds about clock synchronisation.`
 4. Replace the last constraint line (`DurabilityMode.Balanced is supported. It requires opts.UseTcpForControlEndpoint()...`) with: `DurabilityMode.Balanced is supported with no extra configuration; the native mongocontrol transport is registered unless another control endpoint was configured. Node clocks must be synchronized.`
 
-- [ ] **Step 4: FOLLOWUPS**
+- [x] **Step 4: FOLLOWUPS**
 
 Add a section:
 
@@ -1062,7 +1062,7 @@ Add a section:
   handoff than one second; the durability timers it coordinates run at seconds to minutes today.
 ```
 
-- [ ] **Step 5: Humanize and check for dashes**
+- [x] **Step 5: Humanize and check for dashes**
 
 Run the humanizer on the new README, CHANGELOG and FOLLOWUPS text and on every new code comment. Then:
 
@@ -1072,7 +1072,7 @@ Get-ChildItem src -Recurse -Filter *.cs | Select-String -Pattern ([string][char]
 ```
 Expected: 0 and 0 (pre-existing dashes elsewhere in the docs are out of scope).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add CHANGELOG.md README.md CLAUDE.md FOLLOWUPS.md
@@ -1083,7 +1083,7 @@ git commit -m "docs(control): document the native control transport and drop the
 
 ### Task 7: Full verification on both TFMs
 
-- [ ] **Step 1: Clean build**
+- [x] **Step 1: Clean build**
 
 ```powershell
 Remove-Item -Recurse -Force src\Wolverine.MongoDB.Tests\Internal\Generated -ErrorAction SilentlyContinue
@@ -1091,7 +1091,7 @@ dotnet build -c Release
 ```
 Expected: 0 warnings, 0 errors (warnings are errors in this repo).
 
-- [ ] **Step 2: Single-node suite, both TFMs**
+- [x] **Step 2: Single-node suite, both TFMs**
 
 ```powershell
 dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "Category!=multinode"
@@ -1099,7 +1099,7 @@ dotnet test src/Wolverine.MongoDB.Tests -f net9.0 --filter "Category!=multinode"
 ```
 Expected: all pass.
 
-- [ ] **Step 3: Multinode suite, both TFMs, serially**
+- [x] **Step 3: Multinode suite, both TFMs, serially**
 
 ```powershell
 dotnet test src/Wolverine.MongoDB.Tests -f net10.0 --filter "Category=multinode"
@@ -1107,7 +1107,7 @@ dotnet test src/Wolverine.MongoDB.Tests -f net9.0 --filter "Category=multinode"
 ```
 Expected: all pass. Run the multinode suite a second time on net10.0 to catch a flaky poll timing.
 
-- [ ] **Step 4: Pack**
+- [x] **Step 4: Pack**
 
 ```powershell
 dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false
@@ -1118,11 +1118,11 @@ Expected: a nupkg in `src/Wolverine.MongoDB/bin/Release/`.
 
 ### Task 8: Pull request
 
-- [ ] **Step 1: Review the diff against the spec**
+- [x] **Step 1: Review the diff against the spec**
 
 Read `docs/superpowers/plans/2026-09-17-mongodb-control-transport-design.md` once more and confirm every item under Design, Testing and Documentation has a commit. Confirm `git grep UseTcpForControlEndpoint src/` returns only `durability_mode_guard.cs`.
 
-- [ ] **Step 2: Push and open the PR**
+- [x] **Step 2: Push and open the PR**
 
 ```powershell
 git push -u origin feat/control-transport
