@@ -375,3 +375,43 @@ Promote to GitHub issues before the first public release.
 - The reschedule-after-claim residual (see "Post-claim due-time re-check" above) has
   no test, because it is not fixed. `scheduled_claim_recheck.cs` covers only the
   select→claim window that the `ExecutionTime <= now` conjunct closes.
+
+## Control transport
+
+- **Change-stream listener, deferred.** The `mongocontrol` listener polls `wolverine_control_messages`
+  once a second, like every sibling provider. A change stream on the collection would push control
+  messages with sub-second latency and the library already requires a replica set, but it adds a
+  long-lived cursor per node and resume-token handling. Revisit if a consumer needs faster agent
+  handoff than one second; the durability timers it coordinates run at seconds to minutes today.
+
+- **`singular_agent_is_only_running_on_one` races on any polled control transport.** The upstream
+  fact waits until at least one host reports the `simple://` agent, then asserts that exactly one
+  does, with no settling time in between (`LeadershipElectionCompliance.cs:378-386`). Agent handoff
+  over `mongocontrol` costs up to one poll interval, so the stop that reaches the old owner can
+  trail the start on the new owner, and the loop exits inside that overlap and counts two. Measured
+  on one workstation: three consecutive full `Category=multinode` runs green with the two-host
+  suites still on TCP, against one failure of this fact across two runs on the native transport.
+  Upstream carries the same exposure deliberately, in
+  `RavenDbTests.LeaderElection/control_queue_leadership_election_compliance.cs`, which runs the
+  whole battery over RavenDb's control queue; that listener has the identical one-second poll and
+  100 to 1000 ms startup jitter, and the fact is not overridden there. Nothing to fix in the
+  transport. If the flake becomes tiresome in CI, the choices are to keep a TCP-configured copy of
+  the suite beside the native one, which is what upstream does for RavenDb, or to wait for
+  convergence before asserting.
+- **`Xunit.Sdk.TestPipelineException` with two facts never run, pre-existing.** A repeated full
+  `Category=multinode` run sometimes aborts the test host after 46 of the 48 facts, and the summary
+  line still reports no failures, so only the exit code gives it away. Reproduced at commit `8e82c99`,
+  the commit that added `control_transport_compliance.cs` (`control_queue_tests.cs` had already
+  landed). At that commit the two-host suites still called `UseTcpForControlEndpoint()`, so switching
+  them off TCP is ruled out as the cause; the two new `mongocontrol` suites being present in the run
+  is not. Confirming which one requires three `Category=multinode` runs at the merge base
+  `7caf5b6`, after the two-host suites moved to the native transport. One run of the category, which
+  is the CI shape, has been green on both frameworks.
+
+- **Demo still pins `UseTcpForControlEndpoint()` and calls it the only option.** Three places say so:
+  `demo/src/OrderDemo.Api/Program.cs:50-51` (comment: "MongoDB has no native control transport; nodes
+  coordinate over TCP", then calls `UseTcpForControlEndpoint()`), `demo/CLAUDE.md:70` ("Balanced
+  enables multi-instance coordination with a TCP control endpoint"), and `demo/README.md:141-142`
+  ("reachable TCP control endpoints between nodes" as a multinode requirement). All three are correct
+  today: the demo pins the published `Wolverine.MongoDB` 1.0.2 package, which predates this transport.
+  Whoever bumps the demo to 1.1.0 or later needs to update all three and drop the TCP call.

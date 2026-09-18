@@ -7,7 +7,6 @@ using Shouldly;
 using Wolverine.ErrorHandling;
 using Wolverine.MongoDB.Internals;
 using Wolverine.Persistence;
-using Wolverine.Transports.Tcp;
 using Xunit;
 
 namespace Wolverine.MongoDB.Tests;
@@ -54,18 +53,13 @@ public class entity_multinode
     private readonly AppFixture _fixture;
     public entity_multinode(AppFixture fixture) => _fixture = fixture;
 
-    // UseTcpForControlEndpoint() grabs its own OS-assigned free port internally, so two in-proc
-    // Balanced hosts never collide on the control port. The node label is OUR identifier (1 or 2),
-    // independent of Wolverine's assigned node number, recorded into the entity so the test can prove
-    // which node performed each write.
+    // The node label is OUR identifier (1 or 2), independent of Wolverine's assigned node
+    // number, recorded into the entity so the test can prove which node performed each write.
     private Task<IHost> StartNode(int nodeLabel) =>
         Host.CreateDefaultBuilder()
             .UseWolverine(opts =>
             {
                 opts.Durability.Mode = DurabilityMode.Balanced;
-
-                // MongoDB has no native control transport; Balanced nodes coordinate over TCP.
-                opts.UseTcpForControlEndpoint();
 
                 // Fresh compiled assembly per host (mirrors saga_multinode): avoids cross-host
                 // in-memory handler reuse from a message-type-keyed Auto codegen name.

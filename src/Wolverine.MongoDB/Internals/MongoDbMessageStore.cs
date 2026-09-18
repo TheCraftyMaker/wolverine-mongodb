@@ -150,7 +150,27 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         }, MongoTransactionOptions.Durable, cancellation);
     }
 
-    public void Initialize(IWolverineRuntime runtime) => WarnOnBalancedMode(runtime);
+    public void Initialize(IWolverineRuntime runtime)
+    {
+        // Balanced hosts need a control endpoint before WolverineNode.For runs, or it throws
+        // "ControlEndpoint cannot be null for this usage". Register the native one unless the host
+        // already supplied its own (TCP, a broker's control queues): a configured endpoint always wins.
+        if (Role == MessageStoreRole.Main
+            && runtime.Options.Transports.NodeControlEndpoint == null
+            && runtime.Options.Durability.Mode == DurabilityMode.Balanced)
+        {
+            // Reuse a transport a caller already registered rather than constructing a second
+            // one: two instances for the same scheme would each own their own endpoint cache, so
+            // whichever one lost the race to become NodeControlEndpoint would silently orphan its
+            // endpoints.
+            var transport = runtime.Options.Transports.OfType<Transport.MongoDbControlTransport>().FirstOrDefault()
+                            ?? new Transport.MongoDbControlTransport(_database, runtime.Options);
+            runtime.Options.Transports.Add(transport);
+            runtime.Options.Transports.NodeControlEndpoint = transport.ControlEndpoint;
+        }
+
+        WarnOnBalancedMode(runtime);
+    }
 
     public DatabaseDescriptor Describe() => new(this) { Engine = "mongodb", DatabaseName = _databaseName };
 
@@ -171,9 +191,9 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         if (runtime.Options.Durability.Mode != DurabilityMode.Balanced || _warnedOnBalanced) return;
         _warnedOnBalanced = true;
         runtime.LoggerFactory.CreateLogger<MongoDbMessageStore>().LogInformation(
-            "Wolverine.MongoDB is running in Balanced (multi-node) mode. " +
-            "A control endpoint is required (e.g. opts.UseTcpForControlEndpoint()) and node clocks " +
-            "must be synchronized to well within the lock lease ({Lease}).",
+            "Wolverine.MongoDB is running in Balanced (multi-node) mode with node control endpoint {ControlUri}. " +
+            "Node clocks must be synchronized to well within the lock lease ({Lease}).",
+            runtime.Options.Transports.NodeControlEndpoint?.Uri,
             _persistenceOptions.LockLeaseDuration);
     }
 

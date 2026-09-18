@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
 using Wolverine.ComplianceTests;
-using Wolverine.Transports.Tcp;
 
 namespace Wolverine.MongoDB.Tests;
 
@@ -38,10 +37,6 @@ public class leadership_election_compliance : LeadershipElectionCompliance
 
     protected override void configureNode(WolverineOptions opts)
     {
-        // MongoDB has no native control transport (unlike Cosmos); use TCP for the
-        // inter-node control endpoint required by Balanced mode, like RavenDb does.
-        opts.UseTcpForControlEndpoint();
-
         opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
         opts.UseMongoDbPersistence(AppFixture.DatabaseName,
             mongo => mongo.LockLeaseDuration = TimeSpan.FromSeconds(5));

@@ -70,8 +70,8 @@ can configure the client however you like (Atlas connection string, custom
 `Wolverine.MongoDB` supports both single-node (`DurabilityMode.Solo`) and
 multi-node (`DurabilityMode.Balanced`) deployments.
 
-Use `DurabilityMode.Solo` for single-instance deployments: no control endpoint
-is required and node coordination is minimal.
+Use `DurabilityMode.Solo` for single-instance deployments: with only one node
+there is nothing to coordinate, so no control channel runs at all.
 
 For multi-node clusters see [Multinode support](#multinode-support) below.
 
@@ -506,37 +506,44 @@ string coercion). `ListSagaInstancesAsync` clamps its `count` argument to `[0, 1
 
 ## Multinode support
 
-`DurabilityMode.Balanced` is supported. MongoDB has no native control transport,
-so a TCP control endpoint is required between nodes (mirroring Wolverine's RavenDb
-provider):
+`DurabilityMode.Balanced` is supported with no extra configuration. Nodes coordinate (leader
+election, agent assignment, exclusive listeners) over a control channel that this library
+provides on the same MongoDB database: each node listens on `mongocontrol://<its node id>`, and
+control messages are documents in `wolverine_control_messages`, indexed on `nodeId, posted` with
+a TTL index on `expires`. Nothing to configure:
 
 ```csharp
-using Wolverine.Transports.Tcp;
-
 builder.Host.UseWolverine(opts =>
 {
     opts.Durability.Mode = DurabilityMode.Balanced;
-
-    // Required: MongoDB has no native inter-node control transport.
-    opts.UseTcpForControlEndpoint();
-
     opts.UseMongoDbPersistence("my_database");
 });
 ```
 
-At startup, when `DurabilityMode.Balanced` is detected, the store logs an
-`Information` message confirming the mode and reminding you that synchronized
-clocks are required (not a throw; the host starts normally).
+To use another control channel instead (Wolverine's TCP endpoint, or a broker's control queues
+such as `EnableWolverineControlQueues()` on Azure Service Bus), call it anywhere inside the
+`opts` callback: the store checks for an existing control endpoint when it initializes at host
+startup, after the whole callback has already run, so the call does not need to come before
+`UseMongoDbPersistence`. An already configured control endpoint is always kept.
+
+During a rolling upgrade, a node still on the previous version advertises `tcp://...` as its
+control URI in `wolverine_nodes`, while an upgraded node advertises `mongocontrol://...`; the
+upgraded node can still reach the old one over `tcp://`, since Wolverine always registers that
+transport, but the old node's attempt to reach the upgraded one over `mongocontrol://` fails with
+`UnknownTransportException`, an ordinary send failure rather than a crash. The mismatch is
+transient and resolves itself once the rollout completes; a host that keeps an explicit TCP or
+broker control endpoint configured never sees it, because every node then agrees on the same
+scheme.
+
+At startup, when `DurabilityMode.Balanced` is detected, the store logs an `Information` message
+naming the control endpoint in use and reminding you that synchronized clocks are required.
 
 ### Multinode requirements
 
-- **`opts.UseTcpForControlEndpoint()`** (or any configured control endpoint):
-  nodes use Wolverine's control channel for leader election and agent balancing.
-  Without it, nodes cannot exchange control messages.
 - **Synchronized node clocks**: the leader lock uses a time-based lease
-  (`LockLeaseDuration`, default 1 minute). Node clocks must be synchronized to
-  well within this duration. Standard NTP keeps typical server clocks within a
-  few milliseconds, which is safe for the default lease.
+  (`LockLeaseDuration`, default 1 minute), and control messages expire thirty seconds after they
+  are posted. Node clocks must be synchronized to well within the lease. Standard NTP keeps
+  typical server clocks within a few milliseconds, which is safe for the defaults.
 
 ### Multinode semantics
 
@@ -633,7 +640,8 @@ The provider stores envelopes in dedicated collections
 (`wolverine_incoming_envelopes`, `wolverine_outgoing_envelopes`,
 `wolverine_dead_letters`) plus node-coordination collections
 (`wolverine_nodes`, `wolverine_node_assignments`) and, when opted in,
-`wolverine_deduplication` and `wolverine_recurring_messages`. Single-document atomic
+`wolverine_deduplication` and `wolverine_recurring_messages`. A Balanced host also
+writes control messages to `wolverine_control_messages`. Single-document atomic
 operations (`findAndModify`) handle ownership claims and idempotency rather than
 relying on multi-document transactions for the hot path, the approach proven in
 the MassTransit MongoDB outbox.
