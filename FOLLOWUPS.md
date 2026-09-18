@@ -383,3 +383,24 @@ Promote to GitHub issues before the first public release.
   messages with sub-second latency and the library already requires a replica set, but it adds a
   long-lived cursor per node and resume-token handling. Revisit if a consumer needs faster agent
   handoff than one second; the durability timers it coordinates run at seconds to minutes today.
+
+- **`singular_agent_is_only_running_on_one` races on any polled control transport.** The upstream
+  fact waits until at least one host reports the `simple://` agent, then asserts that exactly one
+  does, with no settling time in between (`LeadershipElectionCompliance.cs:378-386`). Agent handoff
+  over `mongocontrol` costs up to one poll interval, so the stop that reaches the old owner can
+  trail the start on the new owner, and the loop exits inside that overlap and counts two. Measured
+  on one workstation: three consecutive full `Category=multinode` runs green with the two-host
+  suites still on TCP, against one failure of this fact across two runs on the native transport.
+  Upstream carries the same exposure deliberately, in
+  `RavenDbTests.LeaderElection/control_queue_leadership_election_compliance.cs`, which runs the
+  whole battery over RavenDb's control queue; that listener has the identical one-second poll and
+  100 to 1000 ms startup jitter, and the fact is not overridden there. Nothing to fix in the
+  transport. If the flake becomes tiresome in CI, the choices are to keep a TCP-configured copy of
+  the suite beside the native one, which is what upstream does for RavenDb, or to wait for
+  convergence before asserting.
+- **`Xunit.Sdk.TestPipelineException` with two facts never run, pre-existing.** A repeated full
+  `Category=multinode` run sometimes aborts the test host after 46 of the 48 facts, and the summary
+  line still reports no failures, so only the exit code gives it away. It reproduces at a commit
+  where the two-host suites still called `UseTcpForControlEndpoint()`, which places it in the
+  shared multinode harness rather than in the control transport or any single suite. One run of the
+  category, which is the CI shape, has been green on both frameworks.
