@@ -138,8 +138,9 @@ Both instances register in `wolverine_nodes`; one acquires the leader lock in
 shared outbox and exactly one instance projects each event. Kill one instance and
 watch the survivor take over its work (node ejection + ownership release).
 
-Requirements: synchronized clocks across instances (the leader lease tolerates
-skew well under its duration) and reachable TCP control endpoints between nodes.
+Node coordination runs over Wolverine.MongoDB's native `mongocontrol` transport, so
+no control endpoint needs configuring. Requirement: synchronized clocks across
+instances (the leader lease tolerates skew well under its duration).
 
 ## How the transaction works
 

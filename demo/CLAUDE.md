@@ -67,7 +67,7 @@ OrderFulfillmentSaga (Handle(OrderShippedApplicationEvent) / Handle(ConfirmDeliv
 ## Key Wolverine Configuration (Program.cs)
 
 - `opts.UseMongoDbPersistence(databaseName)` — registers MongoDB outbox/inbox
-- Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination with a TCP control endpoint
+- Durability mode is config-driven (`Wolverine:DurabilityMode`, default `Solo`); `Balanced` enables multi-instance coordination over Wolverine.MongoDB's native `mongocontrol` transport, provisioned automatically
 - `opts.Policies.AutoApplyTransactions()` — auto-wraps handlers using `IMongoDatabase` in a transaction
 - `.UseDurableInbox()` on the projection queue — inbox persistence for at-least-once delivery
 - `opts.PublishMessage<T>().ToRabbitExchange(...)` — outbox-backed publish routing
