@@ -8,6 +8,8 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-18
+
 ### Added
 - **Native control transport for `DurabilityMode.Balanced`.** A Balanced host that configures no other
   node control endpoint now gets one over its own MongoDB database: `mongocontrol://<node id>` per node,
@@ -572,7 +574,8 @@ Post-review hardening pass (adversarial review of the 0.1.0 implementation):
   `WolverineFx.ComplianceTests` is published to NuGet.
 - Replica set is required; standalone MongoDB is not supported.
 
-[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/TheCraftyMaker/wolverine-mongodb/compare/v0.1.0-beta.7...v1.0.0
