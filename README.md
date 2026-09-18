@@ -70,8 +70,8 @@ can configure the client however you like (Atlas connection string, custom
 `Wolverine.MongoDB` supports both single-node (`DurabilityMode.Solo`) and
 multi-node (`DurabilityMode.Balanced`) deployments.
 
-Use `DurabilityMode.Solo` for single-instance deployments: no control endpoint
-is required and node coordination is minimal.
+Use `DurabilityMode.Solo` for single-instance deployments: with only one node
+there is nothing to coordinate, so no control channel runs at all.
 
 For multi-node clusters see [Multinode support](#multinode-support) below.
 
@@ -526,6 +526,15 @@ such as `EnableWolverineControlQueues()` on Azure Service Bus), call it anywhere
 startup, after the whole callback has already run, so the call does not need to come before
 `UseMongoDbPersistence`. An already configured control endpoint is always kept.
 
+During a rolling upgrade, a node still on the previous version advertises `tcp://...` as its
+control URI in `wolverine_nodes`, while an upgraded node advertises `mongocontrol://...`; the
+upgraded node can still reach the old one over `tcp://`, since Wolverine always registers that
+transport, but the old node's attempt to reach the upgraded one over `mongocontrol://` fails with
+`UnknownTransportException`, an ordinary send failure rather than a crash. The mismatch is
+transient and resolves itself once the rollout completes; a host that keeps an explicit TCP or
+broker control endpoint configured never sees it, because every node then agrees on the same
+scheme.
+
 At startup, when `DurabilityMode.Balanced` is detected, the store logs an `Information` message
 naming the control endpoint in use and reminding you that synchronized clocks are required.
 
@@ -631,7 +640,8 @@ The provider stores envelopes in dedicated collections
 (`wolverine_incoming_envelopes`, `wolverine_outgoing_envelopes`,
 `wolverine_dead_letters`) plus node-coordination collections
 (`wolverine_nodes`, `wolverine_node_assignments`) and, when opted in,
-`wolverine_deduplication` and `wolverine_recurring_messages`. Single-document atomic
+`wolverine_deduplication` and `wolverine_recurring_messages`. A Balanced host also
+writes control messages to `wolverine_control_messages`. Single-document atomic
 operations (`findAndModify`) handle ownership claims and idempotency rather than
 relying on multi-document transactions for the hot path, the approach proven in
 the MassTransit MongoDB outbox.

@@ -99,3 +99,21 @@ The existing two-host suites (`multinode_end_to_end.cs`, `saga_multinode.cs`, `e
 - **Indexes gated on Balanced, sweep unconditional.** Solo deployments stay byte-identical; a rebuild always clears everything.
 - **Expiry filter in the listener query.** One predicate, closes the window between expiry and the TTL sweep.
 - **One PR.** The change is cohesive and small; docs travel with the code.
+
+## As built
+
+- The Testing section above lists `exclusive_listener_recovery_compliance.cs` among the suites
+  that drop their `UseTcpForControlEndpoint()` line. That suite starts one Solo host per fact and
+  never called it, so nothing changed there.
+- The Testing section says the upstream `TransportCompliance<T>` suite has 23 facts. At the
+  pinned `V6.38.0` submodule it declares 23 `[Fact]` attributes, one of them commented out
+  upstream, so 22 actually run.
+- The Registration section argues for lazy registration on the grounds that nothing in this
+  library publishes application messages to a control queue. The Testing section's own
+  `MongoDbControlTransportFixture` contradicts that: the upstream compliance harness's
+  `PublishAllMessages().To(OutboundAddress)` rule resolves the `mongocontrol` scheme at host
+  build time, before `Initialize` runs. Resolution: lazy registration stayed,
+  `MongoDbMessageStore.Initialize` now reuses an already-registered `MongoDbControlTransport`
+  instead of constructing a second one, the way `RavenDbMessageStore.Initialize` does, and the
+  compliance fixture registers the transport itself on the sender host so the scheme resolves
+  for the harness's publishing rule.

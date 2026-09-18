@@ -400,7 +400,18 @@ Promote to GitHub issues before the first public release.
   convergence before asserting.
 - **`Xunit.Sdk.TestPipelineException` with two facts never run, pre-existing.** A repeated full
   `Category=multinode` run sometimes aborts the test host after 46 of the 48 facts, and the summary
-  line still reports no failures, so only the exit code gives it away. It reproduces at a commit
-  where the two-host suites still called `UseTcpForControlEndpoint()`, which places it in the
-  shared multinode harness rather than in the control transport or any single suite. One run of the
-  category, which is the CI shape, has been green on both frameworks.
+  line still reports no failures, so only the exit code gives it away. Reproduced at commit `8e82c99`,
+  the commit that added `control_transport_compliance.cs` (`control_queue_tests.cs` had already
+  landed). At that commit the two-host suites still called `UseTcpForControlEndpoint()`, so switching
+  them off TCP is ruled out as the cause; the two new `mongocontrol` suites being present in the run
+  is not. Confirming which one requires three `Category=multinode` runs at the merge base
+  `7caf5b6`, after the two-host suites moved to the native transport. One run of the category, which
+  is the CI shape, has been green on both frameworks.
+
+- **Demo still pins `UseTcpForControlEndpoint()` and calls it the only option.** Three places say so:
+  `demo/src/OrderDemo.Api/Program.cs:50-51` (comment: "MongoDB has no native control transport; nodes
+  coordinate over TCP", then calls `UseTcpForControlEndpoint()`), `demo/CLAUDE.md:70` ("Balanced
+  enables multi-instance coordination with a TCP control endpoint"), and `demo/README.md:141-142`
+  ("reachable TCP control endpoints between nodes" as a multinode requirement). All three are correct
+  today: the demo pins the published `Wolverine.MongoDB` 1.0.2 package, which predates this transport.
+  Whoever bumps the demo to 1.1.0 or later needs to update all three and drop the TCP call.
