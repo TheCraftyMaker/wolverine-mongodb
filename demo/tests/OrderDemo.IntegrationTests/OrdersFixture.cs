@@ -77,7 +77,7 @@ public sealed class OrdersFixture : IAsyncLifetime
     /// Builds and starts a Wolverine IHost wired to MongoDB for the given database.
     /// Application events are routed to a local durable queue (no RabbitMQ required).
     /// </summary>
-    public async Task<IHost> CreateHostAsync(string databaseName)
+    public async Task<IHost> CreateHostAsync(string databaseName, DurabilityMode mode = DurabilityMode.Solo)
     {
         var host = await Host.CreateDefaultBuilder()
             .UseDefaultServiceProvider(opts =>
@@ -88,7 +88,7 @@ public sealed class OrdersFixture : IAsyncLifetime
             })
             .UseWolverine(opts =>
             {
-                opts.Durability.Mode = DurabilityMode.Solo;
+                opts.Durability.Mode = mode;
 
                 // Mirror Program.cs. OrderPlacedApplicationEvent / OrderShippedApplicationEvent are
                 // handled by BOTH the OrderFulfillmentSaga and the OrderSummaryProjector. Separated
