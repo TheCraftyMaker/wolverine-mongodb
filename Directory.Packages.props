@@ -17,6 +17,6 @@
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <!-- 2.4.1 is the VSTest-only logger; 3.x targets Microsoft.Testing.Platform 2.0, which conflicts with
          the MTP 1.9.1 that xunit.v3 3.2.2 carries (CS1705). Same pin as upstream Wolverine. -->
-    <PackageVersion Include="GitHubActionsTestLogger" Version="2.4.1" />
+    <PackageVersion Include="GitHubActionsTestLogger" Version="3.0.5" />
   </ItemGroup>
 </Project>
