@@ -384,20 +384,35 @@ Promote to GitHub issues before the first public release.
   long-lived cursor per node and resume-token handling. Revisit if a consumer needs faster agent
   handoff than one second; the durability timers it coordinates run at seconds to minutes today.
 
-- **`singular_agent_is_only_running_on_one` races on any polled control transport.** The upstream
-  fact waits until at least one host reports the `simple://` agent, then asserts that exactly one
-  does, with no settling time in between (`LeadershipElectionCompliance.cs:378-386`). Agent handoff
-  over `mongocontrol` costs up to one poll interval, so the stop that reaches the old owner can
-  trail the start on the new owner, and the loop exits inside that overlap and counts two. Measured
-  on one workstation: three consecutive full `Category=multinode` runs green with the two-host
-  suites still on TCP, against one failure of this fact across two runs on the native transport.
-  Upstream carries the same exposure deliberately, in
-  `RavenDbTests.LeaderElection/control_queue_leadership_election_compliance.cs`, which runs the
-  whole battery over RavenDb's control queue; that listener has the identical one-second poll and
-  100 to 1000 ms startup jitter, and the fact is not overridden there. Nothing to fix in the
-  transport. If the flake becomes tiresome in CI, the choices are to keep a TCP-configured copy of
-  the suite beside the native one, which is what upstream does for RavenDb, or to wait for
-  convergence before asserting.
+- **`singular_agent_is_only_running_on_one` runs on a TCP control endpoint, deliberately.** The
+  upstream fact asserts exclusivity the instant any host reports the `simple://` agent, with no
+  settling time (`LeadershipElectionCompliance.cs:380-386`). Agent handoff over a polled control
+  transport costs up to a poll interval, which widens the window where a new leader re-drives a
+  start the previous leader already dispatched (`NodeAgentController.cs:316` writes the assignment
+  row only after the destination starts, and `EvaluateAssignments.cs:23` notes a new leader "starts
+  empty and safely re-drives everything"), so the assertion samples inside it. That fact is the only
+  coverage anywhere of a `SingularAgent` running on at most one node: `simple://` appears in no other
+  fact, the `expectExactlyOneCopyOfEachAsync` and `expectOneCopyWithARowNamingItsNodeAsync` helpers
+  are only ever pointed at the twelve `fake://` agents, and `AssignmentWaiter.HasReached`
+  (`Wolverine/TestingExtensions.cs:345-347`) filters the `simple` scheme out. So excluding or
+  skipping it would leave that property untested rather than covered elsewhere, and
+  `leadership_election_compliance.cs` keeps `UseTcpForControlEndpoint()` instead. Upstream splits the
+  same way: `RavenDbTests.LeaderElection/leadership_election_compliance.cs:42` configures TCP and a
+  separate `control_queue_leadership_election_compliance.cs` runs the battery over the native queue.
+  Nothing to fix in the transport, and the transport's own contract stays covered by
+  `control_transport_compliance` and `control_queue_tests`.
+  Two measurements from settling this, so nobody repeats them. The failure is
+  environment-sensitive rather than deterministic: on one workstation the fact passed 25 of 25 runs
+  over `mongocontrol`, including 6 pinned to two logical CPUs to widen the race, and the full
+  category passed 48 of 48 four times, while the same code failed on both frameworks on a CI runner.
+  And the earlier claim here that a lagging stop causes the duplicate is wrong: the failing CI log
+  contains no "Successfully stopped agent" line at all (`NodeAgentController.cs:538`), so no stop was
+  in flight. The duplicate is an unretracted start, not a late stop.
+  A gated copy of the battery over `mongocontrol` is the remaining gap. Upstream keeps theirs green
+  with a harness that retries each failed test up to three times in a fresh process
+  (`build/SupervisedTests.cs:155`) and reports a pass-on-retry as green; this repository runs one
+  plain `dotnet test` per step and has no per-test retry, because the suite runs on VSTest rather
+  than Microsoft.Testing.Platform. Add the second class when per-test retry exists here.
 - **`Xunit.Sdk.TestPipelineException` with two facts never run, pre-existing.** A repeated full
   `Category=multinode` run sometimes aborts the test host after 46 of the 48 facts, and the summary
   line still reports no failures, so only the exit code gives it away. Reproduced at commit `8e82c99`,
