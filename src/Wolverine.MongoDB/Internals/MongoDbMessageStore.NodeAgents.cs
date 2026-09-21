@@ -157,12 +157,14 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
     // which is why AssignAgentsAsync/AddAssignmentAsync upsert unscoped, matching Postgres's
     // "on conflict (id) do update set node_id". A delete keyed on the URI alone would therefore let a
     // node that no longer owns an agent wipe the row that now belongs to a *different* node.
-    // Wolverine's only caller, NodeAgentController.StopAgentAsync, always passes its own
-    // UniqueNodeId ("remove MY claim") and issues the removal even when this node was never running
-    // the agent (it sits outside the Agents.TryGetValue guard), so an unscoped delete is unsound even
-    // though upstream ordering makes it hard to hit in practice. Every RDBMS provider filters on both
-    // columns ("delete from ... where id = :id and node_id = :node"); a mismatch is a silent no-op
-    // there and here. Do NOT node-scope the writes above — their unscoped upsert IS how ownership
+    // Wolverine's caller, NodeAgentController.StopAgentAsync, always passes its own UniqueNodeId
+    // ("remove MY claim") and issues the removal even when this node was never running the agent (it
+    // sits outside the Agents.TryGetValue guard). This scoping is a hard requirement rather than
+    // defence in depth: core carries a removeAssignment: false path (NodeAgentController.cs:511,
+    // called from Reconcile.cs:176) because an unscoped delete let a leader read the agent as
+    // unassigned and place it again, starting a duplicate. Every provider now filters on both, the
+    // five SQL ones on id and node_id, RavenDb and Cosmos on a NodeId comparison added for GH-4407;
+    // a mismatch is a silent no-op everywhere. Do NOT node-scope the writes above — their unscoped upsert IS how ownership
     // transfers, and the NodePersistenceCompliance assignment facts depend on it.
     public Task RemoveAssignmentAsync(Guid nodeId, Uri agentUri, CancellationToken cancellationToken)
         => AssignmentDocs.DeleteOneAsync(
@@ -267,7 +269,7 @@ public partial class MongoDbMessageStore : INodeAgentPersistence
     // Intentionally narrow: clears only node + assignment state, the operational surface
     // INodeAgentPersistence owns. Counters/locks/node-records/agent-restrictions are left
     // alone. A full system reset is IMessageStoreAdmin.ClearAllAsync/RebuildAsync
-    // (MongoDbMessageStore.Admin.cs), which clears all nine system collections plus every
+    // (MongoDbMessageStore.Admin.cs), which clears all twelve system collections plus every
     // wolverine_saga_* collection — that is the method the test harness calls.
     public async Task ClearAllAsync(CancellationToken cancellationToken)
     {

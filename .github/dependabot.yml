@@ -1,16 +1,29 @@
 version: 2
 updates:
+  # The root and the demo share MongoDB.Driver, WolverineFx*, Microsoft.NET.Test.Sdk and
+  # Testcontainers.MongoDb. They sit in one entry so group-by bumps a shared package in both
+  # manifests at once. Split entries let the two pins drift, and the demo builds against the
+  # nupkg the library job just packed: once the root pin moves ahead, the demo's own reference
+  # sits below what the package demands and restore fails with NU1605.
   - package-ecosystem: "nuget"
-    directory: "/"
+    directories:
+      - "/"
+      - "/demo"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: "nuget"
-    directory: "/demo"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
+    groups:
+      shared:
+        group-by: dependency-name
+    ignore:
+      # Blocked on the MTP 1.9.1 vs 2.0 conflict the pin in Directory.Packages.props documents
+      # (CS1705). Lift once the submodule pin reaches xunit.v3 4.x.
+      - dependency-name: "GitHubActionsTestLogger"
+        update-types: ["version-update:semver-major"]
+      # 4.x is MTP-only and drops the VSTest target on the .NET 10 SDK. Wolverine.ComplianceTests
+      # at the pinned V6.38.0 builds on xunit.v3.extensibility.core 3.2.2, so upstream moves first.
+      - dependency-name: "xunit.v3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

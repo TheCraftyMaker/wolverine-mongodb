@@ -29,3 +29,6 @@ artifacts/
 
 # /teach workspace (personal learning materials — not part of the package)
 .teach/
+
+# Agent scratch: plans, verification logs, review packages (not part of the package)
+.superpowers/
