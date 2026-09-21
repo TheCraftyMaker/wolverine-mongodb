@@ -422,11 +422,3 @@ Promote to GitHub issues before the first public release.
   is not. Confirming which one requires three `Category=multinode` runs at the merge base
   `7caf5b6`, after the two-host suites moved to the native transport. One run of the category, which
   is the CI shape, has been green on both frameworks.
-
-- **Demo still pins `UseTcpForControlEndpoint()` and calls it the only option.** Three places say so:
-  `demo/src/OrderDemo.Api/Program.cs:50-51` (comment: "MongoDB has no native control transport; nodes
-  coordinate over TCP", then calls `UseTcpForControlEndpoint()`), `demo/CLAUDE.md:70` ("Balanced
-  enables multi-instance coordination with a TCP control endpoint"), and `demo/README.md:141-142`
-  ("reachable TCP control endpoints between nodes" as a multinode requirement). All three are correct
-  today: the demo pins the published `Wolverine.MongoDB` 1.0.2 package, which predates this transport.
-  Whoever bumps the demo to 1.1.0 or later needs to update all three and drop the TCP call.
