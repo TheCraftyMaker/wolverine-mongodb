@@ -357,14 +357,15 @@ Promote to GitHub issues before the first public release.
   reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
   (test or app) reads the `agentUri` field directly first.
 
-- **Upstream: RavenDb and Cosmos ignore `nodeId` in `RemoveAssignmentAsync` too.** Both
-  (`Wolverine.RavenDb/Internals/RavenDbMessageStore.NodeAgents.cs`,
-  `Wolverine.CosmosDb/Internals/CosmosDbMessageStore.NodeAgents.cs`) delete the agent-assignment
-  document by agent URI alone, the same unscoped delete this provider fixed under `## [Unreleased]`
-  in `CHANGELOG.md`; all five RDBMS providers filter on `id` **and** `node_id`. Nothing about a
-  document store makes the predicate hard, so this reads as a plain omission rather than a
-  deliberate trade-off. Raise a one-line PR against each when this provider is contributed upstream
-  (same moment as the `ISagaStoreDiagnostics` internals note above).
+- **Upstream: RavenDb and Cosmos scope `RemoveAssignmentAsync` as of V6.38.0. Closed, nothing to
+  raise.** Both now refuse to delete a row another node owns, citing GH-4407:
+  `RavenDbMessageStore.NodeAgents.cs:228-250` loads the document under optimistic concurrency and
+  returns early when `NodeId` is not this node's, and
+  `CosmosDbMessageStore.NodeAgents.cs:261-284` reads the item, returns early on the same comparison, and
+  conditions the delete on the ETag of that read. So all five RDBMS providers, both document stores and
+  this provider agree on the predicate. An earlier note here said both document stores ignored `nodeId`
+  and wanted a one-line PR against each. That was true of an older Wolverine, not of the pinned
+  submodule.
 
 ## Untested-but-inspected paths (add deterministic coverage later)
 
@@ -408,17 +409,55 @@ Promote to GitHub issues before the first public release.
   And the earlier claim here that a lagging stop causes the duplicate is wrong: the failing CI log
   contains no "Successfully stopped agent" line at all (`NodeAgentController.cs:538`), so no stop was
   in flight. The duplicate is an unretracted start, not a late stop.
-  A gated copy of the battery over `mongocontrol` is the remaining gap. Upstream keeps theirs green
-  with a harness that retries each failed test up to three times in a fresh process
-  (`build/SupervisedTests.cs:155`) and reports a pass-on-retry as green; this repository runs one
-  plain `dotnet test` per step and has no per-test retry, because the suite runs on VSTest rather
-  than Microsoft.Testing.Platform. Add the second class when per-test retry exists here.
+  This repository splits the same way. `control_queue_leadership_election_compliance.cs` runs the
+  battery over `mongocontrol`, and `.github/workflows/ci.yml` excludes only
+  `singular_agent_is_only_running_on_one` from that copy, by name. So 18 of the suite's 19 facts are
+  gated on the native transport, among them
+  `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`
+  (`LeadershipElectionCompliance.cs:350-361`), which drives the same scenario the excluded fact does, a
+  leader dying with its starts in flight, but waits up to 60 seconds for convergence instead of sampling
+  an instant. Convergence is therefore gated on `mongocontrol`, and the only fact not gated there is the
+  instantaneous exclusivity assertion, which the TCP class still gates.
+  Running that one on `mongocontrol` too needs per-test retry, which means moving this test project off
+  VSTest onto Microsoft.Testing.Platform. Upstream's harness has it and reports a pass-on-retry as green
+  (`build/SupervisedTests.cs:155`); here the `GitHubActionsTestLogger` 2.4.1 pin described in CLAUDE.md's
+  "Build & Test" section blocks the move.
+
+- **Upstream: let the durable assignment row decide exclusivity.** The fix for the fact
+  above belongs in core, not here. `NodeAgentController.StartAgentAsync`
+  (`external/wolverine/src/Wolverine/Runtime/Agents/NodeAgentController.cs:316`) starts the agent first
+  and writes the assignment row afterwards (`:402`, via `upsertAssignmentAsync`), so while a start is in
+  flight nothing durable says the agent is taken. The only record of it is the dispatching leader's
+  in-memory ledger, which the next leader does not inherit
+  (`NodeAgentController.EvaluateAssignments.cs:23`: a new leader "starts empty and safely re-drives
+  everything"). Calling `TryClaimAssignmentAsync` at the top of `StartAgentAsync` and returning on
+  `false` would put the arbitration on a single atomic write, so a re-driven start loses the claim and
+  never runs. Every provider already implements that method, this one at
+  `MongoDbMessageStore.NodeAgents.cs:134-153` (an `_id`-unique insert whose duplicate-key branch reports
+  whether the surviving row already names this node), and core calls it from a single site today, the
+  reconciliation sweep's "no durable row anywhere" branch (`NodeAgentController.Reconcile.cs:186`).
+  Three things a patch would have to settle. `LeaderUri` is excluded from the sweep
+  (`NodeAgentController.Reconcile.cs:58-59`) and needs excluding from the claim too, because the election
+  places the leader agent rather than the assignment grid. The idempotent-restart path
+  (`NodeAgentController.cs:323-333`) depends on "already mine returns `true`", which
+  `NodePersistenceCompliance.cs:293` pins for every provider. And a claim that lands before a start that
+  then throws leaves a claimed-but-not-running row, which is the sweep's other mismatch direction and
+  already heals itself (`NodeAgentController.Reconcile.cs:151-159` restarts it).
+  This is work for an upstream PR, not for this repository. Raise it with the `ISagaStoreDiagnostics`
+  internals note above when the provider goes upstream.
+
 - **`Xunit.Sdk.TestPipelineException` with two facts never run, pre-existing.** A repeated full
-  `Category=multinode` run sometimes aborts the test host after 46 of the 48 facts, and the summary
-  line still reports no failures, so only the exit code gives it away. Reproduced at commit `8e82c99`,
-  the commit that added `control_transport_compliance.cs` (`control_queue_tests.cs` had already
-  landed). At that commit the two-host suites still called `UseTcpForControlEndpoint()`, so switching
-  them off TCP is ruled out as the cause; the two new `mongocontrol` suites being present in the run
-  is not. Confirming which one requires three `Category=multinode` runs at the merge base
-  `7caf5b6`, after the two-host suites moved to the native transport. One run of the category, which
-  is the CI shape, has been green on both frameworks.
+  `Category=multinode` run sometimes aborts the whole test host partway through, and the summary line
+  still reports no failures, so only the exit code gives it away. Reproduced at commit `8e82c99`,
+  where the two-host suites still called `UseTcpForControlEndpoint()`, so switching them off TCP is
+  ruled out as the cause. Seen again while verifying the native leadership class: two consecutive
+  net10.0 aborts at 18 of 66 facts, exit code `-1073740940` (`0xC0000374`, `STATUS_HEAP_CORRUPTION`),
+  landing between test classes rather than inside a fact, with all 18 executed facts passing. The
+  same command then returned 66/66 twice, and net9.0 returned 66/66 throughout, so it is not a
+  cumulative-load threshold: runs completing 37 and 48 facts passed while the aborting run died at
+  18. Both aborts fell in a window before the machine suspended, which is the leading explanation.
+  What this change does alter is the blast radius. The category is now 66 facts in one process, and
+  this repository runs one plain `dotnet test` per step with no retry, so a single host crash costs
+  the entire step where upstream's harness would retry in a fresh process and report green
+  (`build/SupervisedTests.cs:155`). Watch for it on CI runners; if it recurs there, per-test retry
+  stops being a nicety.
