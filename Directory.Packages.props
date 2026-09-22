@@ -7,8 +7,8 @@
     <PackageVersion Include="WolverineFx" Version="6.38.0" />
     <PackageVersion Include="WolverineFx.ComplianceTests" Version="6.38.0" />
     <PackageVersion Include="WolverineFx.Http" Version="6.38.0" />
-    <PackageVersion Include="MongoDB.Driver" Version="3.11.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
+    <PackageVersion Include="MongoDB.Driver" Version="3.12.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="Testcontainers.MongoDb" Version="4.15.0" />
     <!-- xUnit v3: WolverineFx.ComplianceTests is built on xunit.v3.extensibility.core 3.2.2, so the
          test project must be an xunit.v3 test host (OutputType Exe). Pinned to the same 3.2.2. -->
