@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="WolverineFx" Version="6.39.1" />
+    <PackageVersion Include="WolverineFx" Version="6.51.0" />
     <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.39.1" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.17.6" />
     <PackageVersion Include="MongoDB.Driver" Version="3.12.0" />
@@ -14,7 +14,7 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageVersion Include="FluentAssertions" Version="8.11.0" />
-    <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.39.1" />
+    <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.51.0" />
     <PackageVersion Include="Wolverine.MongoDB" Version="1.1.0" />
   </ItemGroup>
 </Project>
