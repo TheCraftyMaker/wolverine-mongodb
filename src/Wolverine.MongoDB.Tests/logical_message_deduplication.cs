@@ -40,7 +40,8 @@ public class logical_message_deduplication
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private IMongoDatabase Database => _fixture.Client.GetDatabase(AppFixture.DatabaseName);
 
-    private async Task<IHost> buildHostAsync(bool enabled = true)
+    private async Task<IHost> buildHostAsync(bool enabled = true,
+        MessageDeduplicationMode compareMode = MessageDeduplicationMode.CompareByHash)
     {
         await _fixture.ClearAll();
         await Database.DropCollectionAsync(MongoConstants.DeduplicationCollection, Ct);
@@ -64,7 +65,7 @@ public class logical_message_deduplication
                     .IncludeType(typeof(FailingTransactionalHandler));
                 opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
                 opts.UseMongoDbPersistence(AppFixture.DatabaseName);
-                opts.Durability.EnableMessageDeduplication = enabled;
+                opts.Durability.MessageDeduplicationMode = enabled ? compareMode : MessageDeduplicationMode.None;
                 opts.Durability.DeduplicationWindow = 1.Hours();
                 opts.Policies.AutoApplyTransactions();
                 opts.MessageDeduplication.ByMessage<ComposedIdentityMessage>(x => $"{x.Tenant}|{x.Sequence}");
@@ -322,6 +323,16 @@ public class logical_message_deduplication
         outgoing.DeduplicationId = "order-42|2026-09-15|out";
         await store.Outbox.StoreOutgoingAsync(outgoing, MongoConstants.AnyNode);
         (await store.Outbox.LoadOutgoingAsync(outgoing.Destination)).Single().DeduplicationId.ShouldBe("order-42|2026-09-15|out");
+    }
+
+    [Fact]
+    public async Task compare_by_string_mode_also_yields_the_mongodb_store()
+    {
+        using var host = await buildHostAsync(compareMode: MessageDeduplicationMode.CompareByString);
+        await host.ResetResourceState(Ct);
+
+        storeOf(host).ShouldBeOfType<MongoDbDeduplicationStore>();
+        storeOf(host).Enabled.ShouldBeTrue();
     }
 
     [Fact]

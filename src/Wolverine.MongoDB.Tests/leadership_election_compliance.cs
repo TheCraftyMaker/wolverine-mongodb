@@ -1,3 +1,4 @@
+using Bobcat;
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
 using Wolverine.ComplianceTests;
@@ -22,11 +23,12 @@ namespace Wolverine.MongoDB.Tests;
 // "any healthy node leads" model this provider already implements — so un-gating did NOT require
 // the declined "lowest live node wins" election change. Verified 5x consecutive green on BOTH
 // net9.0 and net10.0 (10/10 runs of the full Category=multinode suite) before removing the guard,
-// on the TCP control endpoint this suite still configures. The suite carries 19 facts at the
-// V6.38.0 pin; it carried 13 when it was un-gated.
+// on the TCP control endpoint this suite still configures. The suite carries 23 specs at the
+// V6.65.1 pin; it carried 13 when it was un-gated.
 // The [Trait("Category","multinode")] below routes it into CI's existing multinode step with no
 // ci.yml change (that step already runs `dotnet test --filter "Category=multinode"`).
 //   Decision + 5x proof: FOLLOWUPS.md and the multinode-leadership-model-decision memory.
+[BobcatFeature("MongoDB leader election, TCP control endpoint")]
 [Trait("Category", "multinode")]
 [Collection("mongodb")]
 public class leadership_election_compliance : LeadershipElectionCompliance

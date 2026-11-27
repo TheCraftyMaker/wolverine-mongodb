@@ -18,7 +18,7 @@ public class DeduplicationClaimDocument
 
 /// <summary>
 /// <see cref="IDeduplicationStore"/> over the <c>wolverine_deduplication</c> collection. Built only when
-/// <c>DurabilitySettings.EnableMessageDeduplication</c> is on; otherwise the store returns
+/// <c>DurabilitySettings.MessageDeduplicationMode</c> is not <c>None</c>; otherwise the store returns
 /// <see cref="NullDeduplicationStore.Instance"/> and provisions nothing (the contract's requirement).
 /// <para>
 /// <b>Claim = one insert.</b> <see cref="TryClaimAsync"/> is an <c>InsertOneAsync</c> on the claim's own

@@ -86,11 +86,11 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
 
     /// <summary>
     /// Logical message deduplication (GH-4180). Opt-in: with
-    /// <c>DurabilitySettings.EnableMessageDeduplication</c> off this is <see cref="NullDeduplicationStore.Instance"/>
+    /// <c>DurabilitySettings.MessageDeduplicationMode</c> set to <c>None</c> this is <see cref="NullDeduplicationStore.Instance"/>
     /// and no collection or index is provisioned, so an upgrade is a no-op for hosts that have not asked
     /// for the feature. See <see cref="MongoDbDeduplicationStore"/> for the claim semantics.
     /// </summary>
-    public IDeduplicationStore Deduplication => _deduplication ??= _options.Durability.EnableMessageDeduplication
+    public IDeduplicationStore Deduplication => _deduplication ??= _options.Durability.MessageDeduplicationMode != MessageDeduplicationMode.None
         ? new MongoDbDeduplicationStore(_database)
         : NullDeduplicationStore.Instance;
 
