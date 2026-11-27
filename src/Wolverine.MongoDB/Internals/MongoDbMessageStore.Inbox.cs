@@ -155,6 +155,13 @@ public partial class MongoDbMessageStore : IMessageInbox
     public Task MarkIncomingEnvelopeAsHandledAsync(Envelope envelope)
         => MarkIncomingEnvelopeAsHandledAsync(new[] { envelope });
 
+    /// <summary>
+    /// Marks the documents handled and releases their owner. A handled document is kept only for
+    /// idempotency and recovery reads only <see cref="EnvelopeStatus.Incoming"/> documents, so it has
+    /// no owner, the same as a marker inserted already handled (<see cref="Envelope.ForPersistedHandled"/>).
+    /// Left owned, it would keep its node number in the dead-node ownership sweep and be rewritten by
+    /// every release of that owner.
+    /// </summary>
     public Task MarkIncomingEnvelopeAsHandledAsync(IReadOnlyList<Envelope> envelopes)
     {
         var ids = envelopes.Select(InboxIdentity).ToList();
@@ -162,6 +169,7 @@ public partial class MongoDbMessageStore : IMessageInbox
             Builders<IncomingMessage>.Filter.In(x => x.Id, ids),
             Builders<IncomingMessage>.Update
                 .Set(x => x.Status, EnvelopeStatus.Handled)
+                .Set(x => x.OwnerId, MongoConstants.AnyNode)
                 .Set(x => x.KeepUntil, DateTimeOffset.UtcNow.Add(_options.Durability.KeepAfterMessageHandling)));
     }
 
