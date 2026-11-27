@@ -25,8 +25,8 @@ namespace Wolverine.MongoDB.Tests;
 // net9.0 and net10.0 (10/10 runs of the full Category=multinode suite) before removing the guard,
 // on the TCP control endpoint this suite still configures. The suite carries 23 specs at the
 // V6.65.1 pin; it carried 13 when it was un-gated.
-// The [Trait("Category","multinode")] below routes it into CI's existing multinode step with no
-// ci.yml change (that step already runs `dotnet test --filter "Category=multinode"`).
+// The [Trait("Category","multinode")] below routes it into CI's multinode step, which selects it with
+// `dotnet test --filter-trait "Category=multinode"`.
 //   Decision + 5x proof: FOLLOWUPS.md and the multinode-leadership-model-decision memory.
 [BobcatFeature("MongoDB leader election, TCP control endpoint")]
 [Trait("Category", "multinode")]

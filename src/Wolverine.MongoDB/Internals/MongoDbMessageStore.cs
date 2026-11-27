@@ -90,7 +90,8 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
     /// and no collection or index is provisioned, so an upgrade is a no-op for hosts that have not asked
     /// for the feature. See <see cref="MongoDbDeduplicationStore"/> for the claim semantics.
     /// </summary>
-    public IDeduplicationStore Deduplication => _deduplication ??= _options.Durability.MessageDeduplicationMode != MessageDeduplicationMode.None
+    public IDeduplicationStore Deduplication => _deduplication ??=
+        _options.Durability.MessageDeduplicationMode != MessageDeduplicationMode.None
         ? new MongoDbDeduplicationStore(_database)
         : NullDeduplicationStore.Instance;
 
