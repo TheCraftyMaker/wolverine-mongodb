@@ -186,24 +186,18 @@ public partial class MongoDbMessageStore : IMessageInbox
     /// <see cref="RescheduleExistingEnvelopeForRetryAsync"/> — both move an incoming envelope back
     /// to <see cref="EnvelopeStatus.Scheduled"/>, released to <see cref="MongoConstants.AnyNode"/>,
     /// with the envelope's current execution time and attempt count. One definition so the two call
-    /// sites can't drift.
-    /// <para>
-    /// The document being moved may be a <em>handled</em> one: <c>MarkIncomingEnvelopeAsHandledAsync</c>
-    /// stamps <c>keepUntil</c> and the eager idempotency check stores a body-less handled marker
-    /// (<see cref="Envelope.ForPersistedHandled"/>) before the handler even runs. Two things must
-    /// therefore happen on the way back to Scheduled, or the retry is lost:
-    /// </para>
+    /// sites can't drift. It is applied only through <see cref="ReschedulableFilter"/>, so a handled
+    /// document is never moved.
     /// <list type="bullet">
     /// <item><description><c>keepUntil</c> is <b>unset</b>. The TTL index on that element
     /// (<c>MongoDbMessageStore.Admin.cs</c>) is not status-gated the way the RDBMS expiry sweep is
-    /// (<c>where status = 'Handled' and keep_until &lt;= now</c>): a Scheduled document that still
-    /// carries the handled marker's <c>keepUntil</c> is deleted by the TTL monitor before it is due.
-    /// The TTL index ignores documents without the field, so unsetting it — not nulling it — is the
-    /// proof of ineligibility.</description></item>
-    /// <item><description>The payload is <b>restored</b> from the live envelope when it has one:
-    /// <c>body</c>, <c>messageType</c> and <c>receivedAt</c> are rewritten so a body-less marker becomes
-    /// a runnable retry instead of an envelope with empty <c>Data</c>. An envelope without a payload
-    /// leaves the stored body alone.</description></item>
+    /// (<c>where status = 'Handled' and keep_until &lt;= now</c>), so a Scheduled document that
+    /// carries <c>keepUntil</c> is deleted by the TTL monitor before it is due. The TTL index ignores
+    /// documents without the field, so the field is unset, not set to null.</description></item>
+    /// <item><description>The payload is <b>rewritten</b> from the live envelope when it has one:
+    /// <c>body</c>, <c>messageType</c> and <c>receivedAt</c>. A retry adds headers after the document
+    /// was stored (the failed attempt's activity id, for example), and the next attempt is read back
+    /// from this body. An envelope without a payload leaves the stored body alone.</description></item>
     /// </list>
     /// The filter is the inbox identity (<c>_id</c>) and <c>envelopeId</c> is never touched, so the
     /// document keeps its identity; ownership is released to <see cref="MongoConstants.AnyNode"/> so
@@ -229,21 +223,41 @@ public partial class MongoDbMessageStore : IMessageInbox
         return update;
     }
 
-    public Task ScheduleExecutionAsync(Envelope envelope)
-    {
-        var id = InboxIdentity(envelope);
-        return Incoming.UpdateOneAsync(Builders<IncomingMessage>.Filter.Eq(x => x.Id, id), SchedulingUpdate(envelope));
-    }
+    /// <summary>
+    /// The document a retry may move back to Scheduled: the inbox identity, unless it is handled. A
+    /// handled document records that the message completed (the eager idempotency marker commits or
+    /// rolls back with the handler's transaction), so a retry booked after it is discarded. Moving it
+    /// back would run the message a second time.
+    /// </summary>
+    private static FilterDefinition<IncomingMessage> ReschedulableFilter(string id)
+        => Builders<IncomingMessage>.Filter.And(
+            Builders<IncomingMessage>.Filter.Eq(x => x.Id, id),
+            Builders<IncomingMessage>.Filter.Ne(x => x.Status, EnvelopeStatus.Handled));
 
+    public Task ScheduleExecutionAsync(Envelope envelope)
+        => Incoming.UpdateOneAsync(ReschedulableFilter(InboxIdentity(envelope)), SchedulingUpdate(envelope));
+
+    /// <summary>
+    /// Moves the document to Scheduled, or inserts it as Scheduled when the inbox has none. A
+    /// duplicate key on the insert means a document appeared after the update missed: the update runs
+    /// once more, and a handled document is still left alone.
+    /// </summary>
     public async Task RescheduleExistingEnvelopeForRetryAsync(Envelope envelope)
     {
         envelope.Status = EnvelopeStatus.Scheduled;
         envelope.OwnerId = MongoConstants.AnyNode;
-        var id = InboxIdentity(envelope);
-        var result = await Incoming.UpdateOneAsync(Builders<IncomingMessage>.Filter.Eq(x => x.Id, id), SchedulingUpdate(envelope));
-        if (result.MatchedCount == 0)
+        var filter = ReschedulableFilter(InboxIdentity(envelope));
+
+        var result = await Incoming.UpdateOneAsync(filter, SchedulingUpdate(envelope));
+        if (result.MatchedCount > 0) return;
+
+        try
         {
             await StoreIncomingAsync(envelope);
+        }
+        catch (DuplicateIncomingEnvelopeException)
+        {
+            await Incoming.UpdateOneAsync(filter, SchedulingUpdate(envelope));
         }
     }
 
