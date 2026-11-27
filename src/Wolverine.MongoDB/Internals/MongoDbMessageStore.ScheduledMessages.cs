@@ -17,36 +17,68 @@ public partial class MongoDbMessageStore : IScheduledMessages
         return filter;
     }
 
+    /// <summary>
+    /// Lists scheduled messages. The tenant and saga ids live only in the serialized envelope, so each
+    /// summary reads them from its body. A query that names a saga id goes through core's
+    /// <see cref="ScheduledMessageSagaFilter"/>, which reads every match of the other criteria
+    /// unpaged (a page size of zero) and then filters and pages in memory. A document without a body
+    /// has neither id, so it never matches a saga id.
+    /// </summary>
     async Task<ScheduledMessageResults> IScheduledMessages.QueryAsync(ScheduledMessageQuery query, CancellationToken token)
     {
+        if (query.SagaId.IsNotEmpty())
+        {
+            return await ScheduledMessageSagaFilter.QueryAsync(this, query, token);
+        }
+
         var filter = ScheduledFilter(query);
         var total = (int)await Incoming.CountDocumentsAsync(filter, cancellationToken: token);
 
         if (query.PageNumber <= 0) query.PageNumber = 1;
-        var docs = await Incoming.Find(filter)
-            .Sort(Builders<IncomingMessage>.Sort.Ascending(x => x.ExecutionTime))
-            .Skip((query.PageNumber - 1) * query.PageSize)
-            .Limit(query.PageSize)
-            .ToListAsync(token);
+        var find = Incoming.Find(filter)
+            .Sort(Builders<IncomingMessage>.Sort.Ascending(x => x.ExecutionTime).Ascending(x => x.Id));
+
+        if (query.PageSize > 0)
+        {
+            find = find.Skip((query.PageNumber - 1) * query.PageSize).Limit(query.PageSize);
+        }
+
+        var docs = await find.ToListAsync(token);
 
         return new ScheduledMessageResults
         {
             PageNumber = query.PageNumber,
             TotalCount = total,
             DatabaseUri = Uri,
-            Messages = docs.Select(m => new ScheduledMessageSummary
+            Messages = docs.Select(m =>
             {
-                Id = m.EnvelopeId,
-                MessageType = m.MessageType,
-                ScheduledTime = m.ExecutionTime,
-                Destination = m.ReceivedAt,
-                Attempts = m.Attempts
+                var summary = new ScheduledMessageSummary
+                {
+                    Id = m.EnvelopeId,
+                    MessageType = m.MessageType,
+                    ScheduledTime = m.ExecutionTime,
+                    Destination = m.ReceivedAt,
+                    Attempts = m.Attempts
+                };
+
+                summary.ReadEnvelopeIdentity(m.Body);
+                return summary;
             }).ToList()
         };
     }
 
-    Task IScheduledMessages.CancelAsync(ScheduledMessageQuery query, CancellationToken token)
-        => Incoming.DeleteManyAsync(ScheduledFilter(query), token);
+    async Task IScheduledMessages.CancelAsync(ScheduledMessageQuery query, CancellationToken token)
+    {
+        if (query.SagaId.IsNotEmpty())
+        {
+            // Null when the saga has nothing scheduled. An empty id list would mean "no id filter".
+            var bySagaIds = await ScheduledMessageSagaFilter.ResolveCancellationAsync(this, query, token);
+            if (bySagaIds == null) return;
+            query = bySagaIds;
+        }
+
+        await Incoming.DeleteManyAsync(ScheduledFilter(query), token);
+    }
 
     Task IScheduledMessages.RescheduleAsync(Guid envelopeId, DateTimeOffset newExecutionTime, CancellationToken token)
         => Incoming.UpdateManyAsync(
