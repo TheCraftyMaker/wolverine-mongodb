@@ -8,6 +8,11 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Changed
+- **Raised the `MongoDB.Driver` floor from 3.12.0 to 3.14.1.** Driver releases 3.13.0 through 3.14.1 fix several CVEs.
+  In 3.14.1, `MongoUrl.ToString()`, `MongoServerAddress.ToString()` and `MongoCredential.ToString()` return redacted
+  values, so code that builds a connection string from them has to build it another way.
+
 ## [1.1.0] - 2026-09-18
 
 ### Added
