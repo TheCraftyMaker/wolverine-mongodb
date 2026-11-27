@@ -4,6 +4,8 @@ using Microsoft.Extensions.Hosting;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Shouldly;
+using Wolverine.Attributes;
+using Wolverine.ErrorHandling;
 using Wolverine.ComplianceTests;
 using Wolverine.MongoDB.Internals;
 using Wolverine.Persistence.Durability;
@@ -21,9 +23,11 @@ namespace Wolverine.MongoDB.Tests;
 /// <see cref="Bridge"/> derives from the upstream suite and each upstream fact is an owned, same-named fact here.
 /// Nineteen forward to the suite. Twelve cannot, because upstream answers them through SQL (table and column
 /// introspection, <c>alter table</c>, a <c>DbConnection</c> transaction) and a Mongo collection has none of
-/// those. Each of the twelve is replaced by a same-named fact that asserts the same contract against the
-/// collection. <see cref="every_upstream_fact_is_owned_here"/> fails loudly if upstream adds a fact this class
-/// does not own.
+/// those. Each of the twelve is replaced by a same-named fact that asserts the same guarantee against the
+/// collection. The three transaction facts pin it at the host level: a transactional <c>[Deduplicated]</c> handler
+/// that rolls back leaves its id claimable again, one that commits keeps its id claimed, and an id that is already
+/// claimed is discarded while the host keeps committing other messages.
+/// <see cref="every_upstream_fact_is_owned_here"/> fails loudly if upstream adds a fact this class does not own.
 /// </para>
 /// <para>
 /// Both modes map to one store. The modes exist so an RDBMS can stop its collation deciding which ids are the same
@@ -304,77 +308,98 @@ public class deduplication_store_compliance : IAsyncLifetime
         (await strings.TryClaimAsync("string-claim", anHourFromNow, Ct)).ShouldBeFalse();
     }
 
+    // The three upstream transaction facts drive the store with the caller's own DbConnection and transaction. This
+    // store's claim is sessionless and runs before the handler's transaction opens, so there is no such surface. The
+    // replacements pin the same guarantees through a host with a transactional [Deduplicated] handler: what an
+    // observer sees after the handler's transaction rolled back, committed, or met an id that was already claimed.
+
+    private async Task<IHost> startTransactionalHostAsync(MessageDeduplicationMode mode)
+    {
+        TransactionalDedupHandler.Handled.Clear();
+        await Database.DropCollectionAsync(TransactionalDedupDoc.Collection, Ct);
+
+        var host = await Host.CreateDefaultBuilder()
+            .UseWolverine(opts =>
+            {
+                opts.Durability.Mode = DurabilityMode.Solo;
+                opts.Durability.MessageDeduplicationMode = mode;
+                opts.Durability.DeduplicationWindow = TimeSpan.FromHours(1);
+                opts.Discovery.DisableConventionalDiscovery().IncludeType(typeof(TransactionalDedupHandler));
+                opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
+                opts.UseMongoDbPersistence(AppFixture.DatabaseName);
+                opts.Policies.AutoApplyTransactions();
+                opts.OnException<DivideByZeroException>().Discard();
+            }).StartAsync(Ct);
+
+        _hosts.Add(host);
+        await host.RebuildAllEnvelopeStorageAsync();
+        return host;
+    }
+
+    private static Task sendAsync(IHost host, TransactionalDedupMessage message, string dedupId)
+        => host.TrackActivity().DoNotAssertOnExceptionsDetected()
+            .SendMessageAndWaitAsync(message, new DeliveryOptions { DeduplicationId = dedupId });
+
+    private async Task<string[]> committedDocsAsync()
+        => (await Database.GetCollection<BsonDocument>(TransactionalDedupDoc.Collection).Find(new BsonDocument())
+            .ToListAsync(Ct)).Select(x => x["_id"].AsString).ToArray();
+
     /// <summary>
-    /// The claim is sessionless, written before the handler's transaction opens. Upstream's claim rides the
-    /// caller's transaction and a rollback takes it back. Here a rollback leaves the claim in place, and
-    /// <c>TransactionalFrame</c> releases it explicitly, which the transaction facts in
-    /// <c>logical_message_deduplication</c> cover.
+    /// A handler whose transaction rolled back leaves no claim behind: the same id reaches the handler again and
+    /// commits, and the rolled-back write never became visible.
     /// </summary>
     [Theory]
     [InlineData(MessageDeduplicationMode.CompareByHash)]
     [InlineData(MessageDeduplicationMode.CompareByString)]
     public async Task a_claim_in_a_rolled_back_transaction_was_never_made(MessageDeduplicationMode mode)
     {
-        var host = await startHostAsync(mode);
+        var host = await startTransactionalHostAsync(mode);
 
-        (await claimBesideATransactionAsync(host, "rolled-back", commit: false)).ShouldBeTrue();
+        await sendAsync(host, new TransactionalDedupMessage("doc-1", Fail: true), "rolled-back");
+        TransactionalDedupHandler.Handled.ToArray().ShouldBe(["doc-1"]);
+        (await committedDocsAsync()).ShouldBeEmpty("the failed attempt's write rolled back with its transaction");
 
-        (await storeFor(host).TryClaimAsync("rolled-back", anHourFromNow, Ct))
-            .ShouldBeFalse("a sessionless claim is not part of the transaction that rolled back");
+        await sendAsync(host, new TransactionalDedupMessage("doc-2", Fail: false), "rolled-back");
+
+        TransactionalDedupHandler.Handled.ToArray().ShouldBe(["doc-1", "doc-2"],
+            "the rolled-back attempt must not leave a claim that refuses the retry");
+        (await committedDocsAsync()).ShouldBe(["doc-2"]);
     }
 
+    /// <summary>A handler whose transaction committed keeps its claim: the next message with that id is refused.</summary>
     [Theory]
     [InlineData(MessageDeduplicationMode.CompareByHash)]
     [InlineData(MessageDeduplicationMode.CompareByString)]
     public async Task a_claim_in_a_committed_transaction_refuses_the_next_one(MessageDeduplicationMode mode)
     {
-        var host = await startHostAsync(mode);
+        var host = await startTransactionalHostAsync(mode);
 
-        (await claimBesideATransactionAsync(host, "committed", commit: true)).ShouldBeTrue();
+        await sendAsync(host, new TransactionalDedupMessage("doc-1", Fail: false), "committed");
+        await sendAsync(host, new TransactionalDedupMessage("doc-2", Fail: false), "committed");
 
+        TransactionalDedupHandler.Handled.ToArray().ShouldBe(["doc-1"]);
+        (await committedDocsAsync()).ShouldBe(["doc-1"]);
         (await storeFor(host).TryClaimAsync("committed", anHourFromNow, Ct)).ShouldBeFalse();
     }
 
-    /// <summary>A refused duplicate raises no write error, so it cannot abort an open transaction.</summary>
+    /// <summary>
+    /// A message whose id is already claimed is discarded without running its handler or writing anything, and the
+    /// host keeps committing the transactions of other messages afterwards.
+    /// </summary>
     [Theory]
     [InlineData(MessageDeduplicationMode.CompareByHash)]
     [InlineData(MessageDeduplicationMode.CompareByString)]
     public async Task an_already_claimed_id_is_refused_in_a_transaction_that_can_still_commit(
         MessageDeduplicationMode mode)
     {
-        var host = await startHostAsync(mode);
+        var host = await startTransactionalHostAsync(mode);
         (await storeFor(host).TryClaimAsync("taken", anHourFromNow, Ct)).ShouldBeTrue();
 
-        (await claimBesideATransactionAsync(host, "taken", commit: true)).ShouldBeFalse();
-    }
+        await sendAsync(host, new TransactionalDedupMessage("refused", Fail: false), "taken");
+        await sendAsync(host, new TransactionalDedupMessage("other", Fail: false), "not-taken");
 
-    /// <summary>
-    /// Opens a transaction, makes one enlisted write, claims <paramref name="id"/>, then ends the transaction.
-    /// The commit must succeed whether or not the claim was refused, and the enlisted write must follow the
-    /// transaction's outcome.
-    /// </summary>
-    private async Task<bool> claimBesideATransactionAsync(IHost host, string id, bool commit)
-    {
-        var scratch = Database.GetCollection<BsonDocument>("dedup_compliance_scratch_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            using var session = await _fixture.Client.StartSessionAsync(cancellationToken: Ct);
-            session.StartTransaction();
-            await scratch.InsertOneAsync(session, new BsonDocument("_id", id), cancellationToken: Ct);
-
-            var claimed = await storeFor(host).TryClaimAsync(id, anHourFromNow, Ct);
-
-            if (commit) await session.CommitTransactionAsync(Ct);
-            else await session.AbortTransactionAsync(Ct);
-
-            (await scratch.CountDocumentsAsync(new BsonDocument(), cancellationToken: Ct))
-                .ShouldBe(commit ? 1 : 0);
-            return claimed;
-        }
-        finally
-        {
-            await Database.DropCollectionAsync(scratch.CollectionNamespace.CollectionName, Ct);
-        }
+        TransactionalDedupHandler.Handled.ToArray().ShouldBe(["other"]);
+        (await committedDocsAsync()).ShouldBe(["other"]);
     }
 
     /// <summary>
@@ -455,5 +480,29 @@ public class deduplication_store_compliance : IAsyncLifetime
 
         var missing = facts(typeof(DeduplicationStoreCompliance)).Except(facts(GetType())).ToArray();
         missing.ShouldBeEmpty($"Upstream DeduplicationStoreCompliance facts not owned here: {string.Join(", ", missing)}");
+    }
+}
+
+public record TransactionalDedupMessage(string DocId, bool Fail);
+
+public class TransactionalDedupDoc
+{
+    public const string Collection = "dedup_compliance_docs";
+    public string Id { get; set; } = string.Empty;
+}
+
+[WolverineIgnore]
+public static class TransactionalDedupHandler
+{
+    public static readonly System.Collections.Concurrent.ConcurrentQueue<string> Handled = new();
+
+    // The MongoDbUnitOfWork parameter makes the chain transactional.
+    [Deduplicated]
+    public static async Task Handle(TransactionalDedupMessage message, MongoDbUnitOfWork uow, CancellationToken ct)
+    {
+        Handled.Enqueue(message.DocId);
+        await uow.Collection<TransactionalDedupDoc>(TransactionalDedupDoc.Collection)
+            .InsertOneAsync(new TransactionalDedupDoc { Id = message.DocId }, ct);
+        if (message.Fail) throw new DivideByZeroException("fails after writing");
     }
 }

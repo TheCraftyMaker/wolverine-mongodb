@@ -28,11 +28,14 @@ public class DeduplicationClaimDocument
 /// <see cref="NullDeduplicationStore.Instance"/> and provisions nothing (the contract's requirement).
 /// <para>
 /// <b>Claim = one insert.</b> <see cref="TryClaimAsync(string, DateTimeOffset, CancellationToken)"/> is an
-/// <c>InsertOneAsync</c> on the claim's own id: two nodes racing for the same id both hit the same <c>_id</c>, exactly one insert succeeds and the
-/// other gets a duplicate-key error — no read-then-write window. A duplicate whose <em>stored</em>
-/// window has already passed is then taken over atomically (<c>findAndModify</c> predicated on
-/// <c>expires &lt;= now</c>), so the configured retention window is honoured to the instant rather than
-/// to the reaper's cadence. The stored instant, never the current setting, decides: shortening
+/// <c>InsertOneAsync</c> on the claim's own id: two nodes racing for the same id both hit the same
+/// <c>_id</c>, exactly one insert succeeds and the other gets a duplicate-key error — no read-then-write
+/// window. A duplicate whose <em>stored</em> window has already passed is then taken over atomically
+/// (<c>findAndModify</c> predicated on <c>expires &lt;= now</c>), so the configured retention window is
+/// honoured to the instant rather than to the reaper's cadence. The envelope-aware overload also lets the
+/// envelope that recorded the claim take it over again, so an envelope recovered after its node died is not
+/// refused as a duplicate of its own stranded claim; any other envelope is still refused.
+/// The stored instant, never the current setting, decides: shortening
 /// <c>DeduplicationWindow</c> later cannot retroactively un-claim an id.
 /// </para>
 /// <para>
@@ -80,7 +83,7 @@ public sealed class MongoDbDeduplicationStore : IDeduplicationStore, IEnvelopeAw
     /// over, so the two answers agree.
     /// </summary>
     public async Task<bool> IsClaimedAsync(string deduplicationId, CancellationToken cancellation = default)
-        => await _claims.CountDocumentsAsync(
+        => !string.IsNullOrWhiteSpace(deduplicationId) && await _claims.CountDocumentsAsync(
             Builders<DeduplicationClaimDocument>.Filter.And(
                 Builders<DeduplicationClaimDocument>.Filter.Eq(x => x.Id, deduplicationId),
                 Builders<DeduplicationClaimDocument>.Filter.Gt(x => x.Expires, DateTimeOffset.UtcNow)),
