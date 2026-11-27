@@ -262,8 +262,8 @@ public class logical_message_deduplication
     {
         using var host = await buildHostAsync();
 
-        // Transactional chain (MongoDbUnitOfWork parameter): core emits NO compensating release frame,
-        // so without TransactionalFrame's rollback release the first failure would poison the id.
+        // Transactional chain (MongoDbUnitOfWork parameter): core's failure frame releases the claim once,
+        // after the rollback, so the first failure does not poison the id.
         await host.TrackActivity().DoNotAssertOnExceptionsDetected()
             .SendMessageAndWaitAsync(new FailingTransactionalMessage("doc-1"), new DeliveryOptions { DeduplicationId = "tx-poison-check" });
         FailingTransactionalHandler.Attempts.ShouldBe(1);
@@ -282,25 +282,38 @@ public class logical_message_deduplication
     }
 
     [Fact]
-    public async Task the_transactional_chain_releases_the_claim_in_the_rollback_path_of_the_generated_code()
+    public async Task the_transactional_chain_releases_the_claim_once_after_the_rollback()
     {
         using var host = await buildHostAsync();
 
         var transactional = generatedSourceFor(host, typeof(FailingTransactionalMessage));
-        var claim = transactional.IndexOf(".TryClaimAsync(", StringComparison.Ordinal);
+        var claim = transactional.IndexOf("TryClaimForEnvelopeAsync(", StringComparison.Ordinal);
         var startSession = transactional.IndexOf("StartSessionAsync(", StringComparison.Ordinal);
         var rollback = transactional.IndexOf(".RollbackAsync(", StringComparison.Ordinal);
         var release = transactional.IndexOf(".ReleaseAsync(", StringComparison.Ordinal);
 
         claim.ShouldBeGreaterThan(-1, "the claim frame was never woven in");
-        claim.ShouldBeLessThan(startSession, "core claims BEFORE the session/transaction exists — which is why the claim is sessionless");
-        release.ShouldBeGreaterThan(rollback, "the release must sit in the catch block, after the rollback");
-        transactional.Contains("if (!isDuplicateMessage && !string.IsNullOrWhiteSpace(").ShouldBeTrue("the release is guarded by the claim outcome");
+        claim.ShouldBeLessThan(startSession, "core claims BEFORE the session/transaction exists, which is why the claim is sessionless");
+        rollback.ShouldBeGreaterThan(-1, "the transactional chain rolls back on failure");
+        CountOf(transactional, ".ReleaseAsync(").ShouldBe(1, "core's failure frame is the only release; a second one would run twice");
+        release.ShouldBeGreaterThan(rollback, "the release must run after the MongoDB rollback");
 
-        // A non-transactional deduplicated chain gets core's own release frame and none of ours.
+        // A non-transactional deduplicated chain gets core's own release frame too.
         var nonTransactional = generatedSourceFor(host, typeof(FailingDeduplicatedMessage));
         nonTransactional.ShouldNotContain("RollbackAsync(");
-        nonTransactional.ShouldContain(".ReleaseAsync(");
+        CountOf(nonTransactional, ".ReleaseAsync(").ShouldBe(1);
+    }
+
+    private static int CountOf(string text, string value)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(value, StringComparison.Ordinal); i >= 0;
+             i = text.IndexOf(value, i + value.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     [Fact]
