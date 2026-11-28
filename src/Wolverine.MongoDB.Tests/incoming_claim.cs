@@ -47,6 +47,26 @@ public class incoming_claim
         doc.OwnerId.ShouldBe(7);
     }
 
+    [Theory]
+    [InlineData(EnvelopeStatus.Scheduled)]
+    [InlineData(EnvelopeStatus.Handled)]
+    public async Task a_globally_owned_row_that_is_no_longer_incoming_is_not_returned(EnvelopeStatus status)
+    {
+        await _fixture.ClearAll();
+        var store = _fixture.BuildMessageStore();
+        var envelope = incoming();
+        await store.Inbox.StoreIncomingAsync(envelope);
+        await store.Incoming.UpdateOneAsync(x => x.Id == store.InboxIdentity(envelope),
+            Builders<IncomingMessage>.Update.Set(x => x.Status, status), cancellationToken: TestContext.Current.CancellationToken);
+
+        var claimed = await store.TryClaimIncomingAsync(3, [envelope]);
+
+        claimed.ShouldBeEmpty();
+        var doc = await store.Incoming.Find(x => x.Id == store.InboxIdentity(envelope))
+            .SingleAsync(TestContext.Current.CancellationToken);
+        doc.OwnerId.ShouldBe(MongoConstants.AnyNode);
+    }
+
     [Fact]
     public async Task two_claims_for_the_same_rows_split_them()
     {

@@ -258,7 +258,10 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
             var result = await Incoming.UpdateOneAsync(
                 Builders<IncomingMessage>.Filter.And(
                     Builders<IncomingMessage>.Filter.Eq(x => x.Id, InboxIdentity(envelope)),
-                    Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
+                    Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode),
+                    // The page query selected Incoming rows. A row since rescheduled for retry is owned by
+                    // "any node" again but is Scheduled, so running it now would skip its delay.
+                    Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Incoming)),
                 update);
 
             if (result.ModifiedCount == 1)
