@@ -13,7 +13,7 @@
     <!-- xUnit v3 4.x runs on Microsoft.Testing.Platform 2.x. WolverineFx.ComplianceTests is built on
          xunit.v3.extensibility.core 4.0.2, and a 3.x test host beside it fails at run time, so the two move
          together. Same pin as upstream Wolverine. -->
-    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <!-- The leadership-election compliance specs are Bobcat specifications: Bobcat.Xunit supplies the
          test-platform session hook and Bobcat.Generators binds each inherited spec to the subclass. -->
     <PackageVersion Include="Bobcat.Xunit" Version="1.0.0" />
