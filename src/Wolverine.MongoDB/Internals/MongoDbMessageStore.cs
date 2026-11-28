@@ -230,14 +230,17 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         // default IdOnly mode the _id IS the Guid string, so the filter values are unchanged.
         var ids = incoming.Select(InboxIdentity).ToList();
 
-        // Compare-and-swap: only claim envelopes still owned by "any node". An envelope already
-        // owned by another node (claimed between our read and this write) must not be stolen —
-        // the OwnerId == AnyNode guard makes this an atomic claim per document.
-        return Incoming.UpdateManyAsync(
-            Builders<IncomingMessage>.Filter.And(
-                Builders<IncomingMessage>.Filter.In(x => x.Id, ids),
-                Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
-            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
+        var byId = Builders<IncomingMessage>.Filter.In(x => x.Id, ids);
+
+        // A release to "any node" frees rows this node holds, so it matches by id alone.
+        // A claim for a real node only takes rows still owned by "any node", so a row another
+        // node took between our read and this write is not stolen.
+        var filter = ownerId == MongoConstants.AnyNode
+            ? byId
+            : Builders<IncomingMessage>.Filter.And(
+                byId, Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode));
+
+        return Incoming.UpdateManyAsync(filter, Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
     }
 
     /// <summary>
