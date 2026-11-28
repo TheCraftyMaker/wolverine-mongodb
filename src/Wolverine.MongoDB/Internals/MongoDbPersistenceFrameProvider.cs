@@ -30,7 +30,7 @@ public class MongoDbPersistenceFrameProvider : IPersistenceFrameProvider
             // standalone FlushOutgoingMessages postprocessor; the commit postprocessor
             // commits the transaction and then flushes — committing AFTER the handler
             // writes and flushing AFTER the commit (avoiding flush-before-commit).
-            chain.Middleware.Add(new TransactionalFrame(chain));
+            chain.Middleware.Add(new TransactionalFrame());
 
             // Saga chains receive their single commit+flush from CommitUnitOfWorkFrame (which
             // SagaChain inlines right after the saga write), so the postprocessor must be

@@ -3,7 +3,6 @@ using JasperFx.CodeGeneration.Frames;
 using JasperFx.CodeGeneration.Model;
 using JasperFx.Core.Reflection;
 using MongoDB.Driver;
-using Wolverine.Configuration;
 using Wolverine.Persistence;
 using Wolverine.Persistence.Sagas;
 using Wolverine.Runtime;
@@ -20,16 +19,13 @@ namespace Wolverine.MongoDB.Internals;
 /// </summary>
 internal class TransactionalFrame : AsyncFrame, IFlushesMessages
 {
-    private readonly IChain _chain;
     private Variable? _cancellation;
     private Variable? _client;
     private Variable? _context;
     private Variable? _database;
 
-    public TransactionalFrame(IChain chain)
+    public TransactionalFrame()
     {
-        _chain = chain;
-
         // The MongoDB session this frame opens. Downstream frames (the commit
         // postprocessor) discover it through this created variable.
         Session = new Variable(typeof(IClientSessionHandle), "mongoSession", this);
