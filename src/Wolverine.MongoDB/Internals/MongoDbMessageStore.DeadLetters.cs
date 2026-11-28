@@ -90,14 +90,22 @@ public partial class MongoDbMessageStore : IDeadLetters
             .ToList();
     }
 
+    // The _id tie-break keeps the order stable, so consecutive pages neither repeat nor skip a letter
+    private static readonly SortDefinition<DeadLetterMessage> DlqOrder =
+        Builders<DeadLetterMessage>.Sort.Ascending(x => x.SentAt).Ascending(x => x.Id);
+
+    private const int DlqIdBatchSize = 1000;
+
     public async Task<DeadLetterEnvelopeResults> QueryAsync(DeadLetterEnvelopeQuery query, CancellationToken token)
     {
+        if (query.PageNumber <= 0) query.PageNumber = 1;
+        if (query.HasHeaderFilter()) return await QueryByHeadersAsync(query, token);
+
         var filter = DlqFilter(query);
         var total = (int)await DeadLetterDocs.CountDocumentsAsync(filter, cancellationToken: token);
-        if (query.PageNumber <= 0) query.PageNumber = 1;
 
         var docs = await DeadLetterDocs.Find(filter)
-            .Sort(Builders<DeadLetterMessage>.Sort.Ascending(x => x.SentAt))
+            .Sort(DlqOrder)
             .Skip((query.PageNumber - 1) * query.PageSize)
             .Limit(query.PageSize)
             .ToListAsync(token);
@@ -111,12 +119,97 @@ public partial class MongoDbMessageStore : IDeadLetters
         };
     }
 
-    public Task DiscardAsync(DeadLetterEnvelopeQuery query, CancellationToken token)
-        => DeadLetterDocs.DeleteManyAsync(DlqFilter(query), cancellationToken: token);
+    /// <summary>
+    /// Headers are stored only inside the serialized envelope <c>body</c>, so a header filter cannot
+    /// run on the server. Every document that matches the rest of the query is read in order and
+    /// checked with <see cref="DeadLetterEnvelopeQuery.MatchesHeaders"/>. Only the requested page is
+    /// kept, and <c>TotalCount</c> counts the documents that match the headers. A body-less dead letter
+    /// carries no headers, so it never matches a header filter.
+    /// </summary>
+    private async Task<DeadLetterEnvelopeResults> QueryByHeadersAsync(DeadLetterEnvelopeQuery query,
+        CancellationToken token)
+    {
+        // A page size of zero or less reads every match, as Limit(0) does on the unfiltered path
+        var pageSize = query.PageSize > 0 ? query.PageSize : int.MaxValue;
+        var skip = query.PageSize > 0 ? (query.PageNumber - 1) * query.PageSize : 0;
+        var page = new List<DeadLetterEnvelope>();
+        var total = 0;
 
-    public Task ReplayAsync(DeadLetterEnvelopeQuery query, CancellationToken token)
-        => DeadLetterDocs.UpdateManyAsync(DlqFilter(query),
-            Builders<DeadLetterMessage>.Update.Set(x => x.Replayable, true), cancellationToken: token);
+        using var cursor = await DeadLetterDocs.Find(DlqFilter(query)).Sort(DlqOrder).ToCursorAsync(token);
+        while (await cursor.MoveNextAsync(token))
+        {
+            foreach (var doc in cursor.Current)
+            {
+                var envelope = doc.ToEnvelope();
+                if (!query.MatchesHeaders(envelope.Envelope)) continue;
+
+                if (total >= skip && page.Count < pageSize) page.Add(envelope);
+                total++;
+            }
+        }
+
+        return new DeadLetterEnvelopeResults
+        {
+            PageNumber = query.PageNumber,
+            TotalCount = total,
+            Envelopes = page,
+            DatabaseUri = Uri
+        };
+    }
+
+    public async Task DiscardAsync(DeadLetterEnvelopeQuery query, CancellationToken token)
+    {
+        if (!query.HasHeaderFilter())
+        {
+            await DeadLetterDocs.DeleteManyAsync(DlqFilter(query), cancellationToken: token);
+            return;
+        }
+
+        foreach (var batch in await HeaderMatchedDlqFiltersAsync(query, token))
+        {
+            await DeadLetterDocs.DeleteManyAsync(batch, cancellationToken: token);
+        }
+    }
+
+    public async Task ReplayAsync(DeadLetterEnvelopeQuery query, CancellationToken token)
+    {
+        var update = Builders<DeadLetterMessage>.Update.Set(x => x.Replayable, true);
+        if (!query.HasHeaderFilter())
+        {
+            await DeadLetterDocs.UpdateManyAsync(DlqFilter(query), update, cancellationToken: token);
+            return;
+        }
+
+        foreach (var batch in await HeaderMatchedDlqFiltersAsync(query, token))
+        {
+            await DeadLetterDocs.UpdateManyAsync(batch, update, cancellationToken: token);
+        }
+    }
+
+    /// <summary>
+    /// The bulk discard and replay with a header filter: reads the documents that match the rest of
+    /// the query, keeps the <c>_id</c> of each one whose headers match, and returns filters over those
+    /// ids in batches. Each filter also repeats the rest of the query, so a document that stopped
+    /// matching after it was read (flagged for replay in the meantime, for example) is left alone.
+    /// No match gives no filters, so nothing is discarded or replayed.
+    /// </summary>
+    private async Task<List<FilterDefinition<DeadLetterMessage>>> HeaderMatchedDlqFiltersAsync(
+        DeadLetterEnvelopeQuery query, CancellationToken token)
+    {
+        var filter = DlqFilter(query);
+        var ids = new List<Guid>();
+
+        using var cursor = await DeadLetterDocs.Find(filter).ToCursorAsync(token);
+        while (await cursor.MoveNextAsync(token))
+        {
+            ids.AddRange(cursor.Current
+                .Where(doc => query.MatchesHeaders(doc.ToEnvelope().Envelope))
+                .Select(doc => doc.Id));
+        }
+
+        var b = Builders<DeadLetterMessage>.Filter;
+        return ids.Chunk(DlqIdBatchSize).Select(batch => b.And(b.In(x => x.Id, batch), filter)).ToList();
+    }
 
     /// <summary>
     /// Applies the new body to every dead letter for the envelope id and flags them replayable,
