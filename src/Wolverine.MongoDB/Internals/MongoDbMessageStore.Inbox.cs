@@ -139,6 +139,14 @@ public partial class MongoDbMessageStore : IMessageInbox
             .Limit(1).AnyAsync(cancellation);
     }
 
+    public async Task<bool> IsHandledAsync(Envelope envelope, CancellationToken cancellation)
+    {
+        var id = InboxIdentity(envelope);
+        var filter = Builders<IncomingMessage>.Filter.Eq(x => x.Id, id)
+                     & Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Handled);
+        return await Incoming.Find(filter).Limit(1).AnyAsync(cancellation);
+    }
+
     /// <summary>
     /// Existence check scoped to an active session/transaction. Used by the eager
     /// idempotency check so that a duplicate is detected via a READ rather than a
