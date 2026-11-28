@@ -8,10 +8,39 @@ The major version tracks Wolverine's major version.
 
 ## [Unreleased]
 
+### Added
+- **Dead-letter header filters.** The header filter of `DeadLetterEnvelopeQuery` now works for query, discard and replay. Headers live
+  only inside the serialized envelope, so the filter runs in the application over every dead letter that matches the other criteria.
+  Results are ordered by `(sentAt, _id)`, which a new compound index serves.
+- **Scheduled-message queries by saga id and tenant.** Scheduled-message summaries carry the saga id and tenant of their envelope,
+  a query can filter by saga id, and `CancelAsync` can cancel by saga id.
+- **Envelope-aware deduplication claims.** The deduplication store implements `IEnvelopeAwareDeduplicationStore` and
+  `IDeduplicationClaimLookup`. An envelope that recovery replays takes over its own stranded claim, and `IsClaimedAsync` reports a
+  claim whose window has passed as not held.
+
 ### Changed
+- **Requires WolverineFx 6.65.1** (the `external/wolverine` submodule is pinned at `V6.65.1`). The test project runs on xUnit v3 4.0.2
+  and Microsoft.Testing.Platform, with Bobcat for the leadership-election specs. Run it with
+  `dotnet test --project <test project>`, and select categories with `--filter-trait` and `--filter-not-trait`.
+- **`MessageDeduplicationMode` replaces `EnableMessageDeduplication`.** Both `CompareByHash` and `CompareByString` use the MongoDB
+  deduplication store. `EnableMessageDeduplication` is `[Obsolete]`: `true` maps to `CompareByHash` and `false` to `None`. An
+  application that wants the string comparison sets `MessageDeduplicationMode = CompareByString` explicitly.
+- **A handler that only reads an entity runs in a MongoDB transaction.** With `AutoApplyTransactions`, a handler whose only store
+  access is an `[All]` or `[Entity]` read now runs inside a transaction (GH-4717). `[NonTransactional]` opts out.
+- **Marking an incoming envelope handled releases its owner.** A handled marker no longer holds a node number in the dead-node sweep.
 - **Raised the `MongoDB.Driver` floor from 3.12.0 to 3.14.1.** Driver releases 3.13.0 through 3.14.1 fix several CVEs.
   In 3.14.1, `MongoUrl.ToString()`, `MongoServerAddress.ToString()` and `MongoCredential.ToString()` return redacted
   values, so code that builds a connection string from them has to build it another way.
+
+### Fixed
+- **Inbox recovery claims each row atomically.** Competing recovery passes claim incoming envelopes with one conditional update per
+  row (`OwnerId == 0` and `Status == Incoming`) and keep only the rows they won. Passes that read a page in opposite orders no
+  longer deadlock, and a row that a retry moved back to Scheduled is not claimed early. Releasing rows to `AnyNode` matches by id alone.
+- **The deduplication claim is released once.** Wolverine's failure frame releases the claim after a rollback. The MongoDB
+  transaction frame no longer adds a second release.
+- **`IsHandledAsync` reports by status.** A row counts as handled only when its status is `Handled`.
+- **A late retry never revives a handled message.** Rescheduling a retry for an envelope that is already handled leaves the
+  handled document unchanged.
 
 ## [1.1.0] - 2026-09-18
 
