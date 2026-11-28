@@ -36,7 +36,7 @@ public partial class MongoDbMessageStore : IScheduledMessages
 
         if (query.PageNumber <= 0) query.PageNumber = 1;
         var find = Incoming.Find(filter)
-            .Sort(Builders<IncomingMessage>.Sort.Ascending(x => x.ExecutionTime).Ascending(x => x.Id));
+            .Sort(Builders<IncomingMessage>.Sort.Ascending(x => x.ExecutionTime));
 
         if (query.PageSize > 0)
         {

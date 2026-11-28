@@ -47,7 +47,6 @@ public partial class MongoDbMessageStore : IMessageStoreAdmin
 
         await DeadLetterDocs.Indexes.CreateManyAsync(new[]
         {
-            new CreateIndexModel<DeadLetterMessage>(Builders<DeadLetterMessage>.IndexKeys.Ascending(x => x.SentAt)),
             // Serves the query order (sentAt, then _id), so a header-filtered query that reads every
             // candidate streams them in index order instead of sorting them all in memory.
             new CreateIndexModel<DeadLetterMessage>(
