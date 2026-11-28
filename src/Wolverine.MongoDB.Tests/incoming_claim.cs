@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
 using MongoDB.Driver;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MongoDB.Driver.Core.Events;
 using Shouldly;
 using Wolverine.ComplianceTests;
 using Wolverine.MongoDB.Internals;
 using Wolverine.Persistence.Durability;
+using Wolverine.Tracking;
 
 namespace Wolverine.MongoDB.Tests;
 
@@ -108,13 +111,56 @@ public class incoming_claim
         var settings = MongoClientSettings.FromConnectionString(_fixture.ConnectionString);
         var commands = new ConcurrentQueue<string>();
         settings.ClusterConfigurator = cb => cb.Subscribe<CommandStartedEvent>(e => commands.Enqueue(e.CommandName));
-        var store = new MongoDbMessageStore(new MongoClient(settings), AppFixture.DatabaseName, new WolverineOptions());
+        using var client = new MongoClient(settings);
+        var store = new MongoDbMessageStore(client, AppFixture.DatabaseName, new WolverineOptions());
         commands.Clear();
 
         var claimed = await store.TryClaimIncomingAsync(3, Array.Empty<Envelope>());
 
         claimed.ShouldBeEmpty();
         commands.Where(x => x == "update").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task recovery_does_not_claim_a_row_rescheduled_after_the_page_was_read()
+    {
+        await _fixture.ClearAll();
+        const string queue = "claimrace";
+        using var host = await Host.CreateDefaultBuilder()
+            .UseWolverine(opts =>
+            {
+                opts.Durability.Mode = DurabilityMode.Solo;
+                opts.Durability.ScheduledJobFirstExecution = TimeSpan.FromHours(1);
+                opts.Services.AddSingleton<IMongoClient>(_fixture.Client);
+                opts.UseMongoDbPersistence(AppFixture.DatabaseName);
+                opts.LocalQueue(queue).UseDurableInbox();
+            }).StartAsync(TestContext.Current.CancellationToken);
+
+        var envelope = incoming();
+        envelope.Destination = new Uri($"local://{queue}");
+        var seed = _fixture.BuildMessageStore();
+        await seed.Inbox.StoreIncomingAsync(envelope);
+        var id = seed.InboxIdentity(envelope);
+
+        // Moves the row back to Scheduled right after the page query returns it, the way a retry reschedule would.
+        var settings = MongoClientSettings.FromConnectionString(_fixture.ConnectionString);
+        settings.ClusterConfigurator = cb => cb.Subscribe<CommandSucceededEvent>(e =>
+        {
+            if (e.CommandName == "find")
+            {
+                _fixture.Client.GetDatabase(AppFixture.DatabaseName).GetCollection<IncomingMessage>(MongoConstants.IncomingCollection)
+                    .UpdateOne(x => x.Id == id, Builders<IncomingMessage>.Update.Set(x => x.Status, EnvelopeStatus.Scheduled));
+            }
+        });
+        using var client = new MongoClient(settings);
+        var store = new MongoDbMessageStore(client, AppFixture.DatabaseName, new WolverineOptions());
+
+        await store.RecoverOrphanedIncomingAsync(host.GetRuntime(), TestContext.Current.CancellationToken);
+
+        var doc = await store.Incoming.Find(x => x.Id == store.InboxIdentity(envelope))
+            .SingleAsync(TestContext.Current.CancellationToken);
+        doc.Status.ShouldBe(EnvelopeStatus.Scheduled);
+        doc.OwnerId.ShouldBe(MongoConstants.AnyNode);
     }
 
     private static Envelope copy(Envelope source)

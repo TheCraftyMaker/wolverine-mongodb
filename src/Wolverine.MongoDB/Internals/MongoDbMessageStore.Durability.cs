@@ -211,22 +211,9 @@ public partial class MongoDbMessageStore
 
             var nodeNumber = runtime.DurabilitySettings.AssignedNodeNumber;
             var envelopes = await LoadPageOfGloballyOwnedIncomingAsync(listener, runtime.DurabilitySettings.RecoveryBatchSize);
-            await ReassignIncomingAsync(nodeNumber, envelopes);
-
-            // Only enqueue the envelopes this node actually won. The CAS in ReassignIncomingAsync
-            // skips any that another node claimed between our read and write, so re-read which ids
-            // we now own and enqueue exactly those to avoid double-processing. Key on the document
-            // _id, the same identity unit ReassignIncomingAsync claims on: in IdAndDestination mode
-            // the envelope Guid is not unique per destination, so it cannot map winners back
-            // unambiguously. The page comes from distinct documents, so _id is injective here.
-            var byId = envelopes.ToDictionary(InboxIdentity);
-            var claimedIds = await Incoming.Distinct(x => x.Id,
-                Builders<IncomingMessage>.Filter.And(
-                    Builders<IncomingMessage>.Filter.In(x => x.Id, byId.Keys),
-                    Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, nodeNumber)),
-                cancellationToken: token).ToListAsync(token);
-
-            var claimed = claimedIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+            // TryClaimIncomingAsync returns only the rows this node won. Each claim re-asserts Status == Incoming, so a row
+            // rescheduled for retry since the page was read is left alone instead of running before its delay.
+            var claimed = await TryClaimIncomingAsync(nodeNumber, envelopes);
             if (claimed.Count > 0)
             {
                 await circuit.EnqueueDirectlyAsync(claimed);
