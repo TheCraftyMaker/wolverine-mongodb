@@ -17,7 +17,7 @@
     <!-- The leadership-election compliance specs are Bobcat specifications: Bobcat.Xunit supplies the
          test-platform session hook and Bobcat.Generators binds each inherited spec to the subclass. -->
     <PackageVersion Include="Bobcat.Xunit" Version="1.0.0" />
-    <PackageVersion Include="Bobcat.Generators" Version="1.0.0" />
+    <PackageVersion Include="Bobcat.Generators" Version="1.2.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <!-- 2.4.1 is a VSTest logger: Microsoft.Testing.Platform does not load it, so it only applies when the test
