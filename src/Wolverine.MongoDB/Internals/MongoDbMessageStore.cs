@@ -240,6 +240,34 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
             Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
     }
 
+    /// <summary>
+    /// Claims each globally owned row with its own compare-and-swap and returns only the envelopes this call won.
+    /// One update per document takes no multi-document lock, so passes that read the same page in opposite
+    /// orders cannot deadlock, and a row another pass already took is not returned.
+    /// </summary>
+    public async Task<IReadOnlyList<Envelope>> TryClaimIncomingAsync(int ownerId, IReadOnlyList<Envelope> incoming)
+    {
+        var claimed = new List<Envelope>(incoming.Count);
+        var update = Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId);
+
+        foreach (var envelope in incoming)
+        {
+            var result = await Incoming.UpdateOneAsync(
+                Builders<IncomingMessage>.Filter.And(
+                    Builders<IncomingMessage>.Filter.Eq(x => x.Id, InboxIdentity(envelope)),
+                    Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
+                update);
+
+            if (result.ModifiedCount == 1)
+            {
+                envelope.OwnerId = ownerId;
+                claimed.Add(envelope);
+            }
+        }
+
+        return claimed;
+    }
+
     public ValueTask DisposeAsync()
     {
         HasDisposed = true;
