@@ -6,28 +6,11 @@ using Wolverine.Transports.Tcp;
 
 namespace Wolverine.MongoDB.Tests;
 
-// MULTI-NODE LEADERSHIP-ELECTION COMPLIANCE — the upstream LeadershipElectionCompliance facts.
-//
-// History: Task 6 of the multinode plan (against WolverineFx 6.2.2) could NOT reach five
-// consecutive green runs. `leader_switchover_between_nodes` and the dependent
-// `singular_agent_is_only_running_on_one` hinged on a non-deterministic leadership-claim race
-// that core decided by lock-arrival order, which our durable (w:majority+j:true) Mongo lock lost
-// ~half the time. The suite was therefore compile-gated behind `#if RUN_MULTINODE`, matching how
-// Wolverine's own Cosmos provider gates the same facts [Flaky].
-//   Full diagnosis: docs/superpowers/plans/2026-06-16-task6-multinode-compliance-findings.md
-//
-// UN-GATED (2026-07-05, plan T4.5): WolverineFx 6.9.0 reworked these facts —
-// `leader_switchover_between_nodes` now uses a slow heartbeat plus an explicit `CheckAgentHealth`
-// trigger (removing the lock-arrival-order race), and the new
-// `take_over_leader_ship_if_leader_becomes_stale_with_racing_nodes` fact is built around the
-// "any healthy node leads" model this provider already implements — so un-gating did NOT require
-// the declined "lowest live node wins" election change. Verified 5x consecutive green on BOTH
-// net9.0 and net10.0 (10/10 runs of the full Category=multinode suite) before removing the guard,
-// on the TCP control endpoint this suite still configures. The suite carries 23 specs at the
-// V6.65.1 pin; it carried 13 when it was un-gated.
-// The [Trait("Category","multinode")] below routes it into CI's multinode step, which selects it with
-// `dotnet test --filter-trait "Category=multinode"`.
-//   Decision + 5x proof: FOLLOWUPS.md and the multinode-leadership-model-decision memory.
+// The upstream LeadershipElectionCompliance battery over an explicit TCP control endpoint. Any healthy node can lead, which is
+// the model this provider implements, so the facts do not depend on which node wins a leadership claim.
+// The multinode trait routes the class into CI's multinode step, which selects it with
+// `dotnet test --filter-trait "Category=multinode"`. control_queue_leadership_election_compliance runs the same battery over the
+// native mongocontrol transport.
 [BobcatFeature("MongoDB leader election, TCP control endpoint")]
 [Trait("Category", "multinode")]
 [Collection("mongodb")]
