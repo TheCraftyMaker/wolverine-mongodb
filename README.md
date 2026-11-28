@@ -24,7 +24,7 @@ MongoDB-backed applications reliable, durable message delivery without EF Core.
   are not available on standalone MongoDB. Atlas and any production deployment
   already satisfy this; for local development use a Docker Compose replica set.
   Standalone MongoDB is explicitly unsupported.
-- **WolverineFx 6.38.0 or later** (the exact pin is in `Directory.Packages.props`; the
+- **WolverineFx 6.65.1 or later** (the exact pin is in `Directory.Packages.props`; the
   `external/wolverine` submodule tracks the same release).
 - **.NET 9 or .NET 10.**
 - **MongoDB.Driver** 3.x.
@@ -182,6 +182,13 @@ opts.Durability.DeadLetterQueueExpiration = TimeSpan.FromDays(10); // default
 When expiration is disabled (the default), the TTL index on
 `wolverine_dead_letters` is a no-op: documents without an `expirationTime`
 field are ignored by MongoDB's TTL background thread.
+
+### Dead-letter header filters
+
+`DeadLetterEnvelopeQuery` can filter on envelope headers for query, discard and replay. MongoDB keeps headers only inside the
+serialized envelope, so the filter runs in the application. The query reads every dead letter that matches the other criteria,
+in `sentAt` order, and keeps the ones whose headers match. On a very large dead-letter collection, narrow the query with
+other criteria as well. A dead letter without a body has no headers and never matches a header filter.
 
 ### Dead letters and `MessageIdentity`
 
@@ -453,7 +460,9 @@ public static async Task<PopularColorsFound> Handle(FindPopularColors cmd,
 
 - When the handler is transactional (it writes through a storage action, takes
   `MongoDbUnitOfWork`, …) the read runs on the outbox session and sees that transaction's own
-  writes; a read-only handler reads session-less and no transaction is forced open.
+  writes. With `AutoApplyTransactions`, Wolverine also gives a handler whose only store access is
+  an `[All]` or `[Entity]` read a transaction. A handler marked `[NonTransactional]` reads
+  session-less, and no transaction is forced open.
 - Reads honour an explicit `MapEntityCollection` mapping, and a `Saga` type is read from its
   `wolverine_saga_*` collection.
 
@@ -467,20 +476,23 @@ MongoDB.
 
 ## Logical message deduplication
 
-Opt in with `opts.Durability.EnableMessageDeduplication = true` and mark handlers
-`[Deduplicated]` (or use `opts.MessageDeduplication` / `[DeduplicationIdentity]` to derive the
-id). Claims live in `wolverine_deduplication`, keyed by the deduplication id, so the collection's
-own `_id` uniqueness is the atomic claim: twenty nodes racing for one id produce exactly one
-winner. The stored expiry (`Durability.DeduplicationWindow`) is honoured to the instant — a claim
-whose window has passed is taken over — and a TTL index reaps stale claims. With the flag off the
-store is `NullDeduplicationStore` and nothing is provisioned.
+Opt in with `opts.Durability.MessageDeduplicationMode = MessageDeduplicationMode.CompareByHash` (or `CompareByString`) and mark
+handlers `[Deduplicated]` (or use `opts.MessageDeduplication` / `[DeduplicationIdentity]` to derive the id). Both modes use the
+same store. Claims live in `wolverine_deduplication`, keyed by the deduplication id, so the collection's own `_id` uniqueness
+is the atomic claim: twenty nodes racing for one id produce exactly one winner. The `_id` compares byte for byte, so the
+two modes do not differ here. The stored expiry (`Durability.DeduplicationWindow`) is honoured to the instant. A claim whose
+window has passed is taken over, and a TTL index reaps stale claims. With the mode `None` the store is
+`NullDeduplicationStore` and nothing is provisioned. `EnableMessageDeduplication` is `[Obsolete]`: `true` maps to
+`CompareByHash` and `false` to `None`. To compare ids as strings, set `MessageDeduplicationMode = CompareByString` explicitly.
 
-**Transactional handlers.** Wolverine weaves the claim in *before* the persistence provider opens
-a session and gives providers no way to claim inside the handler transaction; on the RDBMS
-providers a rolled-back transactional handler therefore leaves its claim behind and the retry is
-refused as a duplicate. Here the claim is sessionless and the MongoDB transaction frame **releases
-it when the transaction rolls back**, so the retry runs. A duplicate-key error on the claim can
-never abort a handler transaction because the claim is not part of one.
+**Transactional handlers.** Wolverine makes the claim *before* the persistence provider opens a session, so the claim is its
+own insert and is not part of the handler transaction. A duplicate-key error on the claim can never abort a handler
+transaction. When the handler fails and the MongoDB transaction rolls back, Wolverine releases the claim once, so the retry
+runs.
+
+**Recovered envelopes.** The store records the id of the envelope that took a claim. When inbox recovery replays that envelope
+after its node died, the envelope takes over its own stranded claim and is not refused as a duplicate. A different envelope
+with the same deduplication id is still refused.
 
 ## Durable recurring messages
 
@@ -572,6 +584,9 @@ naming the control endpoint in use and reminding you that synchronized clocks ar
   only envelopes still globally-owned (`OwnerId == 0`) are claimed, and the claim
   uses a filter guard so a competing node that claimed an envelope between load and
   write retains it, so there are no double-sends.
+- **Per-envelope incoming claim:** inbox recovery claims each globally owned incoming envelope with its own conditional
+  update (`OwnerId == 0` and `Status == Incoming`) and keeps only the envelopes it won. Two nodes that load the same page,
+  even in opposite orders, split the rows without a deadlock, and a row that a retry moved back to Scheduled is not claimed.
 - **Node records:** the Main store's durability agent prunes node-event records on
   `Durability.NodeRecordPruningPeriod` (first pass after at most one minute): records older
   than `NodeEventRecordExpirationTime` are deleted and the rest trimmed to
@@ -652,14 +667,15 @@ Collections and indexes are created automatically when Wolverine starts.
 
 The compliance test suite comes from the Wolverine source, vendored as a git
 submodule at `external/wolverine` and pinned to the same release as the
-`WolverineFx` package (`V6.38.0`): clone with `git clone --recursive` (or run
+`WolverineFx` package (`V6.65.1`): clone with `git clone --recursive` (or run
 `git submodule update --init`). Both the library and the test project
 project-reference it so there is a single consistent `Wolverine.dll`; the path is
 overridable via the `WOLVERINE_SOURCE` environment variable or
 `-p:WolverineSourcePath=...`. `WolverineFx.ComplianceTests` is also published on
 NuGet, so a checkout without the submodule builds against the package. The test
-project is an xUnit v3 test host (the compliance suites are built on
-`xunit.v3.extensibility.core`); the demo stays on xUnit 2.
+project is an xUnit v3 test host on Microsoft.Testing.Platform (the compliance suites are built on
+`xunit.v3.extensibility.core` 4.0.2, and the repo-root `global.json` selects the MTP runner for `dotnet test`); the demo
+stays on xUnit 2 and VSTest.
 
 CI initialises the submodule, runs the compliance suite in two separate steps
 (single-node and multinode categories), then packs the library; the demo job
@@ -669,7 +685,7 @@ it, so no stale NuGet version is exercised.
 To run only the multinode tests locally:
 
 ```bash
-dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"
+dotnet test --project src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj --filter-trait "Category=multinode"
 ```
 
 When the submodule is absent, the library can still be built and packed using

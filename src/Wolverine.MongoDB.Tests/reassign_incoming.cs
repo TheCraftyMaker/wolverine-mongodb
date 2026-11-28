@@ -38,6 +38,22 @@ public class reassign_incoming
         freeOwner.ShouldBe(7); // claimed by node 7
     }
 
+    [Fact]
+    public async Task releasing_to_any_node_frees_a_row_this_node_owns()
+    {
+        var store = _fixture.BuildMessageStore();
+        await store.Admin.RebuildAsync();
+
+        var envelope = ObjectMother.Envelope();
+        envelope.Destination = new Uri("rabbitmq://queue/r");
+        envelope.OwnerId = 5;
+        await store.Inbox.StoreIncomingAsync(envelope);
+
+        await store.ReassignIncomingAsync(MongoConstants.AnyNode, new[] { envelope });
+
+        (await ReadOwner(store, envelope.Id)).ShouldBe(MongoConstants.AnyNode);
+    }
+
     private static async Task<int> ReadOwner(MongoDbMessageStore store, Guid envelopeId)
     {
         var doc = await store.Incoming

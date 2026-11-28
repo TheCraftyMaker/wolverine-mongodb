@@ -1,3 +1,4 @@
+using Bobcat;
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
 using Wolverine.ComplianceTests;
@@ -14,6 +15,7 @@ namespace Wolverine.MongoDB.Tests;
 // reason sits next to the filter in .github/workflows/ci.yml.
 // [Collection("mongodb")] stops this class from running its cluster against the same database as
 // the TCP class at the same time.
+[BobcatFeature("MongoDB leader election, native control queue")]
 [Trait("Category", "multinode")]
 [Collection("mongodb")]
 public class control_queue_leadership_election_compliance : LeadershipElectionCompliance

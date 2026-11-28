@@ -5,6 +5,8 @@
     <IsTestProject>true</IsTestProject>
     <!-- xunit.v3 test projects are executables (the package's targets hard-error otherwise). -->
     <OutputType>Exe</OutputType>
+    <!-- xunit.v3 4.x runs on Microsoft.Testing.Platform; the repo-root global.json selects it for `dotnet test`. -->
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
@@ -12,6 +14,10 @@
     <PackageReference Include="GitHubActionsTestLogger" PrivateAssets="All" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit.v3" />
+    <!-- LeadershipElectionCompliance is written as Bobcat specifications: the session hook and the generator
+         that binds each inherited specification to the subclass. -->
+    <PackageReference Include="Bobcat.Xunit" />
+    <PackageReference Include="Bobcat.Generators" />
     <PackageReference Include="Testcontainers.MongoDb" />
     <PackageReference Include="xunit.runner.visualstudio">
       <PrivateAssets>all</PrivateAssets>

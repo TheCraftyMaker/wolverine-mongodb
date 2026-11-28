@@ -32,21 +32,21 @@ jobs:
       # distinguishable from a core regression. Both project-ref the Wolverine submodule.
       - name: Run library tests (single-node)
         run: >
-          dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
+          dotnet test --project src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
           -c Release -p:UseWolverineSource=true
-          --filter "Category!=multinode"
-          --logger "GitHubActions"
+          --filter-not-trait "Category=multinode"
 
       # singular_agent_is_only_running_on_one asserts exclusivity the instant any node reports the
       # agent, with no settling time, so it races over mongocontrol's polled handoff. The TCP class
       # keeps that fact as the gate; only the native copy is excluded, and the exclusion is by name,
-      # so renaming control_queue_leadership_election_compliance means editing this filter too.
+      # so renaming control_queue_leadership_election_compliance means editing the --filter-not-method value too.
       - name: Run library tests (multinode)
         run: >
-          dotnet test src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
+          dotnet test --project src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
           -c Release -p:UseWolverineSource=true
-          --filter "Category=multinode&FullyQualifiedName!=Wolverine.MongoDB.Tests.control_queue_leadership_election_compliance.singular_agent_is_only_running_on_one"
-          --logger "GitHubActions"
+          --filter-trait "Category=multinode"
+          --filter-not-method
+          "Wolverine.MongoDB.Tests.control_queue_leadership_election_compliance.singular_agent_is_only_running_on_one"
 
       - name: Pack (declares the WolverineFx package dependency)
         run: >

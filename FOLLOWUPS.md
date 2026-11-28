@@ -264,19 +264,50 @@ Promote to GitHub issues before the first public release.
   (`Status = Scheduled`, `OwnerId = AnyNode`) rather than drop it, which is a second write path
   with its own failure modes and tests. The residual is shared by every sibling provider.
 
+## Deferred from the WolverineFx 6.65 upgrade
+
+Each entry is a WolverineFx 6.65 capability this provider does not implement, with the reason and the place to start.
+
+- **`TryBuildTransactionalDeduplication` (GH-4505): the claim is not inside the MongoDB transaction.** The claim is a
+  sessionless insert, and core releases it once after a rollback, so nothing is lost or stranded. Claiming on the handler session
+  would make the claim and the handler commit together. **Extension point:** implement the hook in
+  `MongoDbPersistenceFrameProvider` and emit the claim on the open session. A duplicate-key error inside a MongoDB
+  transaction aborts the whole transaction, so the claim must be a conditional write that reports a duplicate without throwing.
+- **`IReplayableDeduplicationStore` is not implemented (GH-4742).** It backs `[DeduplicatedWithResponse]` HTTP endpoints, which
+  `EnableDeduplicatedResponses` turns on. The store claims an id with a request fingerprint and a claim token, records the
+  response, and replays it to a repeat. It needs its own collection and an `Enabled` flag, apart from `wolverine_deduplication`.
+  **Extension point:** a second store class with its own collection, registered next to the message store.
+- **`IDeadLetters.Capabilities` is `DeadLetterCapabilities.None`.** Core defines `FailureGroups`, `OperationCounts`,
+  `ArchiveAndRestore`, `ReplayHistory` and `ExceptionMessageMatching`, and offers each feature only when the store advertises it.
+  **Extension point:** `MongoDbMessageStore.DeadLetters.cs`. Each flag needs its own document fields and operations, for
+  example a state element on `DeadLetterMessage` for archive and restore.
+- **`ISagaStoreDiagnostics` query and completion are not implemented** (`SagaTerminationCompliance` is not adopted). The read
+  surface lists and reads sagas only. **Extension point:** `MongoDbSagaStoreDiagnostics`, which already reads the
+  `wolverine_saga_*` collections.
+- **`INodeAgentPersistence.AdvertisesNodeLoad` is false (GH-4593).** The contract is that the store persists and reads back
+  `WolverineNode.LoadFactor`. Core does not refuse `CapacityAwareAssignment` on a store that answers false. It logs a warning
+  at start, and agent placement ignores capacity. **Extension point:** a load element on the `wolverine_nodes` document,
+  written by the heartbeat in `MongoDbMessageStore.NodeAgents.cs`.
+- **`InboxStaleTime` is not honoured.** Core measures the age from the last claim of the row (receipt, recovery, or a scheduled
+  retry coming due), not from `receivedAt`. A node that holds a row restarts that clock through `IMessageInboxHeartbeat`, and
+  recovery reads stale rows through `IDurabilityPassInboxSource.LoadRecoverableIncomingAsync(staleBefore, ...)`. The RDBMS
+  stores keep the clock in an extra inbox column. This store implements neither interface, so recovery takes only rows owned by
+  any node. **Extension point:** a claim-time element on `IncomingMessage` that every claim sets,
+  `IMessageInboxHeartbeat.RestartStaleClockAsync` on the inbox, and the pass source in `MongoDbMessageStore.Durability.cs`.
+- **A failed incoming claim page can leave claimed rows owned until the next release.** `RecoverOrphanedIncomingAsync` claims
+  a page with `TryClaimIncomingAsync`, one update per row. If a claim fails part way through the page with a non-retryable error,
+  the rows already claimed on that page stay owned by the live node. Shutdown, Solo startup or the Balanced dead-node sweep
+  releases them. **Extension point:** a catch block around the claim loop. It must release only the confirmed winners, never the
+  envelope that was in flight, because a release by id could clear a claim that another node made.
+- **`PreferredEnvelopeIdGeneration` reports no preference.** `IMessageStore.PreferredEnvelopeIdGeneration` (GH-4902) is a hint
+  that is null by default. Wolverine adopts it only when every store agrees and the application did not set
+  `EnvelopeIdGeneration`. Null is a valid answer. **Extension point:** override the property on `MongoDbMessageStore`.
+
 ## Deferred from the WolverineFx 6.38 upgrade (2026-09-15)
 
-- **Logical deduplication has no upstream hook to claim inside the handler transaction.** Core
-  weaves `ClaimDeduplicationIdFrame` in at `Middleware[0]` before the persistence provider opens a
-  session, `IMessageDeduplicator` never sees one, and the release frame is omitted for transactional
-  chains on the assumption the claim is transactional (it is not, on any shipped provider).
-  Wolverine.MongoDB compensates with a rollback release in `TransactionalFrame`, reading the
-  `internal` claim frame's id variable reflectively (`DeduplicationClaim.FindIn`, loud failure on a
-  shape change). **Upstream ask:** a public hook on the claim frame, or a provider-side
-  "claim on my session" seam; then delete the reflection.
 - **`RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules` cannot
   pass for a non-Weasel store** (casts to `Weasel.Core.Migrations.IDatabase`,
-  `RecurringMessageCompliance.cs:528`; upstream only the four RDBMS providers inherit the suite).
+  `RecurringMessageCompliance.cs:531`; upstream only the four RDBMS providers inherit the suite).
   `recurring_message_compliance` hosts the suite by composition — a private `Bridge` subclass and
   one owned forwarding fact per upstream fact, the pattern `RavenDbFaultPublishingTests` uses for
   `DurableFaultPublishingCompliance` — and owns a same-named MongoDB-native fact asserting the same
@@ -293,7 +324,7 @@ Promote to GitHub issues before the first public release.
 - **Node-record TTL index is fixed at 14 days** while the agent now prunes on
   `NodeEventRecordExpirationTime` (default 5 days). Aligning the index would need a `collMod`
   migration on existing deployments; the TTL is a backstop only, so it was left alone.
-- **`WolverineFx.ComplianceTests` is on NuGet (6.38.0):** the submodule could be retired in favour
+- **`WolverineFx.ComplianceTests` is on NuGet (6.65.1):** the submodule could be retired in favour
   of the package reference (`UseWolverineSource=false` path already works). Kept for now because
   the project-reference build is what CI runs and gives one consistent `Wolverine.dll`.
 - **Upstream inconsistency observed:** the RDBMS dead-letter admin ANDs `MessageIds` with the other
@@ -357,11 +388,11 @@ Promote to GitHub issues before the first public release.
   reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
   (test or app) reads the `agentUri` field directly first.
 
-- **Upstream: RavenDb and Cosmos scope `RemoveAssignmentAsync` as of V6.38.0. Closed, nothing to
+- **Upstream: RavenDb and Cosmos scope `RemoveAssignmentAsync` as of V6.65.1. Closed, nothing to
   raise.** Both now refuse to delete a row another node owns, citing GH-4407:
-  `RavenDbMessageStore.NodeAgents.cs:228-250` loads the document under optimistic concurrency and
+  `RavenDbMessageStore.NodeAgents.cs:233-256` loads the document under optimistic concurrency and
   returns early when `NodeId` is not this node's, and
-  `CosmosDbMessageStore.NodeAgents.cs:261-284` reads the item, returns early on the same comparison, and
+  `CosmosDbMessageStore.NodeAgents.cs:266-290` reads the item, returns early on the same comparison, and
   conditions the delete on the ETag of that read. So all five RDBMS providers, both document stores and
   this provider agree on the predicate. An earlier note here said both document stores ignored `nodeId`
   and wanted a one-line PR against each. That was true of an older Wolverine, not of the pinned
@@ -387,18 +418,22 @@ Promote to GitHub issues before the first public release.
 
 - **`singular_agent_is_only_running_on_one` runs on a TCP control endpoint, deliberately.** The
   upstream fact asserts exclusivity the instant any host reports the `simple://` agent, with no
-  settling time (`LeadershipElectionCompliance.cs:380-386`). Agent handoff over a polled control
+  settling time. Agent handoff over a polled control
   transport costs up to a poll interval, which widens the window where a new leader re-drives a
-  start the previous leader already dispatched (`NodeAgentController.cs:316` writes the assignment
-  row only after the destination starts, and `EvaluateAssignments.cs:23` notes a new leader "starts
-  empty and safely re-drives everything"), so the assertion samples inside it. That fact is the only
+  start the previous leader already dispatched (`NodeAgentController.StartAgentAsync` writes the assignment
+  row only after the destination starts, and the next leader does not inherit the previous leader's in-memory
+  record of dispatched starts), so the assertion samples inside it. A newly elected leader holds back
+  such bare first-time placements for `Durability.LeaderTakeoverHoldEvaluations` evaluations (default 1)
+  while another node runs agents (GH-4897, `holdUnplacedAgentsAfterTakeover`). That narrows the window
+  but does not close it: a start that takes longer than the hold to surface as an assignment row is
+  placed again, and the orphans of a stale node are never held. That fact is the only
   coverage anywhere of a `SingularAgent` running on at most one node: `simple://` appears in no other
   fact, the `expectExactlyOneCopyOfEachAsync` and `expectOneCopyWithARowNamingItsNodeAsync` helpers
   are only ever pointed at the twelve `fake://` agents, and `AssignmentWaiter.HasReached`
   (`Wolverine/TestingExtensions.cs:345-347`) filters the `simple` scheme out. So excluding or
   skipping it would leave that property untested rather than covered elsewhere, and
   `leadership_election_compliance.cs` keeps `UseTcpForControlEndpoint()` instead. Upstream splits the
-  same way: `RavenDbTests.LeaderElection/leadership_election_compliance.cs:42` configures TCP and a
+  same way: `RavenDbTests.LeaderElection/leadership_election_compliance.cs:44` configures TCP and a
   separate `control_queue_leadership_election_compliance.cs` runs the battery over the native queue.
   Nothing to fix in the transport, and the transport's own contract stays covered by
   `control_transport_compliance` and `control_queue_tests`.
@@ -407,30 +442,27 @@ Promote to GitHub issues before the first public release.
   over `mongocontrol`, including 6 pinned to two logical CPUs to widen the race, and the full
   category passed 48 of 48 four times, while the same code failed on both frameworks on a CI runner.
   And the earlier claim here that a lagging stop causes the duplicate is wrong: the failing CI log
-  contains no "Successfully stopped agent" line at all (`NodeAgentController.cs:538`), so no stop was
+  contains no "Successfully stopped agent" line at all (`NodeAgentController.cs:597`), so no stop was
   in flight. The duplicate is an unretracted start, not a late stop.
   This repository splits the same way. `control_queue_leadership_election_compliance.cs` runs the
   battery over `mongocontrol`, and `.github/workflows/ci.yml` excludes only
-  `singular_agent_is_only_running_on_one` from that copy, by name. So 18 of the suite's 19 facts are
+  `singular_agent_is_only_running_on_one` from that copy, by name. So 22 of the suite's 23 specs are
   gated on the native transport, among them
-  `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`
-  (`LeadershipElectionCompliance.cs:350-361`), which drives the same scenario the excluded fact does, a
+  `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`,
+  which drives the same scenario the excluded fact does, a
   leader dying with its starts in flight, but waits up to 60 seconds for convergence instead of sampling
   an instant. Convergence is therefore gated on `mongocontrol`, and the only fact not gated there is the
   instantaneous exclusivity assertion, which the TCP class still gates.
-  Running that one on `mongocontrol` too needs per-test retry, which means moving this test project off
-  VSTest onto Microsoft.Testing.Platform. Upstream's harness has it and reports a pass-on-retry as green
-  (`build/SupervisedTests.cs:155`); here the `GitHubActionsTestLogger` 2.4.1 pin described in CLAUDE.md's
-  "Build & Test" section blocks the move.
+  Running that one on `mongocontrol` too needs per-test retry. This test project runs on Microsoft.Testing.Platform, and CI
+  configures no retry. Upstream's harness retries and reports a pass-on-retry as green (`build/SupervisedTests.cs:188-190`).
 
 - **Upstream: let the durable assignment row decide exclusivity.** The fix for the fact
   above belongs in core, not here. `NodeAgentController.StartAgentAsync`
-  (`external/wolverine/src/Wolverine/Runtime/Agents/NodeAgentController.cs:316`) starts the agent first
-  and writes the assignment row afterwards (`:402`, via `upsertAssignmentAsync`), so while a start is in
+  (in `external/wolverine/src/Wolverine/Runtime/Agents/NodeAgentController.cs`) starts the agent first
+  and writes the assignment row afterwards, through `upsertAssignmentAsync`, so while a start is in
   flight nothing durable says the agent is taken. The only record of it is the dispatching leader's
-  in-memory ledger, which the next leader does not inherit
-  (`NodeAgentController.EvaluateAssignments.cs:23`: a new leader "starts empty and safely re-drives
-  everything"). Calling `TryClaimAssignmentAsync` at the top of `StartAgentAsync` and returning on
+  in-memory ledger, which the next leader does not inherit (the ledger is leader-only and in memory, in
+  `NodeAgentController.EvaluateAssignments.cs`). Calling `TryClaimAssignmentAsync` at the top of `StartAgentAsync` and returning on
   `false` would put the arbitration on a single atomic write, so a re-driven start loses the claim and
   never runs. Every provider already implements that method, this one at
   `MongoDbMessageStore.NodeAgents.cs:134-153` (an `_id`-unique insert whose duplicate-key branch reports
@@ -439,7 +471,7 @@ Promote to GitHub issues before the first public release.
   Three things a patch would have to settle. `LeaderUri` is excluded from the sweep
   (`NodeAgentController.Reconcile.cs:58-59`) and needs excluding from the claim too, because the election
   places the leader agent rather than the assignment grid. The idempotent-restart path
-  (`NodeAgentController.cs:323-333`) depends on "already mine returns `true`", which
+  (`NodeAgentController.cs:363-373`) depends on "already mine returns `true`", which
   `NodePersistenceCompliance.cs:293` pins for every provider. And a claim that lands before a start that
   then throws leaves a claimed-but-not-running row, which is the sweep's other mismatch direction and
   already heals itself (`NodeAgentController.Reconcile.cs:151-159` restarts it).
@@ -459,5 +491,5 @@ Promote to GitHub issues before the first public release.
   What this change does alter is the blast radius. The category is now 66 facts in one process, and
   this repository runs one plain `dotnet test` per step with no retry, so a single host crash costs
   the entire step where upstream's harness would retry in a fresh process and report green
-  (`build/SupervisedTests.cs:155`). Watch for it on CI runners; if it recurs there, per-test retry
+  (`build/SupervisedTests.cs:188-190`). Watch for it on CI runners; if it recurs there, per-test retry
   stops being a nicety.

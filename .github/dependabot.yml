@@ -16,13 +16,9 @@ updates:
       shared:
         group-by: dependency-name
     ignore:
-      # Blocked on the MTP 1.9.1 vs 2.0 conflict the pin in Directory.Packages.props documents
-      # (CS1705). Lift once the submodule pin reaches xunit.v3 4.x.
+      # 3.x does not compile next to the Microsoft.Testing.Platform 2.x that xunit.v3 4.x carries
+      # (CS1705); upstream Wolverine stays on 2.4.1 for the same reason.
       - dependency-name: "GitHubActionsTestLogger"
-        update-types: ["version-update:semver-major"]
-      # 4.x is MTP-only and drops the VSTest target on the .NET 10 SDK. Wolverine.ComplianceTests
-      # at the pinned V6.38.0 builds on xunit.v3.extensibility.core 3.2.2, so upstream moves first.
-      - dependency-name: "xunit.v3"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"

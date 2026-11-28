@@ -162,10 +162,13 @@ public class entity_query_attributes
             .ShouldBeLessThan(transactional.IndexOf(".UpsertAsync<", StringComparison.Ordinal),
                 "the read runs before the handler's write");
 
+        // CountColors is [NonTransactional]: under AutoApplyTransactions core gives a chain that reaches
+        // the store only through [All] the store's transaction (GH-4717), so the opt-out is what leaves a
+        // handler without one. The [All] read must then not open a session of its own.
         var readOnly = generatedSourceFor(host, typeof(CountColors));
-        readOnly.ShouldContain("MongoEntityOperations.LoadAllAsync<Wolverine.MongoDB.Tests.Color>(");
-        readOnly.Contains(", null, ").ShouldBeTrue("a read-only handler has no outbox transaction and must not be forced to open one");
-        readOnly.ShouldNotContain("StartSessionAsync");
+        readOnly.ShouldContain("MongoEntityOperations.LoadAllAsync<Wolverine.MongoDB.Tests.Color>(_mongoDatabase, null, ");
+        readOnly.ShouldNotContain("StartSessionAsync",
+            customMessage: "a handler without an outbox transaction must not be forced to open one");
 
         // And the transactional shape really works end to end: the write lands and the read saw the
         // pre-existing documents.
@@ -222,6 +225,8 @@ public record ColorSagasListed(string[] Names);
 [WolverineIgnore]
 public static class ColorHandler
 {
+    // Opted out of AutoApplyTransactions, so this chain covers the session-less [All] read
+    [NonTransactional]
     public static ColorsCounted Handle(CountColors command, [All] IReadOnlyList<Color> colors)
         => new(colors.Count);
 
