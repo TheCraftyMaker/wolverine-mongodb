@@ -482,8 +482,8 @@ same store. Claims live in `wolverine_deduplication`, keyed by the deduplication
 is the atomic claim: twenty nodes racing for one id produce exactly one winner. The `_id` compares byte for byte, so the
 two modes do not differ here. The stored expiry (`Durability.DeduplicationWindow`) is honoured to the instant. A claim whose
 window has passed is taken over, and a TTL index reaps stale claims. With the mode `None` the store is
-`NullDeduplicationStore` and nothing is provisioned. `EnableMessageDeduplication` still works as the older switch for the same
-setting.
+`NullDeduplicationStore` and nothing is provisioned. `EnableMessageDeduplication` is `[Obsolete]`: `true` maps to
+`CompareByHash` and `false` to `None`. To compare ids as strings, set `MessageDeduplicationMode = CompareByString` explicitly.
 
 **Transactional handlers.** Wolverine makes the claim *before* the persistence provider opens a session, so the claim is its
 own insert and is not part of the handler transaction. A duplicate-key error on the claim can never abort a handler

@@ -23,7 +23,8 @@ The major version tracks Wolverine's major version.
   and Microsoft.Testing.Platform, with Bobcat for the leadership-election specs. Run it with
   `dotnet test --project <test project>`, and select categories with `--filter-trait` and `--filter-not-trait`.
 - **`MessageDeduplicationMode` replaces `EnableMessageDeduplication`.** Both `CompareByHash` and `CompareByString` use the MongoDB
-  deduplication store. The older property still works.
+  deduplication store. `EnableMessageDeduplication` is `[Obsolete]`: `true` maps to `CompareByHash` and `false` to `None`. An
+  application that wants the string comparison sets `MessageDeduplicationMode = CompareByString` explicitly.
 - **Marking an incoming envelope handled releases its owner.** A handled marker no longer holds a node number in the dead-node sweep.
 - **Raised the `MongoDB.Driver` floor from 3.12.0 to 3.14.1.** Driver releases 3.13.0 through 3.14.1 fix several CVEs.
   In 3.14.1, `MongoUrl.ToString()`, `MongoServerAddress.ToString()` and `MongoCredential.ToString()` return redacted

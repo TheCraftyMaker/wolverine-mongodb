@@ -273,21 +273,30 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   would make the claim and the handler commit together. **Extension point:** implement the hook in
   `MongoDbPersistenceFrameProvider` and emit the claim on the open session. A duplicate-key error inside a MongoDB
   transaction aborts the whole transaction, so the claim must be a conditional write that reports a duplicate without throwing.
-- **`IReplayableDeduplicationStore` is not implemented.** The deduplication compliance suite passes without it. Replay support
-  needs the store to drop one claim on request. **Extension point:** a `DeleteOneAsync` on `_id` in `MongoDbDeduplicationStore`.
-- **`IDeadLetters.Capabilities` advertises no failure groups, archive or restore.** Core offers none of them for this store.
-  **Extension point:** `MongoDbMessageStore.DeadLetters.cs`, with a state element on `DeadLetterMessage` for archive and restore.
+- **`IReplayableDeduplicationStore` is not implemented (GH-4742).** It backs `[DeduplicatedWithResponse]` HTTP endpoints, which
+  `EnableDeduplicatedResponses` turns on. The store claims an id with a request fingerprint and a claim token, records the
+  response, and replays it to a repeat. It needs its own collection and an `Enabled` flag, apart from `wolverine_deduplication`.
+  **Extension point:** a second store class with its own collection, registered next to the message store.
+- **`IDeadLetters.Capabilities` is `DeadLetterCapabilities.None`.** Core defines `FailureGroups`, `OperationCounts`,
+  `ArchiveAndRestore`, `ReplayHistory` and `ExceptionMessageMatching`, and offers each feature only when the store advertises it.
+  **Extension point:** `MongoDbMessageStore.DeadLetters.cs`. Each flag needs its own document fields and operations, for
+  example a state element on `DeadLetterMessage` for archive and restore.
 - **`ISagaStoreDiagnostics` query and completion are not implemented** (`SagaTerminationCompliance` is not adopted). The read
   surface lists and reads sagas only. **Extension point:** `MongoDbSagaStoreDiagnostics`, which already reads the
   `wolverine_saga_*` collections.
-- **`INodeAgentPersistence.AdvertisesNodeLoad` is false.** Wolverine refuses `CapacityAwareAssignment` on a store that does
-  not advertise node load. **Extension point:** a load element on the `wolverine_nodes` document, written by the
-  heartbeat in `MongoDbMessageStore.NodeAgents.cs`.
-- **`InboxStaleTime` is not honoured.** Recovery does not treat an old `Incoming` row differently from a new one. **Extension
-  point:** a `receivedAt` bound in the recovery page query in `MongoDbMessageStore.Durability.cs`.
-- **`PreferredEnvelopeIdGeneration` is not honoured.** Envelope ids stay the Guids Wolverine assigns, and `_id` stays a BSON
-  Guid. **Extension point:** the `IncomingMessage` and `OutgoingMessage` id mapping, which would need a document-shape
-  migration for existing collections.
+- **`INodeAgentPersistence.AdvertisesNodeLoad` is false (GH-4593).** The contract is that the store persists and reads back
+  `WolverineNode.LoadFactor`. Core does not refuse `CapacityAwareAssignment` on a store that answers false. It logs a warning
+  at start, and agent placement ignores capacity. **Extension point:** a load element on the `wolverine_nodes` document,
+  written by the heartbeat in `MongoDbMessageStore.NodeAgents.cs`.
+- **`InboxStaleTime` is not honoured.** Core measures the age from the last claim of the row (receipt, recovery, or a scheduled
+  retry coming due), not from `receivedAt`. A node that holds a row restarts that clock through `IMessageInboxHeartbeat`, and
+  recovery reads stale rows through `IDurabilityPassInboxSource.LoadRecoverableIncomingAsync(staleBefore, ...)`. The RDBMS
+  stores keep the clock in an extra inbox column. This store implements neither interface, so recovery takes only rows owned by
+  any node. **Extension point:** a claim-time element on `IncomingMessage` that every claim sets,
+  `IMessageInboxHeartbeat.RestartStaleClockAsync` on the inbox, and the pass source in `MongoDbMessageStore.Durability.cs`.
+- **`PreferredEnvelopeIdGeneration` reports no preference.** `IMessageStore.PreferredEnvelopeIdGeneration` (GH-4902) is a hint
+  that is null by default. Wolverine adopts it only when every store agrees and the application did not set
+  `EnvelopeIdGeneration`. Null is a valid answer. **Extension point:** override the property on `MongoDbMessageStore`.
 
 ## Deferred from the WolverineFx 6.38 upgrade (2026-09-15)
 
@@ -428,7 +437,7 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   in flight. The duplicate is an unretracted start, not a late stop.
   This repository splits the same way. `control_queue_leadership_election_compliance.cs` runs the
   battery over `mongocontrol`, and `.github/workflows/ci.yml` excludes only
-  `singular_agent_is_only_running_on_one` from that copy, by name. So 18 of the suite's 19 facts are
+  `singular_agent_is_only_running_on_one` from that copy, by name. So 22 of the suite's 23 specs are
   gated on the native transport, among them
   `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`
   (`LeadershipElectionCompliance.cs:350-361`), which drives the same scenario the excluded fact does, a
