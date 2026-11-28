@@ -40,14 +40,14 @@ public class DeduplicationClaimDocument
 /// </para>
 /// <para>
 /// <b>The claim is deliberately sessionless.</b> Wolverine core weaves the claim frame in <em>before</em>
-/// the persistence provider's transaction frame opens a session, and no upstream hook hands the
-/// claim an <c>IClientSessionHandle</c>; the RDBMS reference implementation claims on its own connection
-/// for the same reason. That also means a duplicate-key error here can never abort a handler
-/// transaction (the MongoDB behaviour that makes an in-transaction duplicate insert poison the whole
-/// transaction), because there is no transaction on this write. What makes the claim safe for a
-/// <em>transactional</em> handler is <c>TransactionalFrame</c>: when the handler's transaction rolls
-/// back, the frame releases the claim so the retry is not refused as a duplicate of its own failed
-/// attempt. Non-transactional handlers get the same compensation from core's own release frame.
+/// the persistence provider's transaction frame opens a session, so the claim has no
+/// <c>IClientSessionHandle</c>. Core can claim on the session through <c>TryBuildTransactionalDeduplication</c>
+/// (GH-4505), but this provider does not implement it yet; see FOLLOWUPS.md. The RDBMS reference
+/// implementation also claims on its own connection. A duplicate-key error here therefore cannot abort a
+/// handler transaction (the MongoDB behavior that makes an in-transaction duplicate insert poison the
+/// whole transaction), because there is no transaction on this write. After a failure, core's
+/// <c>ReleaseDeduplicationIdOnFailureFrame</c> (GH-4180) releases the claim once, so the retry is not refused as a
+/// duplicate of its own failed attempt. It does this for transactional and non-transactional chains alike.
 /// </para>
 /// <para>
 /// Expiry: a TTL index on <c>expires</c> lets the server reap stale claims on its own cadence;
