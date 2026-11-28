@@ -6,7 +6,7 @@ Native MongoDB persistence provider for Wolverine's transactional inbox/outbox. 
 
 **Package:** `Wolverine.MongoDB` (NuGet; see `Directory.Build.props` for the current version: `1.1.0` as of the [1.1.0] CHANGELOG entry)  
 **Targets:** .NET 9, .NET 10  
-**Dependencies:** `WolverineFx 6.38.0` (submodule `external/wolverine` at `V6.38.0`), `MongoDB.Driver 3.x`  
+**Dependencies:** `WolverineFx 6.65.1` (submodule `external/wolverine` at `V6.65.1`), `MongoDB.Driver 3.x`  
 **Constraint:** MongoDB must run as a replica set (transactions require it).
 
 ---
@@ -26,7 +26,7 @@ src/Wolverine.MongoDB/              ← Library (NuGet package)
     MongoDbCollectionNamePolicy.cs  ← IHandlerPolicy that claims a collection per persisted type
     MongoTransactionOptions.cs      ← The TransactionOptions every library-opened transaction carries
     EntityQueryFrames.cs            ← [All]/[FirstOrDefault]/[Queryable] read frames (non-forcing session)
-    MongoDbDeduplicationStore.cs    ← IDeduplicationStore over wolverine_deduplication (opt-in)
+    MongoDbDeduplicationStore.cs    ← Dedup store (envelope-aware claim + claim lookup) over wolverine_deduplication (opt-in)
     MongoDbRecurringMessageStore.cs ← IRecurringMessageStore over wolverine_recurring_messages (opt-in, Main only)
     ControlMessageDocument.cs       ← Document shape for wolverine_control_messages (Balanced only)
     Transport/                      ← mongocontrol transport: endpoint, sender, listener (Balanced-mode node control)
@@ -49,13 +49,16 @@ src/Wolverine.MongoDB.Tests/        ← Integration tests (needs Wolverine sourc
   core_type_name_collision_compliance.cs ← Upstream CoreTypeNameCollisionCompliance (GH-3907)
   recurring_message_compliance.cs   ← Upstream RecurringMessageCompliance (hosted via a RavenDb-style Bridge; the one Weasel-bound fact is replaced, see FOLLOWUPS)
   node_reregistration.cs            ← 6.38 INodeAgentPersistence contract: heartbeat miss, reregister, atomic claim
-  retry_retention.cs                ← Rescheduled retries drop keepUntil and restore the payload
+  retry_retention.cs                ← A retry never revives a Handled row; Incoming retries drop keepUntil, restore the payload
+  incoming_claim.cs                 ← TryClaimIncomingAsync: per-row conditional claim, returns only the rows this call won
+  reassign_incoming.cs              ← ReassignIncomingAsync: release by id alone, claim guarded by OwnerId == AnyNode
+  deduplication_store_compliance.cs ← Upstream DeduplicationStoreCompliance under both modes (Bridge; 12 SQL-bound facts replaced)
   persistence_provider_precedence.cs← IsCatchAll: selective providers win in mixed persistence, both orders
   dead_letter_replayable_filter.cs  ← Tri-state Replayable filter on query/discard/replay
   outbox_batching.cs                ← WasPersistedInOutbox + the batch StoreOutgoingAsync (one bulk update, all-or-nothing)
   entity_query_attributes.cs        ← [All]/[FirstOrDefault]/[Queryable] incl. session use proven on generated source
   after_commit_integration.cs / after_commit_http.cs ← AfterCommit ordering after commit + flush
-  logical_message_deduplication.cs  ← Framework-level dedup facts incl. rollback release
+  logical_message_deduplication.cs  ← Framework-level dedup facts incl. the single release after a rollback
   recurring_messages.cs             ← MongoDB-specific recurring-store facts (cross-node pause, trigger refusal)
   node_record_pruning.cs / orphan_sweep_settings.cs ← Durability maintenance settings honoured by the agent
 demo/                               ← Separate solution, references package from CI nupkg
@@ -158,7 +161,7 @@ coercion, unlike Cosmos/RavenDb).
 | `wolverine_dead_letters` | Failed messages + exception info. `_id` follows `Durability.MessageIdentity` (the envelope Guid in `IdOnly`, an identity-derived Guid in `IdAndDestination`); the framework-facing envelope Guid is the separate `envelopeId` element |
 | `wolverine_nodes` | Node registry (heartbeat, capabilities) |
 | `wolverine_node_assignments` | Agent-to-node mapping |
-| `wolverine_deduplication` | Logical-deduplication claims (`_id` = deduplication id, `expires` TTL); only when `EnableMessageDeduplication` |
+| `wolverine_deduplication` | Dedup claims (`_id` = deduplication id, `expires` TTL); only when `MessageDeduplicationMode` is not `None` |
 | `wolverine_recurring_messages` | Recurring-schedule tracking (`_id` = schedule name); only when `EnableRecurringMessages` on the Main store |
 | `wolverine_control_messages` | Inter-node control messages (Balanced only): `_id` = envelope id, `nodeId`, `body`, `expires` (TTL) |
 | `wolverine_saga_<lowercased-type>` | One collection per saga type (e.g. `wolverine_saga_orderfulfillmentsaga`) |
@@ -176,6 +179,13 @@ coercion, unlike Cosmos/RavenDb).
   - **`TryClaimAssignmentAsync` is the conditional write, and it is a member in its own right rather than a condition bolted onto the unconditional ones.** It claims an agent only when no node owns it and reports whether the document is this node's afterwards (`INodeAgentPersistence.cs:37-44`), with all three outcomes pinned by `NodePersistenceCompliance.cs:267-303`. This provider implements it as an `_id`-unique `InsertOneAsync` whose duplicate-key branch reads who owns the existing document (`MongoDbMessageStore.NodeAgents.cs:134-153`). Core calls it from the reconciliation sweep only (`NodeAgentController.Reconcile.cs:186`); the start path still goes through `AddAssignmentAsync` (`NodeAgentController.cs:482-494`). Read this before reaching for a conditional `AddAssignmentAsync`: the conditional path already exists under its own name, and `add_assignment_moves_the_row_to_the_new_node` (`NodePersistenceCompliance.cs:254-265`) needs the unconditional one to stay unconditional.
 - **`LoadOutgoingAsync` is owner-scoped and batch-limited:** only envelopes with `OwnerId == 0` (globally-owned / unclaimed) are returned, capped at `Durability.RecoveryBatchSize`. Envelopes owned by a live node are in-flight and must never be handed to recovery.
 - **CAS-guarded outgoing recovery:** `RecoverOrphanedOutgoingAsync` uses a filter guard (`OwnerId == AnyNode`) on the claim `UpdateMany` and re-reads which ids this node actually won before enqueuing — prevents double-sends when two nodes race for the same orphaned envelopes.
+- **Incoming claim is one conditional update per envelope:** `TryClaimIncomingAsync(ownerId, envelopes)` updates one document per
+  envelope. The filter is `_id` plus `OwnerId == AnyNode` plus `Status == Incoming`. A row counts as won only when
+  `ModifiedCount == 1`, and only the won envelopes come back, with `OwnerId` set. One update per document takes no multi-document
+  lock, so two recovery passes that read the same page in opposite orders cannot deadlock. The `Status` guard keeps a row that a
+  retry moved back to Scheduled (owned by `AnyNode` again) from running before its delay. The RDBMS providers guard the same status.
+  `ReassignIncomingAsync` stays one bulk `UpdateMany`. A release to `AnyNode` matches by id alone, because it frees rows this node
+  owns. A claim for a real node keeps the `OwnerId == AnyNode` guard, so a row another node took is not stolen.
 - **Dead-node ownership release is two-tick-confirmed (Balanced mode only):** the orphan sweep — its own loop at `OrphanedMessageSweepPollingTime`, never created in Solo mode — calls `ReleaseDeadNodeOwnershipAsync`, which releases in bounded batches (`OrphanedMessageReleaseBatchSize` × `OrphanedMessageReleaseMaxBatchesPerCycle`, remainder on the next sweep; a tick is one sweep). It which computes the node numbers that are *owned* in `wolverine_incoming_envelopes`/`wolverine_outgoing_envelopes` but have no live `wolverine_nodes` document, and releases only the numbers that were **also** dead on the previous tick (`Filter.In(confirmed)`, never `Filter.Nin(liveSnapshot)`). Reading the owned set *before* the live set, plus monotonic never-reused node numbers (see the node-number-reuse decision below), means a number confirmed dead was dead for the whole interval — a node that registers and claims between the read and the write can never be released. Cost: a crashed node's envelopes are rescued one recovery interval later. Still runs before orphan recovery so released envelopes are re-claimable in the same tick. **A future change to reuse freed node numbers would invalidate this argument** — see the soundness comment on the method.
 - **Handled markers expire via `KeepUntil` TTL:** `IncomingMessage` maps `envelope.KeepUntil` into the document. The TTL index on `keepUntil` automatically removes handled markers. Previously, `KeepUntil` was dropped, causing unbounded inbox growth.
 - **Dead-letter TTL is opt-in:** `ExpirationTime` is only written when `Durability.DeadLetterQueueExpirationEnabled == true`. With the default `false`, dead letters are retained forever (matching RDBMS providers). The TTL index ignores documents without the `expirationTime` field.
@@ -204,18 +214,75 @@ coercion, unlike Cosmos/RavenDb).
 - **Collection-name collisions are refused, never auto-resolved:** `MongoCollectionNaming` is the single resolution point for "which collection does this type live in", and `MongoDbCollectionNamePolicy` (an `IHandlerPolicy`) claims one per persisted type. Defaults are byte-identical — `MongoConstants.SagaCollectionName`/`EntityCollectionName` are untouched, so no existing collection is renamed and no data is migrated. Two different Wolverine-persisted types resolving to one collection throws an `InvalidOperationException` naming both full type names, the collection, the database and the exact mapping call; auto-resolving (e.g. falling back to `FullName` for the "second" type) was rejected because which type is second depends on discovery order, so it would be a non-deterministic silent rename. **Hook point:** `WolverineRuntime.StartAsync` calls `Handlers.Compile(Options, _container)` (`WolverineRuntime.HostService.cs:100`) before `startMessagingTransportsAsync()`, and `HandlerGraph.Compile` runs every `IHandlerPolicy` (`HandlerGraph.cs:397`) — so the check fires before any listener starts, and in `TypeLoadMode.Static` too (`Compile` is unconditional; only frame *constructors* are skipped), which is the gap that forces `MongoIdentityMapping` to duplicate itself in the runtime accessors. An `IHostedService` (Cosmos's `CosmosDbSagaSerializationValidator` precedent) runs strictly later, after transports are live. The runtime accessors claim too, as defence in depth for any discovery shape the policy's walk misses — but only the policy fails the operator's deploy; an accessor throw happens inside an open transaction, mid-handler, which Wolverine's retry/DLQ policy would turn into a message-delivery incident. **Escape hatch:** `MongoDbPersistenceOptions.MapSagaCollection`/`MapEntityCollection`. Saga mappings must keep the `wolverine_saga_` prefix because `MongoDbMessageStore.Admin.cs`'s sweep is prefix-coupled (both sides now share `MongoCollectionNaming.IsSagaCollectionName`, so they cannot drift); entity mappings are barred from that prefix and from the nine system collection names. Unlike upstream RDBMS — which registers a `SagaTableDefinition` with the user's table name and then discards it on the runtime path (`PostgresqlMessageStore.cs:782` et al. construct `new SagaTableDefinition(typeof(T), null)`) — the mapping here is honoured by the frames, `MongoDbSagaStoreDiagnostics` and the admin sweep alike. **Process-global state, scoped by database:** both the mapping map and the claim registry are `static` (the runtime accessors are `static` and receive only an `IMongoDatabase`; threading options through them would break the `public static` `MongoSagaOperations`/`MongoEntityOperations` signatures pre-generated deployments compiled against). Both dictionaries are keyed by **database name**, so two in-process hosts on different databases never interact; two on the *same* database must agree, which they must anyway since they share the physical collections. Re-applying an identical mapping set and re-claiming an already-owned collection are lock-free no-ops (a snapshot probe and `ConcurrentDictionary.GetOrAdd` respectively), so repeated and concurrent host construction — the compliance suites, the two-host multinode fixtures — costs one dictionary probe; genuine disagreement throws. **`ApplyMappings` is all-or-nothing:** the mapping registry is an immutable snapshot swapped under a configuration-time lock only after the whole set has validated, so a rejected set is never published — publishing first and validating after would have redirected an *already running*, unmapped host away from the collection it had been writing all along, orphaning those documents with no exception on that host. The runtime `resolve` path never takes the lock. Note the limit of "disagreement": a host that configures **no** mapping is indistinguishable from one mapped to the default, so it silently inherits another host's mapping rather than clashing with it (the reverse order — default actually resolved first, mapping applied second — does throw). **Two narrower new refusals**, both silently destructive before: an entity type whose *default* name lands inside `wolverine_saga_` (dropped by every `RebuildAsync`) or on a system collection name. **Explicit non-goals:** an overlap with a collection the application's own repositories own (`GetCollection<T>("orders")`) is invisible to a handler-graph walk — documented in README, `MapEntityCollection` is the remedy; and two `IMongoClient`s on different clusters sharing a database name are treated as one namespace.
 - **`ISagaStoreDiagnostics` registered unconditionally (T2.1):** `UseMongoDbPersistence` always registers `MongoDbSagaStoreDiagnostics` as a singleton — no opt-in flag, matching how RavenDb registers its implementation. The Wolverine runtime's diagnostics aggregator tolerates zero or multiple registered implementations, so unconditional registration is safe even in a mixed-provider app.
 - **Diagnostics reaches internal Wolverine members via reflection, not direct calls (T2.1):** `MongoDbSagaStoreDiagnostics` needs `SagaDescriptorBuilder.Build`, `WolverineOptions.HandlerGraph`, and `HandlerGraph.Container` — all `internal` to Wolverine core. Because this provider ships as an **external** NuGet package (not on Wolverine's `[InternalsVisibleTo]` list, unlike the in-repo RavenDb/Marten/EF Core/RDBMS providers), it bridges each member through isolated, cached, non-throwing reflection, each call site carrying a `// TODO(upstream)` marker. When contributed upstream into the Wolverine repo, add `Wolverine.MongoDB` to `[InternalsVisibleTo]` and collapse each bridge to the direct member access every sibling provider uses.
-- **Multinode leadership compliance un-gated, and now run twice (T4.5, 2026-07-05):** the upstream `LeadershipElectionCompliance` suite was compile-gated behind `#if RUN_MULTINODE` because earlier WolverineFx releases required the lowest-numbered surviving node to win a leadership-claim race our `w:majority` lock couldn't guarantee. WolverineFx 6.9.0 reworked those facts around the "any healthy node leads" model this provider already implements. Verified 5× consecutive green on net9.0 **and** net10.0 (10/10 runs, 17/17 facts each) over a TCP control endpoint, which is the transport that claim was earned on; the `#if` guard was removed and `[Trait("Category","multinode")]` now routes the suite into CI's existing multinode step with no `ci.yml` change. **Two classes run the battery, split by which assertion each transport can gate.** `leadership_election_compliance.cs` configures `UseTcpForControlEndpoint()` and runs all 19 facts. `control_queue_leadership_election_compliance.cs` configures no control endpoint, so `MongoDbControlTransport` self-registers, and runs 18 of them: the same pairing RavenDb ships (`RavenDbTests.LeaderElection/leadership_election_compliance.cs` on TCP, `control_queue_leadership_election_compliance.cs` on its native control queue). The excluded fact is `singular_agent_is_only_running_on_one` (`LeadershipElectionCompliance.cs:366-387`), which waits until at least one host reports `simple://` and then asserts immediately that exactly one does, with no settling time. Over a polled control transport a new leader can re-drive a start the previous leader already dispatched, because the destination writes its assignment document only after starting the agent (`NodeAgentController.cs:374-402`) and the outgoing leader's suppression ledger is in-memory. The fact is not `virtual`, so CI's multinode step excludes it by fully-qualified name for that one class (`ci.yml`), so renaming the class means editing that filter too. Coverage is intact on both sides: instantaneous exclusivity stays gated on TCP, where `simple://` appears in no other fact, and the native transport gates the convergent form of the same race, `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight` (`LeadershipElectionCompliance.cs:349-361`), along with the other 17.
+- **Multinode leadership compliance un-gated, and now run twice (T4.5, 2026-07-05):** the upstream `LeadershipElectionCompliance` suite
+  was compile-gated behind `#if RUN_MULTINODE` because earlier WolverineFx releases required the lowest-numbered surviving node to win a
+  leadership-claim race our `w:majority` lock couldn't guarantee. WolverineFx 6.9.0 reworked those facts around the "any healthy node
+  leads" model this provider already implements. Verified 5× consecutive green on net9.0 **and** net10.0 (10/10 runs, 17/17 facts each)
+  over a TCP control endpoint, which is the transport that claim was earned on; the `#if` guard was removed and
+  `[Trait("Category","multinode")]` now routes the suite into CI's existing multinode step with no `ci.yml` change. **Two classes run the
+  battery, split by which assertion each transport can gate.** `leadership_election_compliance.cs` configures `UseTcpForControlEndpoint()`
+  and runs all 23 specs. `control_queue_leadership_election_compliance.cs` configures no control endpoint, so `MongoDbControlTransport`
+  self-registers, and runs 22 of them: the same pairing RavenDb ships (`RavenDbTests.LeaderElection/leadership_election_compliance.cs` on
+  TCP, `control_queue_leadership_election_compliance.cs` on its native control queue). The excluded fact is
+  `singular_agent_is_only_running_on_one` (`LeadershipElectionCompliance.cs:366-387`), which waits until at least one host reports
+  `simple://` and then asserts immediately that exactly one does, with no settling time. Over a polled control transport a new leader can
+  re-drive a start the previous leader already dispatched, because the destination writes its assignment document only after starting the
+  agent (`NodeAgentController.cs:374-402`) and the outgoing leader's suppression ledger is in-memory. The fact is not `virtual`, so CI's
+  multinode step excludes it by fully-qualified name for that one class (`ci.yml`), so renaming the class means editing that filter too.
+  Coverage is intact on both sides: instantaneous exclusivity stays gated on TCP, where `simple://` appears in no other fact, and the
+  native transport gates the convergent form of the same race,
+  `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight` (`LeadershipElectionCompliance.cs:349-361`), along with
+  the other 21.
 - **Pre-1.0 hardening backlog — four dated document/defer decisions (T4.6, 2026-07-05):** no behavior changed; each is tracked in `FOLLOWUPS.md` with rationale and an extension point if revisited.
   - **Node-number reuse:** the node-number counter (`MongoDbMessageStore.NodeAgents.cs:16-20`) is a pure monotonic increment that never reuses a freed slot. Acceptable — node numbers are short-lived coordination identifiers, not long-lived keys. If revisited post-1.0: track the lowest free slot instead of redesigning allocation. ⚠️ **Monotonicity is now load-bearing:** the two-tick dead-node ownership release (see the dead-node bullet above) relies on "a number issued after the previous tick cannot appear in the previous tick's dead set". Reusing freed slots would invalidate step 4 of that soundness argument — re-derive it (step 3's read-ordering argument survives alone, but the total-interval guarantee does not) before changing allocation.
   - **Index migration (post-1.0, document/defer — see `FOLLOWUPS.md`):** the hardening pass added compound indexes (`MongoDbMessageStore.Admin.cs:18-64`) but `EnsureIndexesAsync` only creates indexes (plus the one-off dead-letter `envelopeId` backfill), never drops superseded single-field ones from deployments created before that pass. Harmless (old indexes stay valid, just suboptimal); a `RebuildAsync` (which recreates all indexes from scratch) is an acceptable manual remedy **only where losing data is acceptable** — it clears every system collection first. Add an explicit `Admin.MigrateAsync()` drop step only if a concrete need arises.
   - **Lease fencing token (epoch):** the lock document (`MongoDbMessageStore.Locking.cs`) has no fencing token; not needed for store-only leader work since the 75%-lease margin already mitigates the internal stale-leadership window. Track as a future hardening item only if leader-scoped **external** side effects (writes outside this store needing stale-epoch rejection) become common.
   - **Saga-specific indexes:** saga collections (`wolverine_saga_*`) have only the implicit `_id` index; the current access pattern (load/insert/update/delete by `_id`) doesn't need more. `EnsureIndexesAsync`/`RebuildAsync` (`MongoDbMessageStore.Admin.cs`) is the extension point when a concrete query pattern (e.g. filtering by status) demands secondary indexes.
 
-- **Retry rescheduling clears `keepUntil` and restores the payload (2026-09-15):** `SchedulingUpdate` `$unset`s `keepUntil` because the TTL index on it is not status-gated (unlike the RDBMS `where status='Handled'` sweep), and rewrites `body`/`messageType`/`receivedAt` from the live envelope when it has a payload so a body-less eager handled marker (`Envelope.ForPersistedHandled`) becomes a runnable retry. Identity (`_id`, `envelopeId`) and the release to `AnyNode` are unchanged.
+- **Retry rescheduling never revives a Handled row (GH-4216):** `ReschedulableFilter` (`_id` and `Status != Handled`) guards
+  `ScheduleExecutionAsync` and `RescheduleExistingEnvelopeForRetryAsync`. A handled document records that the message completed,
+  so a retry booked after it is discarded. When the guarded update matches nothing, `RescheduleExistingEnvelopeForRetryAsync`
+  inserts the envelope as Scheduled. A duplicate key on that insert triggers one more guarded update. For the rows it does move,
+  `SchedulingUpdate` `$unset`s `keepUntil`, because the TTL index on it is not status-gated (unlike the RDBMS
+  `where status='Handled'` sweep). It also rewrites `body`/`messageType`/`receivedAt` from the live envelope when that envelope
+  has a payload, because a retry adds headers after the document was stored. Identity (`_id`, `envelopeId`) and the release to
+  `AnyNode` are unchanged.
+- **Marking handled releases the owner (GH-4739):** `MarkIncomingEnvelopeAsHandledAsync` sets `OwnerId` to `AnyNode` together with
+  `keepUntil`. Recovery reads only `Incoming` rows, so a handled marker holds no owner, the same as `Envelope.ForPersistedHandled`.
+  An owned marker would keep its node number in the dead-node sweep. `IsHandledAsync` matches the inbox identity and
+  `Status == Handled`, so a Scheduled or Incoming row is not handled.
+- **Dead-letter header filters run in memory:** headers exist only inside the serialized envelope `body`. A query with a header
+  filter reads every document that matches the rest of the query through a cursor, in `(sentAt, _id)` order, and checks each one
+  with `MatchesHeaders`. It keeps only the requested page, and `TotalCount` counts the header matches. Discard and replay collect
+  the matching `_id`s and act on them in batches of 1000. Each batch filter repeats the rest of the query, so a document that
+  stopped matching after the read is left alone. A body-less letter never matches. A compound index on `sentAt, _id` serves the
+  order, and the `_id` tie-break keeps consecutive pages from repeating or skipping a letter. A page size of zero or less reads
+  every match.
+- **Scheduled-message queries carry saga id and tenant:** both live only in the serialized envelope, so each summary reads them from
+  its body (`ReadEnvelopeIdentity`). A query that names a saga id goes through core's `ScheduledMessageSagaFilter`, which reads
+  every match of the other criteria unpaged and then filters and pages in memory. `CancelAsync` by saga id resolves the ids first
+  and returns when the saga has nothing scheduled, because an empty id list would mean no id filter. The order is
+  `(executionTime, _id)`, and a page size of zero or less is unpaged.
 - **`IsCatchAll => true`:** `CanPersist` claims every type, so the provider must sort after selective providers (EF Core) in `OrderedPersistenceProviders`; without the flag whichever `UseXxx` ran last (all register via `InsertFirstPersistenceStrategy`) won every entity.
 - **Outbox batch overload is all-or-nothing:** one unordered `BulkWrite` of `ReplaceOne{IsUpsert}` models inside `InTransactionAsync`; `WasPersistedInOutbox` is set only after the commit (both overloads set it only after success). Matches the RDBMS explicit-transaction + rollback and Cosmos `TransactionalBatch` expectations.
 - **`[All]`/`[FirstOrDefault]`/`[Queryable]` are plain reads of the type's collection** (`EntityQueryFrames.cs`), resolving the session non-forcingly like `LoadEntityFrame`; a `Saga` type reads `wolverine_saga_*` (reads carry no version guard, so this is safe where LD4 rejects saga *writes*).
-- **Logical deduplication: sessionless claim + rollback release.** Core inserts `ClaimDeduplicationIdFrame` at `Middleware[0]` (before the session exists), never hands a provider a session for the claim, and omits its release frame for transactional chains. The claim is therefore an `_id`-unique insert on its own (so a duplicate key never aborts a handler transaction), and `TransactionalFrame` emits `IMessageDeduplicator.ReleaseAsync` in its rollback catch, guarded by the claim outcome. The claim frame is `internal` upstream; `DeduplicationClaim.FindIn` reads its id/marker reflectively and fails the host build loudly if the shape changes (`TODO(upstream)`).
+  Under `AutoApplyTransactions`, core gives a chain whose only store access is an `[All]` or `[Entity]` read a transaction
+  (GH-4717). `[NonTransactional]` opts out, and only then does the read run session-less.
+- **Logical deduplication: sessionless claim, core-owned release.** Core inserts the claim frame at `Middleware[0]`, before the
+  session exists, so the claim is an `_id`-unique insert of its own and a duplicate key never aborts a handler transaction. Core
+  owns the release (GH-4501): its failure frame calls `IMessageDeduplicator.ReleaseAsync` once, after the rollback, and the
+  generated source of a transactional chain contains exactly one release call. `TransactionalFrame` emits none, and nothing
+  reads the claim frame by reflection.
+  - **Envelope-aware claim.** `MongoDbDeduplicationStore` also implements `IEnvelopeAwareDeduplicationStore`. The overload
+    `TryClaimAsync(id, envelopeId, expires)` stores the envelope id in an optional `envelopeId` element. The envelope that holds a
+    claim can take it over again, so an envelope recovered after its node died is not refused as a duplicate of its own stranded
+    claim. Another envelope, or a claim stored without an envelope id, is still refused. Anyone can take over a claim whose stored
+    `expires` has passed. Both takeovers are one `findAndModify`, so two late-comers cannot both win.
+  - **Claim lookup.** `IDeduplicationClaimLookup.IsClaimedAsync` counts a claim only while its `expires` lies in the future. An
+    expired claim is reported as not held, and a claim attempt would take it over, so the two answers agree.
+  - **Both modes, one store.** `CompareByHash` and `CompareByString` both select this store. The modes exist so that an RDBMS
+    collation does not decide which ids are equal. A collection `_id` without a collation compares byte for byte.
+    `deduplication_store_compliance` hosts upstream's suite under both modes.
 - **Recurring messages mirror `RdbmsRecurringMessageStore` member for member;** the paused-trigger refusal is the update predicate itself (an upsert whose `paused == false` filter misses turns into a duplicate-key insert). Main store only.
 - **Node-record pruning and the orphan sweep are provider-implemented:** upstream applies `NodeRecordRetention`/`NodeRecordPruningPeriod`/`NodeEventRecordExpirationTime` and the `OrphanedMessage*` settings only in the RDBMS `DurabilityAgent`; `MongoDbDurabilityAgent` runs its own loops for them (pruning for the Main store, first pass after `min(period, 1 min)`; the sweep in Balanced mode only). The 14-day node-record TTL index stays as a backstop.
 
@@ -239,27 +306,30 @@ dotnet build src/Wolverine.MongoDB/Wolverine.MongoDB.csproj
 # Build + test (compliance tests project-ref the Wolverine submodule at external/wolverine)
 # Initialise it first: git submodule update --init   (or clone with --recursive)
 # Override the path if needed: WOLVERINE_SOURCE env var or -p:WolverineSourcePath=...
-dotnet test src/Wolverine.MongoDB.Tests/
+dotnet test --project src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj
 
 # Run only multinode tests (requires Docker, heavier setup — two in-proc Balanced hosts)
-dotnet test src/Wolverine.MongoDB.Tests --filter "Category=multinode"
+dotnet test --project src/Wolverine.MongoDB.Tests/Wolverine.MongoDB.Tests.csproj --filter-trait "Category=multinode"
 
 # Pack for NuGet (declares WolverineFx package dependency)
 dotnet pack src/Wolverine.MongoDB/Wolverine.MongoDB.csproj -c Release -p:UseWolverineSource=false
 ```
 
-Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required. The test project is an
-xUnit **v3** host (`xunit.v3`, `OutputType=Exe`, `ValueTask` `IAsyncLifetime`, every CT-accepting call passes
-`TestContext.Current.CancellationToken` — the xUnit1051 analyzer is an error under `TreatWarningsAsErrors`).
-`GitHubActionsTestLogger` stays on 2.4.1: 3.x targets Microsoft.Testing.Platform 2.0 and does not compile
-next to the MTP 1.9.1 that xunit.v3 3.2.2 carries. A nested worktree under the main checkout still picks up a
+Tests use Testcontainers (auto-starts MongoDB replica set). Docker Desktop required. The test project is an xUnit **v3** host on
+Microsoft.Testing.Platform (`xunit.v3` 4.0.2, `OutputType=Exe`, `UseMicrosoftTestingPlatformRunner`). The repo-root `global.json`
+selects the MTP runner for `dotnet test`. `demo/global.json` selects VSTest for the demo, which stays on xUnit 2. The
+leadership-election compliance specs are Bobcat specifications, so the test project references `Bobcat.Xunit` and
+`Bobcat.Generators` and both subclasses carry `[BobcatFeature]`. Tests use `ValueTask` `IAsyncLifetime`, and every CT-accepting
+call passes `TestContext.Current.CancellationToken` (the xUnit1051 analyzer is an error under `TreatWarningsAsErrors`).
+`GitHubActionsTestLogger` stays on 2.4.1. It is a VSTest logger that MTP does not load, and 3.x does not compile next to the MTP 2.x
+that xunit.v3 4.x carries (CS1705). A nested worktree under the main checkout still picks up a
 parent `Directory.Build.rsp` if one exists; verify audit-clean restores with `-noAutoResponse`.
 
 **CI:** the `library` job checks out with `submodules: recursive` (the Wolverine source is the
-`external/wolverine` submodule, pinned to the `V6.38.0` commit — keep the pin in sync with
+`external/wolverine` submodule, pinned to the `V6.65.1` commit; keep the pin in sync with
 `WolverineFx` in `Directory.Packages.props`), runs the compliance suite in two steps
-(`Category!=multinode`, then `Category=multinode` minus the one fact named in `ci.yml`, see the
-leadership bullet above), then packs the library at version `0.0.0-ci`.
+(`--filter-not-trait "Category=multinode"`, then `--filter-trait "Category=multinode"` with `--filter-not-method` naming the one
+fact `ci.yml` excludes, see the leadership bullet above), then packs the library at version `0.0.0-ci`.
 The `demo` job downloads that nupkg and runs the end-to-end integration tests against it, so
 every PR exercises the freshly built package.
 

@@ -264,16 +264,33 @@ Promote to GitHub issues before the first public release.
   (`Status = Scheduled`, `OwnerId = AnyNode`) rather than drop it, which is a second write path
   with its own failure modes and tests. The residual is shared by every sibling provider.
 
+## Deferred from the WolverineFx 6.65 upgrade
+
+Each entry is a WolverineFx 6.65 capability this provider does not implement, with the reason and the place to start.
+
+- **`TryBuildTransactionalDeduplication` (GH-4505): the claim is not inside the MongoDB transaction.** The claim is a
+  sessionless insert, and core releases it once after a rollback, so nothing is lost or stranded. Claiming on the handler session
+  would make the claim and the handler commit together. **Extension point:** implement the hook in
+  `MongoDbPersistenceFrameProvider` and emit the claim on the open session. A duplicate-key error inside a MongoDB
+  transaction aborts the whole transaction, so the claim must be a conditional write that reports a duplicate without throwing.
+- **`IReplayableDeduplicationStore` is not implemented.** The deduplication compliance suite passes without it. Replay support
+  needs the store to drop one claim on request. **Extension point:** a `DeleteOneAsync` on `_id` in `MongoDbDeduplicationStore`.
+- **`IDeadLetters.Capabilities` advertises no failure groups, archive or restore.** Core offers none of them for this store.
+  **Extension point:** `MongoDbMessageStore.DeadLetters.cs`, with a state element on `DeadLetterMessage` for archive and restore.
+- **`ISagaStoreDiagnostics` query and completion are not implemented** (`SagaTerminationCompliance` is not adopted). The read
+  surface lists and reads sagas only. **Extension point:** `MongoDbSagaStoreDiagnostics`, which already reads the
+  `wolverine_saga_*` collections.
+- **`INodeAgentPersistence.AdvertisesNodeLoad` is false.** Wolverine refuses `CapacityAwareAssignment` on a store that does
+  not advertise node load. **Extension point:** a load element on the `wolverine_nodes` document, written by the
+  heartbeat in `MongoDbMessageStore.NodeAgents.cs`.
+- **`InboxStaleTime` is not honoured.** Recovery does not treat an old `Incoming` row differently from a new one. **Extension
+  point:** a `receivedAt` bound in the recovery page query in `MongoDbMessageStore.Durability.cs`.
+- **`PreferredEnvelopeIdGeneration` is not honoured.** Envelope ids stay the Guids Wolverine assigns, and `_id` stays a BSON
+  Guid. **Extension point:** the `IncomingMessage` and `OutgoingMessage` id mapping, which would need a document-shape
+  migration for existing collections.
+
 ## Deferred from the WolverineFx 6.38 upgrade (2026-09-15)
 
-- **Logical deduplication has no upstream hook to claim inside the handler transaction.** Core
-  weaves `ClaimDeduplicationIdFrame` in at `Middleware[0]` before the persistence provider opens a
-  session, `IMessageDeduplicator` never sees one, and the release frame is omitted for transactional
-  chains on the assumption the claim is transactional (it is not, on any shipped provider).
-  Wolverine.MongoDB compensates with a rollback release in `TransactionalFrame`, reading the
-  `internal` claim frame's id variable reflectively (`DeduplicationClaim.FindIn`, loud failure on a
-  shape change). **Upstream ask:** a public hook on the claim frame, or a provider-side
-  "claim on my session" seam; then delete the reflection.
 - **`RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules` cannot
   pass for a non-Weasel store** (casts to `Weasel.Core.Migrations.IDatabase`,
   `RecurringMessageCompliance.cs:528`; upstream only the four RDBMS providers inherit the suite).
@@ -293,7 +310,7 @@ Promote to GitHub issues before the first public release.
 - **Node-record TTL index is fixed at 14 days** while the agent now prunes on
   `NodeEventRecordExpirationTime` (default 5 days). Aligning the index would need a `collMod`
   migration on existing deployments; the TTL is a backstop only, so it was left alone.
-- **`WolverineFx.ComplianceTests` is on NuGet (6.38.0):** the submodule could be retired in favour
+- **`WolverineFx.ComplianceTests` is on NuGet (6.65.1):** the submodule could be retired in favour
   of the package reference (`UseWolverineSource=false` path already works). Kept for now because
   the project-reference build is what CI runs and gives one consistent `Wolverine.dll`.
 - **Upstream inconsistency observed:** the RDBMS dead-letter admin ANDs `MessageIds` with the other
@@ -418,10 +435,8 @@ Promote to GitHub issues before the first public release.
   leader dying with its starts in flight, but waits up to 60 seconds for convergence instead of sampling
   an instant. Convergence is therefore gated on `mongocontrol`, and the only fact not gated there is the
   instantaneous exclusivity assertion, which the TCP class still gates.
-  Running that one on `mongocontrol` too needs per-test retry, which means moving this test project off
-  VSTest onto Microsoft.Testing.Platform. Upstream's harness has it and reports a pass-on-retry as green
-  (`build/SupervisedTests.cs:155`); here the `GitHubActionsTestLogger` 2.4.1 pin described in CLAUDE.md's
-  "Build & Test" section blocks the move.
+  Running that one on `mongocontrol` too needs per-test retry. This test project runs on Microsoft.Testing.Platform, and CI
+  configures no retry. Upstream's harness retries and reports a pass-on-retry as green (`build/SupervisedTests.cs:155`).
 
 - **Upstream: let the durable assignment row decide exclusivity.** The fix for the fact
   above belongs in core, not here. `NodeAgentController.StartAgentAsync`
