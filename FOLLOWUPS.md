@@ -294,6 +294,11 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   stores keep the clock in an extra inbox column. This store implements neither interface, so recovery takes only rows owned by
   any node. **Extension point:** a claim-time element on `IncomingMessage` that every claim sets,
   `IMessageInboxHeartbeat.RestartStaleClockAsync` on the inbox, and the pass source in `MongoDbMessageStore.Durability.cs`.
+- **A failed incoming claim page can leave claimed rows owned until the next release.** `RecoverOrphanedIncomingAsync` claims
+  a page with `TryClaimIncomingAsync`, one update per row. If a claim fails part way through the page with a non-retryable error,
+  the rows already claimed on that page stay owned by the live node. Shutdown, Solo startup or the Balanced dead-node sweep
+  releases them. **Extension point:** a catch block around the claim loop. It must release only the confirmed winners, never the
+  envelope that was in flight, because a release by id could clear a claim that another node made.
 - **`PreferredEnvelopeIdGeneration` reports no preference.** `IMessageStore.PreferredEnvelopeIdGeneration` (GH-4902) is a hint
   that is null by default. Wolverine adopts it only when every store agrees and the application did not set
   `EnvelopeIdGeneration`. Null is a valid answer. **Extension point:** override the property on `MongoDbMessageStore`.
@@ -413,11 +418,11 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
 
 - **`singular_agent_is_only_running_on_one` runs on a TCP control endpoint, deliberately.** The
   upstream fact asserts exclusivity the instant any host reports the `simple://` agent, with no
-  settling time (`LeadershipElectionCompliance.cs:380-386`). Agent handoff over a polled control
+  settling time. Agent handoff over a polled control
   transport costs up to a poll interval, which widens the window where a new leader re-drives a
-  start the previous leader already dispatched (`NodeAgentController.cs:316` writes the assignment
-  row only after the destination starts, and `EvaluateAssignments.cs:23` notes a new leader "starts
-  empty and safely re-drives everything"), so the assertion samples inside it. That fact is the only
+  start the previous leader already dispatched (`NodeAgentController.StartAgentAsync` writes the assignment
+  row only after the destination starts, and the next leader does not inherit the previous leader's in-memory
+  record of dispatched starts), so the assertion samples inside it. That fact is the only
   coverage anywhere of a `SingularAgent` running on at most one node: `simple://` appears in no other
   fact, the `expectExactlyOneCopyOfEachAsync` and `expectOneCopyWithARowNamingItsNodeAsync` helpers
   are only ever pointed at the twelve `fake://` agents, and `AssignmentWaiter.HasReached`
@@ -439,8 +444,8 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   battery over `mongocontrol`, and `.github/workflows/ci.yml` excludes only
   `singular_agent_is_only_running_on_one` from that copy, by name. So 22 of the suite's 23 specs are
   gated on the native transport, among them
-  `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`
-  (`LeadershipElectionCompliance.cs:350-361`), which drives the same scenario the excluded fact does, a
+  `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`,
+  which drives the same scenario the excluded fact does, a
   leader dying with its starts in flight, but waits up to 60 seconds for convergence instead of sampling
   an instant. Convergence is therefore gated on `mongocontrol`, and the only fact not gated there is the
   instantaneous exclusivity assertion, which the TCP class still gates.
@@ -449,12 +454,11 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
 
 - **Upstream: let the durable assignment row decide exclusivity.** The fix for the fact
   above belongs in core, not here. `NodeAgentController.StartAgentAsync`
-  (`external/wolverine/src/Wolverine/Runtime/Agents/NodeAgentController.cs:316`) starts the agent first
-  and writes the assignment row afterwards (`:402`, via `upsertAssignmentAsync`), so while a start is in
+  (in `external/wolverine/src/Wolverine/Runtime/Agents/NodeAgentController.cs`) starts the agent first
+  and writes the assignment row afterwards, through `upsertAssignmentAsync`, so while a start is in
   flight nothing durable says the agent is taken. The only record of it is the dispatching leader's
-  in-memory ledger, which the next leader does not inherit
-  (`NodeAgentController.EvaluateAssignments.cs:23`: a new leader "starts empty and safely re-drives
-  everything"). Calling `TryClaimAssignmentAsync` at the top of `StartAgentAsync` and returning on
+  in-memory ledger, which the next leader does not inherit (the ledger is leader-only and in memory, in
+  `NodeAgentController.EvaluateAssignments.cs`). Calling `TryClaimAssignmentAsync` at the top of `StartAgentAsync` and returning on
   `false` would put the arbitration on a single atomic write, so a re-driven start loses the claim and
   never runs. Every provider already implements that method, this one at
   `MongoDbMessageStore.NodeAgents.cs:134-153` (an `_id`-unique insert whose duplicate-key branch reports
