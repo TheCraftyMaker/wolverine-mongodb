@@ -307,7 +307,7 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
 
 - **`RecurringMessageCompliance.the_opt_in_is_schema_neutral_for_hosts_without_schedules` cannot
   pass for a non-Weasel store** (casts to `Weasel.Core.Migrations.IDatabase`,
-  `RecurringMessageCompliance.cs:528`; upstream only the four RDBMS providers inherit the suite).
+  `RecurringMessageCompliance.cs:531`; upstream only the four RDBMS providers inherit the suite).
   `recurring_message_compliance` hosts the suite by composition — a private `Bridge` subclass and
   one owned forwarding fact per upstream fact, the pattern `RavenDbFaultPublishingTests` uses for
   `DurableFaultPublishingCompliance` — and owns a same-named MongoDB-native fact asserting the same
@@ -388,11 +388,11 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   reads with `new Uri(x.Id)` and remove the `agentUri` element/property, verifying no consumer
   (test or app) reads the `agentUri` field directly first.
 
-- **Upstream: RavenDb and Cosmos scope `RemoveAssignmentAsync` as of V6.38.0. Closed, nothing to
+- **Upstream: RavenDb and Cosmos scope `RemoveAssignmentAsync` as of V6.65.1. Closed, nothing to
   raise.** Both now refuse to delete a row another node owns, citing GH-4407:
-  `RavenDbMessageStore.NodeAgents.cs:228-250` loads the document under optimistic concurrency and
+  `RavenDbMessageStore.NodeAgents.cs:233-256` loads the document under optimistic concurrency and
   returns early when `NodeId` is not this node's, and
-  `CosmosDbMessageStore.NodeAgents.cs:261-284` reads the item, returns early on the same comparison, and
+  `CosmosDbMessageStore.NodeAgents.cs:266-290` reads the item, returns early on the same comparison, and
   conditions the delete on the ETag of that read. So all five RDBMS providers, both document stores and
   this provider agree on the predicate. An earlier note here said both document stores ignored `nodeId`
   and wanted a one-line PR against each. That was true of an older Wolverine, not of the pinned
@@ -429,7 +429,7 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   (`Wolverine/TestingExtensions.cs:345-347`) filters the `simple` scheme out. So excluding or
   skipping it would leave that property untested rather than covered elsewhere, and
   `leadership_election_compliance.cs` keeps `UseTcpForControlEndpoint()` instead. Upstream splits the
-  same way: `RavenDbTests.LeaderElection/leadership_election_compliance.cs:42` configures TCP and a
+  same way: `RavenDbTests.LeaderElection/leadership_election_compliance.cs:44` configures TCP and a
   separate `control_queue_leadership_election_compliance.cs` runs the battery over the native queue.
   Nothing to fix in the transport, and the transport's own contract stays covered by
   `control_transport_compliance` and `control_queue_tests`.
@@ -438,7 +438,7 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   over `mongocontrol`, including 6 pinned to two logical CPUs to widen the race, and the full
   category passed 48 of 48 four times, while the same code failed on both frameworks on a CI runner.
   And the earlier claim here that a lagging stop causes the duplicate is wrong: the failing CI log
-  contains no "Successfully stopped agent" line at all (`NodeAgentController.cs:538`), so no stop was
+  contains no "Successfully stopped agent" line at all (`NodeAgentController.cs:597`), so no stop was
   in flight. The duplicate is an unretracted start, not a late stop.
   This repository splits the same way. `control_queue_leadership_election_compliance.cs` runs the
   battery over `mongocontrol`, and `.github/workflows/ci.yml` excludes only
@@ -450,7 +450,7 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   an instant. Convergence is therefore gated on `mongocontrol`, and the only fact not gated there is the
   instantaneous exclusivity assertion, which the TCP class still gates.
   Running that one on `mongocontrol` too needs per-test retry. This test project runs on Microsoft.Testing.Platform, and CI
-  configures no retry. Upstream's harness retries and reports a pass-on-retry as green (`build/SupervisedTests.cs:155`).
+  configures no retry. Upstream's harness retries and reports a pass-on-retry as green (`build/SupervisedTests.cs:188-190`).
 
 - **Upstream: let the durable assignment row decide exclusivity.** The fix for the fact
   above belongs in core, not here. `NodeAgentController.StartAgentAsync`
@@ -467,7 +467,7 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   Three things a patch would have to settle. `LeaderUri` is excluded from the sweep
   (`NodeAgentController.Reconcile.cs:58-59`) and needs excluding from the claim too, because the election
   places the leader agent rather than the assignment grid. The idempotent-restart path
-  (`NodeAgentController.cs:323-333`) depends on "already mine returns `true`", which
+  (`NodeAgentController.cs:363-373`) depends on "already mine returns `true`", which
   `NodePersistenceCompliance.cs:293` pins for every provider. And a claim that lands before a start that
   then throws leaves a claimed-but-not-running row, which is the sweep's other mismatch direction and
   already heals itself (`NodeAgentController.Reconcile.cs:151-159` restarts it).
@@ -487,5 +487,5 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   What this change does alter is the blast radius. The category is now 66 facts in one process, and
   this repository runs one plain `dotnet test` per step with no retry, so a single host crash costs
   the entire step where upstream's harness would retry in a fresh process and report green
-  (`build/SupervisedTests.cs:155`). Watch for it on CI runners; if it recurs there, per-test retry
+  (`build/SupervisedTests.cs:188-190`). Watch for it on CI runners; if it recurs there, per-test retry
   stops being a nicety.
