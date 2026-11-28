@@ -8,12 +8,18 @@ namespace Wolverine.MongoDB.Internals;
 /// <summary>
 /// One logical-deduplication claim (GH-4180): <c>_id</c> is the deduplication id itself, so the
 /// collection's mandatory unique <c>_id</c> index is the database-enforced uniqueness the contract
-/// requires; <c>expires</c> is the stored end of the claim's window.
+/// requires; <c>expires</c> is the stored end of the claim's window; <c>envelopeId</c> is the envelope that took
+/// the claim, absent for a claim made without one.
 /// </summary>
 public class DeduplicationClaimDocument
 {
     [BsonId] public string Id { get; set; } = string.Empty;
     [BsonElement("expires")] [BsonRepresentation(BsonType.DateTime)] public DateTimeOffset Expires { get; set; }
+
+    [BsonElement("envelopeId")]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    [BsonIgnoreIfNull]
+    public Guid? EnvelopeId { get; set; }
 }
 
 /// <summary>
@@ -21,31 +27,35 @@ public class DeduplicationClaimDocument
 /// <c>DurabilitySettings.MessageDeduplicationMode</c> is not <c>None</c>; otherwise the store returns
 /// <see cref="NullDeduplicationStore.Instance"/> and provisions nothing (the contract's requirement).
 /// <para>
-/// <b>Claim = one insert.</b> <see cref="TryClaimAsync"/> is an <c>InsertOneAsync</c> on the claim's own
-/// id: two nodes racing for the same id both hit the same <c>_id</c>, exactly one insert succeeds and the
-/// other gets a duplicate-key error — no read-then-write window. A duplicate whose <em>stored</em>
-/// window has already passed is then taken over atomically (<c>findAndModify</c> predicated on
-/// <c>expires &lt;= now</c>), so the configured retention window is honoured to the instant rather than
-/// to the reaper's cadence. The stored instant, never the current setting, decides: shortening
+/// <b>Claim = one insert.</b> <see cref="TryClaimAsync(string, DateTimeOffset, CancellationToken)"/> is an
+/// <c>InsertOneAsync</c> on the claim's own id: two nodes racing for the same id both hit the same
+/// <c>_id</c>, exactly one insert succeeds and the other gets a duplicate-key error — no read-then-write
+/// window. A duplicate whose <em>stored</em> window has already passed is then taken over atomically
+/// (<c>findAndModify</c> predicated on <c>expires &lt;= now</c>), so the configured retention window is
+/// honoured to the instant rather than to the reaper's cadence. The envelope-aware overload also lets the
+/// envelope that recorded the claim take it over again, so an envelope recovered after its node died is not
+/// refused as a duplicate of its own stranded claim; any other envelope is still refused.
+/// The stored instant, never the current setting, decides: shortening
 /// <c>DeduplicationWindow</c> later cannot retroactively un-claim an id.
 /// </para>
 /// <para>
 /// <b>The claim is deliberately sessionless.</b> Wolverine core weaves the claim frame in <em>before</em>
-/// the persistence provider's transaction frame opens a session, and no upstream hook hands the
-/// claim an <c>IClientSessionHandle</c>; the RDBMS reference implementation claims on its own connection
-/// for the same reason. That also means a duplicate-key error here can never abort a handler
-/// transaction (the MongoDB behaviour that makes an in-transaction duplicate insert poison the whole
-/// transaction), because there is no transaction on this write. What makes the claim safe for a
-/// <em>transactional</em> handler is <c>TransactionalFrame</c>: when the handler's transaction rolls
-/// back, the frame releases the claim so the retry is not refused as a duplicate of its own failed
-/// attempt. Non-transactional handlers get the same compensation from core's own release frame.
+/// the persistence provider's transaction frame opens a session, so the claim has no
+/// <c>IClientSessionHandle</c>. Core can claim on the session through <c>TryBuildTransactionalDeduplication</c>
+/// (GH-4505), but this provider does not implement it yet; see FOLLOWUPS.md. The RDBMS reference
+/// implementation also claims on its own connection. A duplicate-key error here therefore cannot abort a
+/// handler transaction (the MongoDB behavior that makes an in-transaction duplicate insert poison the
+/// whole transaction), because there is no transaction on this write. After a failure, core's
+/// <c>ReleaseDeduplicationIdOnFailureFrame</c> (GH-4180) releases the claim once, so the retry is not refused as a
+/// duplicate of its own failed attempt. It does this for transactional and non-transactional chains alike.
 /// </para>
 /// <para>
 /// Expiry: a TTL index on <c>expires</c> lets the server reap stale claims on its own cadence;
 /// <see cref="DeleteExpiredAsync"/> is the contract's explicit reaper and reports what it removed.
 /// </para>
 /// </summary>
-public sealed class MongoDbDeduplicationStore : IDeduplicationStore
+public sealed class MongoDbDeduplicationStore : IDeduplicationStore, IEnvelopeAwareDeduplicationStore,
+    IDeduplicationClaimLookup
 {
     private readonly IMongoCollection<DeduplicationClaimDocument> _claims;
 
@@ -56,10 +66,36 @@ public sealed class MongoDbDeduplicationStore : IDeduplicationStore
 
     public bool Enabled => true;
 
-    public async Task<bool> TryClaimAsync(string deduplicationId, DateTimeOffset expires,
+    public Task<bool> TryClaimAsync(string deduplicationId, DateTimeOffset expires,
         CancellationToken cancellation = default)
+        => claimAsync(deduplicationId, null, expires, cancellation);
+
+    /// <summary>
+    /// A repeat from the envelope that already holds the claim takes it over, which is how inbox recovery gets its
+    /// own stranded claim back; a different envelope, or a claim recorded with no envelope, is still refused.
+    /// </summary>
+    public Task<bool> TryClaimAsync(string deduplicationId, Guid envelopeId, DateTimeOffset expires,
+        CancellationToken cancellation = default)
+        => claimAsync(deduplicationId, envelopeId, expires, cancellation);
+
+    /// <summary>
+    /// Whether a claim is held right now. A claim whose stored window has passed is not held: a claim would take it
+    /// over, so the two answers agree.
+    /// </summary>
+    public async Task<bool> IsClaimedAsync(string deduplicationId, CancellationToken cancellation = default)
+        => !string.IsNullOrWhiteSpace(deduplicationId) && await _claims.CountDocumentsAsync(
+            Builders<DeduplicationClaimDocument>.Filter.And(
+                Builders<DeduplicationClaimDocument>.Filter.Eq(x => x.Id, deduplicationId),
+                Builders<DeduplicationClaimDocument>.Filter.Gt(x => x.Expires, DateTimeOffset.UtcNow)),
+            new CountOptions { Limit = 1 }, cancellation) > 0;
+
+    private async Task<bool> claimAsync(string deduplicationId, Guid? envelopeId, DateTimeOffset expires,
+        CancellationToken cancellation)
     {
-        var claim = new DeduplicationClaimDocument { Id = deduplicationId, Expires = expires.ToUniversalTime() };
+        var claim = new DeduplicationClaimDocument
+        {
+            Id = deduplicationId, Expires = expires.ToUniversalTime(), EnvelopeId = envelopeId
+        };
         try
         {
             await _claims.InsertOneAsync(claim, cancellationToken: cancellation);
@@ -67,13 +103,20 @@ public sealed class MongoDbDeduplicationStore : IDeduplicationStore
         }
         catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategory.DuplicateKey)
         {
-            // Already claimed. If that claim's stored window has passed it protects nothing any more, so
-            // take it over — atomically, predicated on the expiry, so two late-comers cannot both win.
+            // Already claimed. The claim is taken over when its stored window has passed, since it protects nothing
+            // any more, or when the same envelope holds it. One conditional update decides, so two late-comers
+            // cannot both win.
+            var filter = Builders<DeduplicationClaimDocument>.Filter;
+            var passed = filter.Lte(x => x.Expires, DateTimeOffset.UtcNow);
+            var takeable = envelopeId is { } id ? filter.Or(passed, filter.Eq(x => x.EnvelopeId, id)) : passed;
+
+            var update = Builders<DeduplicationClaimDocument>.Update.Set(x => x.Expires, claim.Expires);
+            update = envelopeId is { } owner
+                ? update.Set(x => x.EnvelopeId, owner)
+                : update.Unset(x => x.EnvelopeId);
+
             var takenOver = await _claims.FindOneAndUpdateAsync(
-                Builders<DeduplicationClaimDocument>.Filter.And(
-                    Builders<DeduplicationClaimDocument>.Filter.Eq(x => x.Id, deduplicationId),
-                    Builders<DeduplicationClaimDocument>.Filter.Lte(x => x.Expires, DateTimeOffset.UtcNow)),
-                Builders<DeduplicationClaimDocument>.Update.Set(x => x.Expires, claim.Expires),
+                filter.And(filter.Eq(x => x.Id, deduplicationId), takeable), update,
                 new FindOneAndUpdateOptions<DeduplicationClaimDocument> { ReturnDocument = ReturnDocument.After },
                 cancellation);
 
