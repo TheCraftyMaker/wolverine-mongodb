@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="WolverineFx" Version="6.65.1" />
+    <PackageVersion Include="WolverineFx" Version="6.66.0" />
     <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.65.1" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.21.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.14.1" />
