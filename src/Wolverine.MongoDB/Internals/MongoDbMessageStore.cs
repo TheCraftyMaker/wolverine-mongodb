@@ -230,14 +230,48 @@ public partial class MongoDbMessageStore : IMessageStoreWithAgentSupport
         // default IdOnly mode the _id IS the Guid string, so the filter values are unchanged.
         var ids = incoming.Select(InboxIdentity).ToList();
 
-        // Compare-and-swap: only claim envelopes still owned by "any node". An envelope already
-        // owned by another node (claimed between our read and this write) must not be stolen —
-        // the OwnerId == AnyNode guard makes this an atomic claim per document.
-        return Incoming.UpdateManyAsync(
-            Builders<IncomingMessage>.Filter.And(
-                Builders<IncomingMessage>.Filter.In(x => x.Id, ids),
-                Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode)),
-            Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
+        var byId = Builders<IncomingMessage>.Filter.In(x => x.Id, ids);
+
+        // A release to "any node" frees rows this node holds, so it matches by id alone.
+        // A claim for a real node only takes rows still owned by "any node", so a row another
+        // node took between our read and this write is not stolen.
+        var filter = ownerId == MongoConstants.AnyNode
+            ? byId
+            : Builders<IncomingMessage>.Filter.And(
+                byId, Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode));
+
+        return Incoming.UpdateManyAsync(filter, Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId));
+    }
+
+    /// <summary>
+    /// Claims each globally owned row with its own compare-and-swap and returns only the envelopes this call won.
+    /// One update per document takes no multi-document lock, so passes that read the same page in opposite
+    /// orders cannot deadlock, and a row another pass already took is not returned.
+    /// </summary>
+    public async Task<IReadOnlyList<Envelope>> TryClaimIncomingAsync(int ownerId, IReadOnlyList<Envelope> incoming)
+    {
+        var claimed = new List<Envelope>(incoming.Count);
+        var update = Builders<IncomingMessage>.Update.Set(x => x.OwnerId, ownerId);
+
+        foreach (var envelope in incoming)
+        {
+            var result = await Incoming.UpdateOneAsync(
+                Builders<IncomingMessage>.Filter.And(
+                    Builders<IncomingMessage>.Filter.Eq(x => x.Id, InboxIdentity(envelope)),
+                    Builders<IncomingMessage>.Filter.Eq(x => x.OwnerId, MongoConstants.AnyNode),
+                    // The page query selected Incoming rows. A row since rescheduled for retry is owned by
+                    // "any node" again but is Scheduled, so running it now would skip its delay.
+                    Builders<IncomingMessage>.Filter.Eq(x => x.Status, EnvelopeStatus.Incoming)),
+                update);
+
+            if (result.ModifiedCount == 1)
+            {
+                envelope.OwnerId = ownerId;
+                claimed.Add(envelope);
+            }
+        }
+
+        return claimed;
     }
 
     public ValueTask DisposeAsync()
