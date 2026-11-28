@@ -242,8 +242,10 @@ coercion, unlike Cosmos/RavenDb).
   backfills `envelopeId` from `_id` (aggregation-pipeline update, MongoDB 4.2+); the operator-facing, **non-destructive** entry point for
   that backfill is `MigrateAsync()` (also run at startup by the storage migration) — **not** `RebuildAsync()`, which is `ClearAllAsync()`
   + `EnsureIndexesAsync()` and therefore wipes the dead-letter, inbox, outbox and node collections before the backfill can see anything.
-  Discard/replay/edit apply to **all** documents for the Guid and `DeadLetterEnvelopeByIdAsync` returns the first ordered by `receivedAt`,
-  matching `DiscardAsync`, `ReplayAsync` and `EditAndReplayAsync` in `MessageDatabase.DeadLetterAdminService.cs:356-472`; edit
+  Discard/replay/edit apply to **all** documents for the Guid, matching `DiscardAsync`, `ReplayAsync` and `EditAndReplayAsync` in
+  `MessageDatabase.DeadLetterAdminService.cs:356-472`. `DeadLetterEnvelopeByIdAsync` returns the earliest document by `receivedAt`, so the
+  answer is the same on every call; upstream's lookup selects on `id` with no order (`MessageDatabase.DeadLetters.cs:9-26`) and returns
+  whichever row the database reads first. Edit
   re-serializes per document so each keeps its own `Destination` (a shared blob would collapse both replays onto one inbox key).
   `ReplayDeadLettersAsync`'s three id filters are **deliberately unchanged** — they round-trip the `_id` of documents they just read, and
   repointing them at `envelopeId` would over-delete sibling destinations.
@@ -345,7 +347,11 @@ coercion, unlike Cosmos/RavenDb).
   `singular_agent_is_only_running_on_one`, which waits until at least one host reports `simple://` and then asserts immediately that
   exactly one does, with no settling time. Over a polled control transport a new leader can re-drive a start the previous leader already
   dispatched, because the destination writes its assignment document only after starting the agent (`NodeAgentController.StartAgentAsync`)
-  and the outgoing leader's suppression ledger is in-memory. The fact is not `virtual`, so CI's multinode step excludes it by
+  and the outgoing leader's suppression ledger is in-memory. A newly elected leader holds back such bare first-time placements for
+  `Durability.LeaderTakeoverHoldEvaluations` evaluations (default 1) while another node runs agents (GH-4897,
+  `holdUnplacedAgentsAfterTakeover`), which narrows the window but does not close it: a start that takes longer than the hold to surface
+  as an assignment document is placed again, a polled transport makes that more likely, and the orphans of a stale node are never held.
+  The fact is not `virtual`, so CI's multinode step excludes it by
   fully-qualified name for that one class (`ci.yml`), so renaming the class means editing that filter too. Coverage is intact on both
   sides: instantaneous exclusivity stays gated on TCP, where `simple://` appears in no other fact, and the native transport gates the
   convergent form of the same race, `every_agent_runs_exactly_once_after_the_leader_dies_with_its_starts_in_flight`, along with the other

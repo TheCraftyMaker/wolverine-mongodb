@@ -422,7 +422,11 @@ Each entry is a WolverineFx 6.65 capability this provider does not implement, wi
   transport costs up to a poll interval, which widens the window where a new leader re-drives a
   start the previous leader already dispatched (`NodeAgentController.StartAgentAsync` writes the assignment
   row only after the destination starts, and the next leader does not inherit the previous leader's in-memory
-  record of dispatched starts), so the assertion samples inside it. That fact is the only
+  record of dispatched starts), so the assertion samples inside it. A newly elected leader holds back
+  such bare first-time placements for `Durability.LeaderTakeoverHoldEvaluations` evaluations (default 1)
+  while another node runs agents (GH-4897, `holdUnplacedAgentsAfterTakeover`). That narrows the window
+  but does not close it: a start that takes longer than the hold to surface as an assignment row is
+  placed again, and the orphans of a stale node are never held. That fact is the only
   coverage anywhere of a `SingularAgent` running on at most one node: `simple://` appears in no other
   fact, the `expectExactlyOneCopyOfEachAsync` and `expectOneCopyWithARowNamingItsNodeAsync` helpers
   are only ever pointed at the twelve `fake://` agents, and `AssignmentWaiter.HasReached`
